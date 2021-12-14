@@ -173,6 +173,12 @@ where
     }
 }
 
+pub trait RequestBody {
+    type ResponseBody;
+    const API_KEY: ApiKey;
+    const API_VERSION_RANGE: (ApiVersion, ApiVersion);
+}
+
 pub struct ApiVersionsRequest {
     /// The name of the client.
     pub client_software_name: CompactString,
@@ -204,6 +210,13 @@ where
             _ => Err(WriteVersionedError::InvalidVersion { version }),
         }
     }
+}
+
+impl RequestBody for ApiVersionsRequest {
+    type ResponseBody = ApiVersionsResponse;
+    const API_KEY: ApiKey = ApiKey::ApiVersions;
+    const API_VERSION_RANGE: (ApiVersion, ApiVersion) =
+        (ApiVersion(Int16(0)), ApiVersion(Int16(3)));
 }
 
 #[derive(Debug)]
@@ -305,7 +318,7 @@ where
                 tagged_fields: TaggedFields::default(),
             }),
             3 => Ok(Self {
-                error_code: dbg!(ApiError::new(Int16::read(reader)?)),
+                error_code: ApiError::new(Int16::read(reader)?),
                 api_keys: Array::<ReadVersionedAdapter<ApiVersionsResponseApiKey, 3>>::read(
                     reader,
                 )?

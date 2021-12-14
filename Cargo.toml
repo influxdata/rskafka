@@ -6,9 +6,10 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
+async-trait = "0.1"
 pin-project-lite = "0.2"
 thiserror = "1.0"
-tokio = {version = "1.14", default-features = false, features = ["io-util", "net"]}
+tokio = {version = "1.14", default-features = false, features = ["io-util", "net", "sync"]}
 
 [dev-dependencies]
 assert_matches = "1.5"

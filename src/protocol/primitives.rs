@@ -256,7 +256,7 @@ where
     T: ReadType<R>,
 {
     fn read(reader: &mut R) -> Result<Self, ReadError> {
-        let len = dbg!(Int32::read(reader)?);
+        let len = Int32::read(reader)?;
         if len.0 == -1 {
             Ok(Self(None))
         } else {

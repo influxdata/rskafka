@@ -5,7 +5,7 @@
 
 use super::primitives::Int16;
 
-#[derive(Debug, PartialEq, Eq, Clone, Copy)]
+#[derive(Debug, PartialEq, Eq, Hash, Clone, Copy)]
 #[cfg_attr(test, derive(proptest_derive::Arbitrary))]
 pub enum ApiKey {
     Produce,
