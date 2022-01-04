@@ -6,6 +6,8 @@
 
 use std::io::{Read, Write};
 
+use varint_rs::{VarintReader, VarintWriter};
+
 use super::traits::{ReadError, ReadType, WriteError, WriteType};
 
 /// Represents an integer between `-2^7` and `2^7-1` inclusive.
@@ -118,6 +120,32 @@ where
     fn write(&self, writer: &mut W) -> Result<(), WriteError> {
         let buf = self.0.to_be_bytes();
         writer.write_all(&buf)?;
+        Ok(())
+    }
+}
+
+/// Represents an integer between `-2^31` and `2^31-1` inclusive.
+///
+/// Encoding follows the variable-length zig-zag encoding from Google Protocol Buffers.
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Clone, Copy)]
+#[cfg_attr(test, derive(proptest_derive::Arbitrary))]
+pub struct Varint(pub i32);
+
+impl<R> ReadType<R> for Varint
+where
+    R: Read,
+{
+    fn read(reader: &mut R) -> Result<Self, ReadError> {
+        Ok(Self(reader.read_i32_varint()?))
+    }
+}
+
+impl<W> WriteType<W> for Varint
+where
+    W: Write,
+{
+    fn write(&self, writer: &mut W) -> Result<(), WriteError> {
+        writer.write_i32_varint(self.0)?;
         Ok(())
     }
 }
@@ -430,6 +458,8 @@ mod tests {
     test_roundtrip!(Int32, test_int32_roundtrip);
 
     test_roundtrip!(Int64, test_int64_roundtrip);
+
+    test_roundtrip!(Varint, test_varint_roundtrip);
 
     test_roundtrip!(UnsignedVarint, test_unsigned_varint_roundtrip);
 
