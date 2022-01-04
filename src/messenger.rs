@@ -129,7 +129,7 @@ where
         let correlation_id = self.correlation_id.fetch_add(1, Ordering::SeqCst);
 
         let header = RequestHeader {
-            request_api_key: ApiKey::ApiVersions,
+            request_api_key: R::API_KEY,
             request_api_version: body_api_version,
             correlation_id: Int32(correlation_id),
             client_id: NullableString(None),

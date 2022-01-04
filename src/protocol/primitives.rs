@@ -10,6 +10,40 @@ use varint_rs::{VarintReader, VarintWriter};
 
 use super::traits::{ReadError, ReadType, WriteError, WriteType};
 
+/// Represents a boolean
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Clone, Copy)]
+#[cfg_attr(test, derive(proptest_derive::Arbitrary))]
+pub struct Boolean(pub bool);
+
+impl<R> ReadType<R> for Boolean
+where
+    R: Read,
+{
+    fn read(reader: &mut R) -> Result<Self, ReadError> {
+        let mut buf = [0u8; 1];
+        reader.read_exact(&mut buf)?;
+        match buf[0] {
+            0 => Ok(Self(false)),
+            1 => Ok(Self(true)),
+            b => Err(ReadError::Malformed(
+                format!("Invalid value for bool: {}", b).into(),
+            )),
+        }
+    }
+}
+
+impl<W> WriteType<W> for Boolean
+where
+    W: Write,
+{
+    fn write(&self, writer: &mut W) -> Result<(), WriteError> {
+        match self.0 {
+            true => Ok(writer.write_all(&[1])?),
+            false => Ok(writer.write_all(&[0])?),
+        }
+    }
+}
+
 /// Represents an integer between `-2^7` and `2^7-1` inclusive.
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Clone, Copy)]
 #[cfg_attr(test, derive(proptest_derive::Arbitrary))]
@@ -551,6 +585,8 @@ mod tests {
             }
         };
     }
+
+    test_roundtrip!(Boolean, test_bool_roundtrip);
 
     test_roundtrip!(Int8, test_int8_roundtrip);
 

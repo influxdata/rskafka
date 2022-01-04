@@ -6,19 +6,23 @@ use tokio::net::TcpStream;
 use tokio::sync::Mutex;
 
 use crate::backoff::{Backoff, BackoffConfig};
-use crate::messenger::Messenger;
+use crate::messenger::{Messenger, RequestError};
+use crate::protocol::messages::MetadataRequest;
 
 /// A connection to a broker
 pub type BrokerConnection = Arc<Messenger<BufStream<TcpStream>>>;
 
 #[derive(Debug, Error)]
-pub enum Error {}
+pub enum Error {
+    #[error("error getting cluster metadata: {0}")]
+    MetadataError(RequestError),
+}
 
 pub type Result<T, E = Error> = std::result::Result<T, E>;
 
 /// Maintains a list of brokers within the cluster and caches a connection to a broker
 pub struct BrokerPool {
-    ///
+    /// Brokers used to boostrap this pool
     bootstrap_brokers: Vec<String>,
     /// Discovered brokers in the cluster, including bootstrap brokers
     discovered_brokers: Vec<String>,
@@ -40,9 +44,23 @@ impl BrokerPool {
 
     /// Fetch and cache broker metadata
     pub async fn refresh_metadata(&mut self) -> Result<()> {
-        self.get_cached_broker().await?;
+        let broker = self.get_cached_broker().await?;
 
-        //TODO: Get broker list
+        let response = broker
+            .request(MetadataRequest {
+                topics: vec![],
+                allow_auto_topic_creation: None,
+            })
+            .await
+            .map_err(Error::MetadataError)?;
+
+        self.discovered_brokers = response
+            .brokers
+            .into_iter()
+            .map(|broker| format!("{}:{}", broker.host.0, broker.port.0))
+            .collect();
+        println!("Found brokers: {:?}", self.discovered_brokers);
+
         Ok(())
     }
 

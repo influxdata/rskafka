@@ -7,15 +7,16 @@ use std::io::{Read, Write};
 
 use thiserror::Error;
 
-use crate::protocol::primitives::TaggedFields;
-
 use super::{
     api_key::ApiKey,
     api_version::ApiVersion,
     error::Error as ApiError,
-    primitives::{CompactString, Int16, Int32, NullableString},
+    primitives::{CompactString, Int16, Int32, NullableString, TaggedFields},
     traits::{ReadError, ReadType, WriteError, WriteType},
 };
+
+mod metadata;
+pub use metadata::*;
 
 #[derive(Error, Debug)]
 pub enum ReadVersionedError {
@@ -40,6 +41,9 @@ pub enum WriteVersionedError {
 
     #[error(transparent)]
     WriteError(#[from] WriteError),
+
+    #[error("Field {field} not available in version: {version:?}")]
+    FieldNotAvailable { field: String, version: ApiVersion },
 }
 
 pub trait WriteVersionedType<W>: Sized
