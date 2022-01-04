@@ -245,20 +245,15 @@ where
     R: Read,
 {
     fn read_versioned(reader: &mut R, version: ApiVersion) -> Result<Self, ReadVersionedError> {
-        if version.0 .0 > 3 {
+        let v = version.0 .0;
+        if v > 3 {
             return Err(ReadVersionedError::InvalidVersion { version });
         }
 
         let error_code = ApiError::new(Int16::read(reader)?);
         let api_keys = read_versioned_array(reader, version)?.unwrap_or_default();
-
-        let throttle_time_ms = (version.0 .0 > 0)
-            .then(|| Int32::read(reader))
-            .transpose()?;
-
-        let tagged_fields = (version.0 .0 >= 3)
-            .then(|| TaggedFields::read(reader))
-            .transpose()?;
+        let throttle_time_ms = (v > 0).then(|| Int32::read(reader)).transpose()?;
+        let tagged_fields = (v >= 3).then(|| TaggedFields::read(reader)).transpose()?;
 
         Ok(Self {
             error_code,
