@@ -28,11 +28,17 @@ use crate::protocol::{
     primitives::{Int16, Int32, NullableString, TaggedFields},
 };
 
+struct Response {
+    #[allow(dead_code)]
+    header: ResponseHeader,
+    data: Cursor<Vec<u8>>,
+}
+
 pub struct Messenger<RW> {
     stream_write: Mutex<WriteHalf<RW>>,
     correlation_id: AtomicI32,
     version_ranges: RwLock<HashMap<ApiKey, (ApiVersion, ApiVersion)>>,
-    channels: Arc<Mutex<HashMap<i32, Sender<(ResponseHeader, Cursor<Vec<u8>>)>>>>,
+    channels: Arc<Mutex<HashMap<i32, Sender<Response>>>>,
     join_handle: JoinHandle<()>,
 }
 
@@ -60,7 +66,7 @@ where
 {
     pub fn new(stream: RW) -> Self {
         let (stream_read, stream_write) = tokio::io::split(stream);
-        let channels: Arc<Mutex<HashMap<i32, Sender<(ResponseHeader, Cursor<Vec<u8>>)>>>> =
+        let channels: Arc<Mutex<HashMap<i32, Sender<Response>>>> =
             Arc::new(Mutex::new(HashMap::new()));
         let channels_captured = Arc::clone(&channels);
 
@@ -78,7 +84,11 @@ where
                     .remove(&header.correlation_id.0)
                 {
                     // we don't care if the other side is gone
-                    tx.send((header, cursor)).ok();
+                    tx.send(Response {
+                        header,
+                        data: cursor,
+                    })
+                    .ok();
                 }
             }
         });
@@ -135,8 +145,8 @@ where
             stream_write.flush().await?;
         }
 
-        let (_header, mut cursor) = rx.await.unwrap();
-        let body = R::ResponseBody::read_versioned(&mut cursor, body_api_version)?;
+        let mut response = rx.await.unwrap();
+        let body = R::ResponseBody::read_versioned(&mut response.data, body_api_version)?;
 
         Ok(body)
     }
