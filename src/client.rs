@@ -16,6 +16,7 @@ use crate::{
 };
 
 pub struct Client {
+    #[allow(dead_code)]
     messenger: Messenger<BufStream<TcpStream>>,
 }
 
@@ -69,14 +70,4 @@ async fn sync_versions(messenger: &Messenger<BufStream<TcpStream>>) {
     }
 
     panic!("cannot sync")
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[tokio::test]
-    async fn test() {
-        let mut client = Client::new("localhost:9093").await;
-    }
 }

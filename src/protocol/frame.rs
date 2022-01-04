@@ -30,7 +30,7 @@ impl<R> AsyncMessageRead for R
 where
     R: AsyncRead + Send + Unpin,
 {
-    async fn read_message(&mut self, max_message_size: usize) -> Result<Vec<u8>, ReadError> {
+    async fn read_message(&mut self, _max_message_size: usize) -> Result<Vec<u8>, ReadError> {
         let mut len_buf = vec![0u8; 4];
         self.read_exact(&mut len_buf).await?;
         let len = Int32::read(&mut Cursor::new(len_buf))
