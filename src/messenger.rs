@@ -39,7 +39,7 @@ struct Response {
 /// A connection to a single broker
 ///
 /// Note: Requests to the same [`Messenger`] will be pipelined by Kafka
-/// -
+///
 pub struct Messenger<RW> {
     stream_write: Mutex<WriteHalf<RW>>,
     correlation_id: AtomicI32,

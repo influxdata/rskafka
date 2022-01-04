@@ -18,9 +18,13 @@ pub type Result<T, E = Error> = std::result::Result<T, E>;
 
 /// Maintains a list of brokers within the cluster and caches a connection to a broker
 pub struct BrokerPool {
+    ///
     bootstrap_brokers: Vec<String>,
+    /// Discovered brokers in the cluster, including bootstrap brokers
     discovered_brokers: Vec<String>,
+    /// The current cached broker
     current_broker: Mutex<Option<BrokerConnection>>,
+    /// The backoff configuration on error
     backoff_config: BackoffConfig,
 }
 
