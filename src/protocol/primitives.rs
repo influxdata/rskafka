@@ -150,6 +150,32 @@ where
     }
 }
 
+/// Represents an integer between `-2^63` and `2^63-1` inclusive.
+///
+/// Encoding follows the variable-length zig-zag encoding from Google Protocol Buffers.
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Clone, Copy)]
+#[cfg_attr(test, derive(proptest_derive::Arbitrary))]
+pub struct Varlong(pub i64);
+
+impl<R> ReadType<R> for Varlong
+where
+    R: Read,
+{
+    fn read(reader: &mut R) -> Result<Self, ReadError> {
+        Ok(Self(reader.read_i64_varint()?))
+    }
+}
+
+impl<W> WriteType<W> for Varlong
+where
+    W: Write,
+{
+    fn write(&self, writer: &mut W) -> Result<(), WriteError> {
+        writer.write_i64_varint(self.0)?;
+        Ok(())
+    }
+}
+
 /// The UNSIGNED_VARINT type describes an unsigned variable length integer.
 ///
 /// To serialize a number as a variable-length integer, you break it up into groups of 7 bits. The lowest 7 bits is
@@ -460,6 +486,8 @@ mod tests {
     test_roundtrip!(Int64, test_int64_roundtrip);
 
     test_roundtrip!(Varint, test_varint_roundtrip);
+
+    test_roundtrip!(Varlong, test_varlong_roundtrip);
 
     test_roundtrip!(UnsignedVarint, test_unsigned_varint_roundtrip);
 
