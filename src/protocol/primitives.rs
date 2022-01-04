@@ -492,31 +492,11 @@ where
 mod tests {
     use std::io::Cursor;
 
+    use crate::protocol::test_utils::test_roundtrip;
+
     use super::*;
 
     use assert_matches::assert_matches;
-    use proptest::prelude::*;
-
-    macro_rules! test_roundtrip {
-        ($t:ty, $name:ident) => {
-            proptest! {
-                #[test]
-                fn $name(orig: $t) {
-                    let mut buf = Cursor::new(Vec::<u8>::new());
-                    match orig.write(&mut buf) {
-                        Err(_) => {
-                            // skip
-                        }
-                        Ok(()) => {
-                            buf.set_position(0);
-                            let restored = <$t>::read(&mut buf).unwrap();
-                            assert_eq!(orig, restored);
-                        }
-                    }
-                }
-            }
-        };
-    }
 
     test_roundtrip!(Int8, test_int8_roundtrip);
 
