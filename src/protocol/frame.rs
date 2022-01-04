@@ -51,7 +51,7 @@ where
         // check max message size to not blow up memory
         if len > max_message_size {
             // We need to seek so that next message is readable. However `self.seek` would require `R: AsyncSeek` which
-            // doesn't hold for many types we wanna work with. So do some manual seeking.
+            // doesn't hold for many types we want to work with. So do some manual seeking.
             let mut to_read = len;
             let mut buf = vec![]; // allocate empty buffer
             while to_read > 0 {
