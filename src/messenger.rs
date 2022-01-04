@@ -17,6 +17,8 @@ use tokio::{
     task::JoinHandle,
 };
 
+use crate::protocol::messages::ApiVersionsRequest;
+use crate::protocol::primitives::CompactString;
 use crate::protocol::{
     api_key::ApiKey,
     api_version::ApiVersion,
@@ -34,6 +36,10 @@ struct Response {
     data: Cursor<Vec<u8>>,
 }
 
+/// A connection to a single broker
+///
+/// Note: Requests to the same [`Messenger`] will be pipelined by Kafka
+///
 pub struct Messenger<RW> {
     stream_write: Mutex<WriteHalf<RW>>,
     correlation_id: AtomicI32,
@@ -101,8 +107,8 @@ where
         }
     }
 
-    pub fn set_version_ranges(&self, ranges: HashMap<ApiKey, (ApiVersion, ApiVersion)>) {
-        *self.version_ranges.write().expect("lock poissened") = ranges;
+    fn set_version_ranges(&self, ranges: HashMap<ApiKey, (ApiVersion, ApiVersion)>) {
+        *self.version_ranges.write().expect("lock poisoned") = ranges;
     }
 
     pub async fn request<R>(&self, msg: R) -> Result<R::ResponseBody, RequestError>
@@ -113,7 +119,7 @@ where
         let body_api_version = self
             .version_ranges
             .read()
-            .expect("lock poissened")
+            .expect("lock poisoned")
             .get(&R::API_KEY)
             .map(|range_server| match_versions(*range_server, R::API_VERSION_RANGE))
             .flatten()
@@ -149,6 +155,44 @@ where
         let body = R::ResponseBody::read_versioned(&mut response.data, body_api_version)?;
 
         Ok(body)
+    }
+
+    pub async fn sync_versions(&self) {
+        for upper_bound in (ApiVersionsRequest::API_VERSION_RANGE.0 .0 .0
+            ..=ApiVersionsRequest::API_VERSION_RANGE.1 .0 .0)
+            .rev()
+        {
+            self.set_version_ranges(HashMap::from([(
+                ApiKey::ApiVersions,
+                (
+                    ApiVersionsRequest::API_VERSION_RANGE.0,
+                    ApiVersion(Int16(upper_bound)),
+                ),
+            )]));
+
+            let body = ApiVersionsRequest {
+                client_software_name: CompactString(String::from("")),
+                client_software_version: CompactString(String::from("")),
+                tagged_fields: TaggedFields::default(),
+            };
+
+            if let Ok(response) = self.request(body).await {
+                if response.error_code.is_some() {
+                    continue;
+                }
+
+                // TODO: check min and max are sane
+                let ranges = response
+                    .api_keys
+                    .into_iter()
+                    .map(|x| (x.api_key, (x.min_version, x.max_version)))
+                    .collect();
+                self.set_version_ranges(ranges);
+                return;
+            }
+        }
+
+        panic!("cannot sync")
     }
 }
 

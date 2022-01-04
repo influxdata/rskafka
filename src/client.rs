@@ -1,73 +1,16 @@
-use std::collections::HashMap;
-
-use tokio::{
-    io::BufStream,
-    net::{TcpStream, ToSocketAddrs},
-};
-
-use crate::{
-    messenger::Messenger,
-    protocol::{
-        api_key::ApiKey,
-        api_version::ApiVersion,
-        messages::{ApiVersionsRequest, RequestBody},
-        primitives::{CompactString, Int16, TaggedFields},
-    },
-};
+use crate::connection::BrokerPool;
 
 pub struct Client {
     #[allow(dead_code)]
-    messenger: Messenger<BufStream<TcpStream>>,
+    brokers: BrokerPool,
 }
 
 impl Client {
-    pub async fn new<A>(addr: A) -> Self
-    where
-        A: ToSocketAddrs,
-    {
-        let stream = TcpStream::connect(addr).await.unwrap();
-        let stream = BufStream::new(stream);
-        let messenger = Messenger::new(stream);
-        sync_versions(&messenger).await;
+    /// Create a new [`Client`] with the list of bootstrap brokers
+    pub async fn new(boostrap_brokers: Vec<String>) -> Self {
+        let mut brokers = BrokerPool::new(boostrap_brokers);
+        brokers.refresh_metadata().await.unwrap();
 
-        Self { messenger }
+        Self { brokers }
     }
-}
-
-async fn sync_versions(messenger: &Messenger<BufStream<TcpStream>>) {
-    for upper_bound in (ApiVersionsRequest::API_VERSION_RANGE.0 .0 .0
-        ..=ApiVersionsRequest::API_VERSION_RANGE.1 .0 .0)
-        .rev()
-    {
-        messenger.set_version_ranges(HashMap::from([(
-            ApiKey::ApiVersions,
-            (
-                ApiVersionsRequest::API_VERSION_RANGE.0,
-                ApiVersion(Int16(upper_bound)),
-            ),
-        )]));
-
-        let body = ApiVersionsRequest {
-            client_software_name: CompactString(String::from("")),
-            client_software_version: CompactString(String::from("")),
-            tagged_fields: TaggedFields::default(),
-        };
-
-        if let Ok(response) = messenger.request(body).await {
-            if response.error_code.is_some() {
-                continue;
-            }
-
-            // TODO: check min and max are sane
-            let ranges = response
-                .api_keys
-                .into_iter()
-                .map(|x| (x.api_key, (x.min_version, x.max_version)))
-                .collect();
-            messenger.set_version_ranges(ranges);
-            return;
-        }
-    }
-
-    panic!("cannot sync")
 }

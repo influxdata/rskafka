@@ -49,5 +49,5 @@ macro_rules! maybe_skip_kafka_integration {
 #[tokio::test]
 async fn test_connect() {
     let connection = maybe_skip_kafka_integration!();
-    Client::new(connection).await;
+    Client::new(vec![connection]).await;
 }
