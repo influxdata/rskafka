@@ -1,0 +1,175 @@
+---
+version: 2.1
+
+commands:
+  rust_components:
+    description: Verify installed components
+    steps:
+      - run:
+          name: Verify installed components
+          command: |
+            rustup --version
+            rustup show
+            cargo fmt --version
+            cargo clippy --version
+
+  cache_restore:
+    description: Restore Cargo Cache
+    steps:
+      - restore_cache:
+          name: Restoring Cargo Cache
+          keys:
+            - cargo-cache-{{ arch }}-{{ .Branch }}-{{ checksum "Cargo.lock" }}
+            - cargo-cache-{{ arch }}-{{ .Branch }}
+            - cargo-cache
+  cache_save:
+    description: Save Cargo Cache
+    steps:
+      - save_cache:
+          name: Save Cargo Cache
+          paths:
+            - /usr/local/cargo/registry
+          key: cargo-cache-{{ arch }}-{{ .Branch }}-{{ checksum "Cargo.lock" }}
+
+jobs:
+  fmt:
+    docker:
+      - image: quay.io/influxdb/rust:ci
+    environment:
+      # Disable incremental compilation to avoid overhead. We are not preserving these files anyway.
+      CARGO_INCREMENTAL: "0"
+      # Disable full debug symbol generation to speed up CI build
+      # "1" means line tables only, which is useful for panic tracebacks.
+      RUSTFLAGS: "-C debuginfo=1"
+    steps:
+      - checkout
+      - rust_components
+      - cache_restore
+      - run:
+          name: Rust fmt
+          command: cargo fmt --all -- --check
+      - cache_save
+  lint:
+    docker:
+      - image: quay.io/influxdb/rust:ci
+    environment:
+      # Disable incremental compilation to avoid overhead. We are not preserving these files anyway.
+      CARGO_INCREMENTAL: "0"
+      # Disable full debug symbol generation to speed up CI build
+      # "1" means line tables only, which is useful for panic tracebacks.
+      RUSTFLAGS: "-C debuginfo=1"
+    steps:
+      - checkout
+      - rust_components
+      - cache_restore
+      - run:
+          name: Clippy
+          command: cargo clippy --all-targets --all-features -- -D warnings
+      - cache_save
+  cargo_audit:
+    docker:
+      - image: quay.io/influxdb/rust:ci
+    environment:
+      # Disable incremental compilation to avoid overhead. We are not preserving these files anyway.
+      CARGO_INCREMENTAL: "0"
+      # Disable full debug symbol generation to speed up CI build
+      # "1" means line tables only, which is useful for panic tracebacks.
+      RUSTFLAGS: "-C debuginfo=1"
+    steps:
+      - checkout
+      - rust_components
+      - cache_restore
+      - run:
+          name: Install Cargo Audit
+          command: cargo install --force cargo-audit
+      - run:
+          name: Cargo Audit
+          command: cargo audit
+      - cache_save
+  doc:
+    docker:
+      - image: quay.io/influxdb/rust:ci
+    environment:
+      # Disable incremental compilation to avoid overhead. We are not preserving these files anyway.
+      CARGO_INCREMENTAL: "0"
+      # Disable full debug symbol generation to speed up CI build
+      # "1" means line tables only, which is useful for panic tracebacks.
+      RUSTFLAGS: "-C debuginfo=1"
+    steps:
+      - checkout
+      - rust_components
+      - cache_restore
+      - run:
+          name: Cargo doc
+          command: cargo doc --document-private-items --no-deps
+      - cache_save
+      - run:
+          name: Compress Docs
+          command: tar -cvzf rustdoc.tar.gz target/doc/
+      - store_artifacts:
+          path: rustdoc.tar.gz
+
+  test:
+    # setup multiple docker images (see https://circleci.com/docs/2.0/configuration-reference/#docker)
+    docker:
+      - image: quay.io/influxdb/rust:ci
+      - image: vectorized/redpanda:v21.9.2
+        command: redpanda start --overprovisioned --smp 1 --memory 1G --reserve-memory 0M
+    resource_class: xlarge  # use of a smaller executor tends crashes on link
+    environment:
+      # Disable incremental compilation to avoid overhead. We are not preserving these files anyway.
+      CARGO_INCREMENTAL: "0"
+      # Disable full debug symbol generation to speed up CI build
+      # "1" means line tables only, which is useful for panic tracebacks.
+      RUSTFLAGS: "-C debuginfo=1"
+      RUST_BACKTRACE: "1"
+      # Run integration tests
+      TEST_INTEGRATION: 1
+      KAFKA_CONNECT: "localhost:9092"
+    steps:
+      - checkout
+      - rust_components
+      - cache_restore
+      - run:
+          name: Cargo test
+          command: cargo test
+      - cache_save
+
+  # Build a dev binary.
+  #
+  # Compiles a binary with the default ("dev") cargo profile from the iox source
+  # using the latest ci_image.
+  build:
+    docker:
+      - image: quay.io/influxdb/rust:ci
+    resource_class: xlarge  # use of a smaller executor tends crashes on link
+    environment:
+      # Disable incremental compilation to avoid overhead. We are not preserving these files anyway.
+      CARGO_INCREMENTAL: "0"
+      # Disable full debug symbol generation to speed up CI build
+      # "1" means line tables only, which is useful for panic tracebacks.
+      RUSTFLAGS: "-C debuginfo=1"
+    steps:
+      - checkout
+      - rust_components
+      - cache_restore
+      - run:
+          name: Cargo build
+          command: cargo build
+      - run:
+          name: Build benches
+          command: cargo test --benches --no-run
+      - cache_save
+
+workflows:
+  version: 2
+
+  # CI for all pull requests.
+  ci:
+    jobs:
+      - fmt
+      - lint
+      - cargo_audit
+      - test
+      - build
+      - doc
