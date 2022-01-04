@@ -6,7 +6,36 @@
 
 use std::io::{Read, Write};
 
+use varint_rs::{VarintReader, VarintWriter};
+
 use super::traits::{ReadError, ReadType, WriteError, WriteType};
+
+/// Represents an integer between `-2^7` and `2^7-1` inclusive.
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Clone, Copy)]
+#[cfg_attr(test, derive(proptest_derive::Arbitrary))]
+pub struct Int8(pub i8);
+
+impl<R> ReadType<R> for Int8
+where
+    R: Read,
+{
+    fn read(reader: &mut R) -> Result<Self, ReadError> {
+        let mut buf = [0u8; 1];
+        reader.read_exact(&mut buf)?;
+        Ok(Self(i8::from_be_bytes(buf)))
+    }
+}
+
+impl<W> WriteType<W> for Int8
+where
+    W: Write,
+{
+    fn write(&self, writer: &mut W) -> Result<(), WriteError> {
+        let buf = self.0.to_be_bytes();
+        writer.write_all(&buf)?;
+        Ok(())
+    }
+}
 
 /// Represents an integer between `-2^15` and `2^15-1` inclusive.
 ///
@@ -62,6 +91,87 @@ where
     fn write(&self, writer: &mut W) -> Result<(), WriteError> {
         let buf = self.0.to_be_bytes();
         writer.write_all(&buf)?;
+        Ok(())
+    }
+}
+
+/// Represents an integer between `-2^63` and `2^63-1` inclusive.
+///
+/// The values are encoded using eight bytes in network byte order (big-endian).
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Clone, Copy)]
+#[cfg_attr(test, derive(proptest_derive::Arbitrary))]
+pub struct Int64(pub i64);
+
+impl<R> ReadType<R> for Int64
+where
+    R: Read,
+{
+    fn read(reader: &mut R) -> Result<Self, ReadError> {
+        let mut buf = [0u8; 8];
+        reader.read_exact(&mut buf)?;
+        Ok(Self(i64::from_be_bytes(buf)))
+    }
+}
+
+impl<W> WriteType<W> for Int64
+where
+    W: Write,
+{
+    fn write(&self, writer: &mut W) -> Result<(), WriteError> {
+        let buf = self.0.to_be_bytes();
+        writer.write_all(&buf)?;
+        Ok(())
+    }
+}
+
+/// Represents an integer between `-2^31` and `2^31-1` inclusive.
+///
+/// Encoding follows the variable-length zig-zag encoding from Google Protocol Buffers.
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Clone, Copy)]
+#[cfg_attr(test, derive(proptest_derive::Arbitrary))]
+pub struct Varint(pub i32);
+
+impl<R> ReadType<R> for Varint
+where
+    R: Read,
+{
+    fn read(reader: &mut R) -> Result<Self, ReadError> {
+        Ok(Self(reader.read_i32_varint()?))
+    }
+}
+
+impl<W> WriteType<W> for Varint
+where
+    W: Write,
+{
+    fn write(&self, writer: &mut W) -> Result<(), WriteError> {
+        writer.write_i32_varint(self.0)?;
+        Ok(())
+    }
+}
+
+/// Represents an integer between `-2^63` and `2^63-1` inclusive.
+///
+/// Encoding follows the variable-length zig-zag encoding from Google Protocol Buffers.
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Clone, Copy)]
+#[cfg_attr(test, derive(proptest_derive::Arbitrary))]
+pub struct Varlong(pub i64);
+
+impl<R> ReadType<R> for Varlong
+where
+    R: Read,
+{
+    fn read(reader: &mut R) -> Result<Self, ReadError> {
+        Ok(Self(reader.read_i64_varint()?))
+    }
+}
+
+impl<W> WriteType<W> for Varlong
+where
+    W: Write,
+{
+    fn write(&self, writer: &mut W) -> Result<(), WriteError> {
+        writer.write_i64_varint(self.0)?;
         Ok(())
     }
 }
@@ -201,6 +311,51 @@ where
     }
 }
 
+/// Represents a raw sequence of bytes or null.
+///
+/// For non-null values, first the length N is given as an INT32. Then N bytes follow. A null value is encoded with
+/// length of -1 and there are no following bytes.
+#[derive(Debug, PartialEq, Eq)]
+#[cfg_attr(test, derive(proptest_derive::Arbitrary))]
+pub struct NullableBytes(pub Option<Vec<u8>>);
+
+impl<R> ReadType<R> for NullableBytes
+where
+    R: Read,
+{
+    fn read(reader: &mut R) -> Result<Self, ReadError> {
+        let len = Int16::read(reader)?;
+        match len.0 {
+            l if l < -1 => Err(ReadError::Malformed(
+                format!("Invalid negative length for nullable bytes: {}", l).into(),
+            )),
+            -1 => Ok(Self(None)),
+            l => {
+                let mut buf = vec![0; l as usize];
+                reader.read_exact(&mut buf)?;
+                Ok(Self(Some(buf)))
+            }
+        }
+    }
+}
+
+impl<W> WriteType<W> for NullableBytes
+where
+    W: Write,
+{
+    fn write(&self, writer: &mut W) -> Result<(), WriteError> {
+        match &self.0 {
+            Some(s) => {
+                let l = i16::try_from(s.len()).map_err(|e| WriteError::Malformed(Box::new(e)))?;
+                Int16(l).write(writer)?;
+                writer.write_all(s)?;
+                Ok(())
+            }
+            None => Int16(-1).write(writer),
+        }
+    }
+}
+
 /// Represents a section containing optional tagged fields.
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
 #[cfg_attr(test, derive(proptest_derive::Arbitrary))]
@@ -322,9 +477,41 @@ mod tests {
         };
     }
 
+    test_roundtrip!(Int8, test_int8_roundtrip);
+
     test_roundtrip!(Int16, test_int16_roundtrip);
 
     test_roundtrip!(Int32, test_int32_roundtrip);
+
+    test_roundtrip!(Int64, test_int64_roundtrip);
+
+    test_roundtrip!(Varint, test_varint_roundtrip);
+
+    #[test]
+    fn test_varint_special_values() {
+        // Taken from https://developers.google.com/protocol-buffers/docs/encoding?csw=1#varints
+        for v in [0, -1, 1, -2, 2147483647, -2147483648] {
+            let mut data = vec![];
+            Varint(v).write(&mut data).unwrap();
+
+            let restored = Varint::read(&mut Cursor::new(data)).unwrap();
+            assert_eq!(restored.0, v);
+        }
+    }
+
+    test_roundtrip!(Varlong, test_varlong_roundtrip);
+
+    #[test]
+    fn test_varlong_special_values() {
+        // Taken from https://developers.google.com/protocol-buffers/docs/encoding?csw=1#varints + min/max
+        for v in [0, -1, 1, -2, 2147483647, -2147483648, i64::MIN, i64::MAX] {
+            let mut data = vec![];
+            Varlong(v).write(&mut data).unwrap();
+
+            let restored = Varlong::read(&mut Cursor::new(data)).unwrap();
+            assert_eq!(restored.0, v);
+        }
+    }
 
     test_roundtrip!(UnsignedVarint, test_unsigned_varint_roundtrip);
 
@@ -354,6 +541,22 @@ mod tests {
     }
 
     test_roundtrip!(CompactString, test_compact_string_roundtrip);
+
+    test_roundtrip!(NullableBytes, test_nullable_bytes_roundtrip);
+
+    #[test]
+    fn test_nullable_bytes_read_negative_length() {
+        let mut buf = Cursor::new(Vec::<u8>::new());
+        Int16(-2).write(&mut buf).unwrap();
+        buf.set_position(0);
+
+        let err = NullableBytes::read(&mut buf).unwrap_err();
+        assert_matches!(err, ReadError::Malformed(_));
+        assert_eq!(
+            err.to_string(),
+            "Invalid negative length for nullable bytes: -2"
+        );
+    }
 
     test_roundtrip!(TaggedFields, test_tagged_fields_roundtrip);
 
