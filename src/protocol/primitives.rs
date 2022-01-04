@@ -311,6 +311,47 @@ where
     }
 }
 
+/// Represents a nullable string whose length is expressed as a variable-length integer rather than a fixed 2-byte length.
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[cfg_attr(test, derive(proptest_derive::Arbitrary))]
+pub struct CompactNullableString(pub Option<String>);
+
+impl<R> ReadType<R> for CompactNullableString
+where
+    R: Read,
+{
+    fn read(reader: &mut R) -> Result<Self, ReadError> {
+        let len = UnsignedVarint::read(reader)?;
+        match len.0 {
+            0 => Ok(Self(None)),
+            len => {
+                let mut buf = vec![0; len as usize - 1];
+                reader.read_exact(&mut buf)?;
+                let s = String::from_utf8(buf).map_err(|e| ReadError::Malformed(Box::new(e)))?;
+                Ok(Self(Some(s)))
+            }
+        }
+    }
+}
+
+impl<W> WriteType<W> for CompactNullableString
+where
+    W: Write,
+{
+    fn write(&self, writer: &mut W) -> Result<(), WriteError> {
+        match &self.0 {
+            Some(s) => {
+                UnsignedVarint(s.len() as u64 + 1).write(writer)?;
+                writer.write_all(s.as_bytes())?;
+            }
+            None => {
+                UnsignedVarint(0).write(writer)?;
+            }
+        }
+        Ok(())
+    }
+}
+
 /// Represents a raw sequence of bytes or null.
 ///
 /// For non-null values, first the length N is given as an INT32. Then N bytes follow. A null value is encoded with
@@ -541,6 +582,11 @@ mod tests {
     }
 
     test_roundtrip!(CompactString, test_compact_string_roundtrip);
+
+    test_roundtrip!(
+        CompactNullableString,
+        test_compact_nullable_string_roundtrip
+    );
 
     test_roundtrip!(NullableBytes, test_nullable_bytes_roundtrip);
 
