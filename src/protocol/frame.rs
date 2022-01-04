@@ -58,9 +58,7 @@ where
                 let step = max_message_size.min(to_read);
 
                 // resize buffer if required
-                if buf.len() != step {
-                    buf = vec![0; step];
-                }
+                buf.resize(step, 0);
 
                 self.read_exact(&mut buf).await?;
                 to_read -= step;
