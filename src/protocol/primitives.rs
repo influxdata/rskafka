@@ -487,7 +487,31 @@ mod tests {
 
     test_roundtrip!(Varint, test_varint_roundtrip);
 
+    #[test]
+    fn test_varint_special_values() {
+        // Taken from https://developers.google.com/protocol-buffers/docs/encoding?csw=1#varints
+        for v in [0, -1, 1, -2, 2147483647, -2147483648] {
+            let mut data = vec![];
+            Varint(v).write(&mut data).unwrap();
+
+            let restored = Varint::read(&mut Cursor::new(data)).unwrap();
+            assert_eq!(restored.0, v);
+        }
+    }
+
     test_roundtrip!(Varlong, test_varlong_roundtrip);
+
+    #[test]
+    fn test_varlong_special_values() {
+        // Taken from https://developers.google.com/protocol-buffers/docs/encoding?csw=1#varints + min/max
+        for v in [0, -1, 1, -2, 2147483647, -2147483648, i64::MIN, i64::MAX] {
+            let mut data = vec![];
+            Varlong(v).write(&mut data).unwrap();
+
+            let restored = Varlong::read(&mut Cursor::new(data)).unwrap();
+            assert_eq!(restored.0, v);
+        }
+    }
 
     test_roundtrip!(UnsignedVarint, test_unsigned_varint_roundtrip);
 
