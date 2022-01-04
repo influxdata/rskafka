@@ -82,27 +82,25 @@ mod tests {
 
         let assert_fuzzy_eq = |a: f64, b: f64| assert!((b - a).abs() < 0.0001, "{} != {}", a, b);
 
-        /// Create a static rng that takes the minimum of the range
-        let mut rng = StepRng::new(0, 0);
+        // Create a static rng that takes the minimum of the range
+        let rng = StepRng::new(0, 0);
         let mut backoff = Backoff::new_with_rng(&config, rng);
 
-        let mut value = init_backoff_secs;
         for _ in 0..20 {
             assert_eq!(backoff.next().as_secs_f64(), init_backoff_secs);
         }
 
-        /// Create a static rng that takes the maximum of the range
-        let mut rng = StepRng::new(u64::MAX, 0);
+        // Create a static rng that takes the maximum of the range
+        let rng = StepRng::new(u64::MAX, 0);
         let mut backoff = Backoff::new_with_rng(&config, rng);
 
-        let mut value = init_backoff_secs;
         for i in 0..20 {
             let value = (base.powi(i) * init_backoff_secs).min(max_backoff_secs);
             assert_fuzzy_eq(backoff.next().as_secs_f64(), value);
         }
 
-        /// Create a static rng that takes the mid point of the range
-        let mut rng = StepRng::new(u64::MAX / 2, 0);
+        // Create a static rng that takes the mid point of the range
+        let rng = StepRng::new(u64::MAX / 2, 0);
         let mut backoff = Backoff::new_with_rng(&config, rng);
 
         let mut value = init_backoff_secs;
