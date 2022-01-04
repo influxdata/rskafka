@@ -201,6 +201,51 @@ where
     }
 }
 
+/// Represents a raw sequence of bytes or null.
+///
+/// For non-null values, first the length N is given as an INT32. Then N bytes follow. A null value is encoded with
+/// length of -1 and there are no following bytes.
+#[derive(Debug, PartialEq, Eq)]
+#[cfg_attr(test, derive(proptest_derive::Arbitrary))]
+pub struct NullableBytes(pub Option<Vec<u8>>);
+
+impl<R> ReadType<R> for NullableBytes
+where
+    R: Read,
+{
+    fn read(reader: &mut R) -> Result<Self, ReadError> {
+        let len = Int16::read(reader)?;
+        match len.0 {
+            l if l < -1 => Err(ReadError::Malformed(
+                format!("Invalid negative length for nullable bytes: {}", l).into(),
+            )),
+            -1 => Ok(Self(None)),
+            l => {
+                let mut buf = vec![0; l as usize];
+                reader.read_exact(&mut buf)?;
+                Ok(Self(Some(buf)))
+            }
+        }
+    }
+}
+
+impl<W> WriteType<W> for NullableBytes
+where
+    W: Write,
+{
+    fn write(&self, writer: &mut W) -> Result<(), WriteError> {
+        match &self.0 {
+            Some(s) => {
+                let l = i16::try_from(s.len()).map_err(|e| WriteError::Malformed(Box::new(e)))?;
+                Int16(l).write(writer)?;
+                writer.write_all(s)?;
+                Ok(())
+            }
+            None => Int16(-1).write(writer),
+        }
+    }
+}
+
 /// Represents a section containing optional tagged fields.
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
 #[cfg_attr(test, derive(proptest_derive::Arbitrary))]
@@ -354,6 +399,22 @@ mod tests {
     }
 
     test_roundtrip!(CompactString, test_compact_string_roundtrip);
+
+    test_roundtrip!(NullableBytes, test_nullable_bytes_roundtrip);
+
+    #[test]
+    fn test_nullable_bytes_read_negative_length() {
+        let mut buf = Cursor::new(Vec::<u8>::new());
+        Int16(-2).write(&mut buf).unwrap();
+        buf.set_position(0);
+
+        let err = NullableBytes::read(&mut buf).unwrap_err();
+        assert_matches!(err, ReadError::Malformed(_));
+        assert_eq!(
+            err.to_string(),
+            "Invalid negative length for nullable bytes: -2"
+        );
+    }
 
     test_roundtrip!(TaggedFields, test_tagged_fields_roundtrip);
 
