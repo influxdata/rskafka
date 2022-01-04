@@ -93,6 +93,35 @@ where
     }
 }
 
+/// Represents an integer between `-2^63` and `2^63-1` inclusive.
+///
+/// The values are encoded using eight bytes in network byte order (big-endian).
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Clone, Copy)]
+#[cfg_attr(test, derive(proptest_derive::Arbitrary))]
+pub struct Int64(pub i64);
+
+impl<R> ReadType<R> for Int64
+where
+    R: Read,
+{
+    fn read(reader: &mut R) -> Result<Self, ReadError> {
+        let mut buf = [0u8; 8];
+        reader.read_exact(&mut buf)?;
+        Ok(Self(i64::from_be_bytes(buf)))
+    }
+}
+
+impl<W> WriteType<W> for Int64
+where
+    W: Write,
+{
+    fn write(&self, writer: &mut W) -> Result<(), WriteError> {
+        let buf = self.0.to_be_bytes();
+        writer.write_all(&buf)?;
+        Ok(())
+    }
+}
+
 /// The UNSIGNED_VARINT type describes an unsigned variable length integer.
 ///
 /// To serialize a number as a variable-length integer, you break it up into groups of 7 bits. The lowest 7 bits is
@@ -399,6 +428,8 @@ mod tests {
     test_roundtrip!(Int16, test_int16_roundtrip);
 
     test_roundtrip!(Int32, test_int32_roundtrip);
+
+    test_roundtrip!(Int64, test_int64_roundtrip);
 
     test_roundtrip!(UnsignedVarint, test_unsigned_varint_roundtrip);
 
