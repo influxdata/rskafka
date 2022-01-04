@@ -282,6 +282,40 @@ where
     }
 }
 
+/// Represents a sequence of characters.
+///
+/// First the length N is given as an INT16. Then N bytes follow which are the UTF-8 encoding of the character
+/// sequence. Length must not be negative.
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[cfg_attr(test, derive(proptest_derive::Arbitrary))]
+pub struct String_(pub String);
+
+impl<R> ReadType<R> for String_
+where
+    R: Read,
+{
+    fn read(reader: &mut R) -> Result<Self, ReadError> {
+        let len = Int16::read(reader)?;
+        let len = usize::try_from(len.0).map_err(|e| ReadError::Malformed(Box::new(e)))?;
+        let mut buf = vec![0; len];
+        reader.read_exact(&mut buf)?;
+        let s = String::from_utf8(buf).map_err(|e| ReadError::Malformed(Box::new(e)))?;
+        Ok(Self(s))
+    }
+}
+
+impl<W> WriteType<W> for String_
+where
+    W: Write,
+{
+    fn write(&self, writer: &mut W) -> Result<(), WriteError> {
+        let len = i16::try_from(self.0.len()).map_err(WriteError::Overflow)?;
+        Int16(len).write(writer)?;
+        writer.write_all(self.0.as_bytes())?;
+        Ok(())
+    }
+}
+
 /// Represents a string whose length is expressed as a variable-length integer rather than a fixed 2-byte length.
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[cfg_attr(test, derive(proptest_derive::Arbitrary))]
@@ -564,6 +598,8 @@ mod tests {
         assert_matches!(err, ReadError::Malformed(_));
         assert_eq!(err.to_string(), "Overflow while reading unsigned varint");
     }
+
+    test_roundtrip!(String_, test_string_roundtrip);
 
     test_roundtrip!(NullableString, test_nullable_string_roundtrip);
 
