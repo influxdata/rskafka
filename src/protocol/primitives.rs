@@ -8,6 +8,33 @@ use std::io::{Read, Write};
 
 use super::traits::{ReadError, ReadType, WriteError, WriteType};
 
+/// Represents an integer between `-2^7` and `2^7-1` inclusive.
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Clone, Copy)]
+#[cfg_attr(test, derive(proptest_derive::Arbitrary))]
+pub struct Int8(pub i8);
+
+impl<R> ReadType<R> for Int8
+where
+    R: Read,
+{
+    fn read(reader: &mut R) -> Result<Self, ReadError> {
+        let mut buf = [0u8; 1];
+        reader.read_exact(&mut buf)?;
+        Ok(Self(i8::from_be_bytes(buf)))
+    }
+}
+
+impl<W> WriteType<W> for Int8
+where
+    W: Write,
+{
+    fn write(&self, writer: &mut W) -> Result<(), WriteError> {
+        let buf = self.0.to_be_bytes();
+        writer.write_all(&buf)?;
+        Ok(())
+    }
+}
+
 /// Represents an integer between `-2^15` and `2^15-1` inclusive.
 ///
 /// The values are encoded using two bytes in network byte order (big-endian).
@@ -366,6 +393,8 @@ mod tests {
             }
         };
     }
+
+    test_roundtrip!(Int8, test_int8_roundtrip);
 
     test_roundtrip!(Int16, test_int16_roundtrip);
 
