@@ -154,7 +154,9 @@ pub trait RequestBody {
     /// From this range and the range that the broker reports, we will pick the highest version that both support.
     const API_VERSION_RANGE: (ApiVersion, ApiVersion);
 
-    /// The first version that uses tagged fields, if any.
+    /// The first version of the messages (not of the header) that uses tagged fields, if any.
+    ///
+    /// To determine the version just look for the `_tagged_fields` or `TAG_BUFFER` in the protocol description.
     ///
     /// This will be used to control which request and response header versions will be used.
     ///
