@@ -24,10 +24,7 @@ where
         reader.read_exact(&mut buf)?;
         match buf[0] {
             0 => Ok(Self(false)),
-            1 => Ok(Self(true)),
-            b => Err(ReadError::Malformed(
-                format!("Invalid value for bool: {}", b).into(),
-            )),
+            _ => Ok(Self(true)),
         }
     }
 }
@@ -567,6 +564,16 @@ mod tests {
     use assert_matches::assert_matches;
 
     test_roundtrip!(Boolean, test_bool_roundtrip);
+
+    #[test]
+    fn test_boolean_decode() {
+        assert!(!Boolean::read(&mut Cursor::new(vec![0])).unwrap().0);
+
+        // When reading a boolean value, any non-zero value is considered true.
+        for v in [1, 35, 255] {
+            assert!(Boolean::read(&mut Cursor::new(vec![v])).unwrap().0);
+        }
+    }
 
     test_roundtrip!(Int8, test_int8_roundtrip);
 

@@ -80,15 +80,22 @@ where
 
 #[derive(Debug)]
 pub struct MetadataResponse {
+    /// The duration in milliseconds for which the request was throttled due to
+    /// a quota violation, or zero if the request did not violate any quota.
+    ///
     /// Added in version 3
     pub throttle_time_ms: Option<Int32>,
 
     /// Each broker in the response
     pub brokers: Vec<MetadataResponseBroker>,
 
+    /// The cluster ID that responding broker belongs to.
+    ///
     /// Added in version 2
     pub cluster_id: Option<NullableString>,
 
+    /// The ID of the controller broker.
+    ///
     /// Added in version 1
     pub controller_id: Option<Int32>,
 
