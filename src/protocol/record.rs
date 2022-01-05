@@ -16,8 +16,8 @@ const CASTAGNOLI: Crc<u32> = Crc::<u32>::new(&CRC_32_ISO_HDLC);
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(test, derive(proptest_derive::Arbitrary))]
 pub struct RecordHeader {
-    key: String,
-    value: Vec<u8>,
+    pub key: String,
+    pub value: Vec<u8>,
 }
 
 impl<R> ReadType<R> for RecordHeader
@@ -68,11 +68,11 @@ where
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(test, derive(proptest_derive::Arbitrary))]
 pub struct Record {
-    timestamp_delta: i64,
-    offset_delta: i32,
-    key: Vec<u8>,
-    value: Vec<u8>,
-    headers: Vec<RecordHeader>,
+    pub timestamp_delta: i64,
+    pub offset_delta: i32,
+    pub key: Vec<u8>,
+    pub value: Vec<u8>,
+    pub headers: Vec<RecordHeader>,
 }
 
 impl<R> ReadType<R> for Record
@@ -251,18 +251,18 @@ pub enum RecordBatchTimestampType {
 #[derive(Debug, PartialEq, Eq)]
 #[cfg_attr(test, derive(proptest_derive::Arbitrary))]
 pub struct RecordBatch {
-    base_offset: i64,
-    partition_leader_epoch: i32,
-    last_offset_delta: i32,
-    first_timestamp: i64,
-    max_timestamp: i64,
-    producer_id: i64,
-    producer_epoch: i16,
-    base_sequence: i32,
-    records: ControlBatchOrRecords,
-    compression: RecordBatchCompression,
-    is_transactional: bool,
-    timestamp_type: RecordBatchTimestampType,
+    pub base_offset: i64,
+    pub partition_leader_epoch: i32,
+    pub last_offset_delta: i32,
+    pub first_timestamp: i64,
+    pub max_timestamp: i64,
+    pub producer_id: i64,
+    pub producer_epoch: i16,
+    pub base_sequence: i32,
+    pub records: ControlBatchOrRecords,
+    pub compression: RecordBatchCompression,
+    pub is_transactional: bool,
+    pub timestamp_type: RecordBatchTimestampType,
 }
 
 impl<R> ReadType<R> for RecordBatch
