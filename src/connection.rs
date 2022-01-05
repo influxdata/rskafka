@@ -2,15 +2,17 @@ use std::sync::Arc;
 
 use thiserror::Error;
 use tokio::io::BufStream;
-use tokio::net::TcpStream;
 use tokio::sync::Mutex;
 
 use crate::backoff::{Backoff, BackoffConfig};
+use crate::connection::transport::Transport;
 use crate::messenger::{Messenger, RequestError};
 use crate::protocol::messages::MetadataRequest;
 
+mod transport;
+
 /// A connection to a broker
-pub type BrokerConnection = Arc<Messenger<BufStream<TcpStream>>>;
+pub type BrokerConnection = Arc<Messenger<BufStream<transport::Transport>>>;
 
 #[derive(Debug, Error)]
 pub enum Error {
@@ -30,15 +32,21 @@ pub struct BrokerPool {
     current_broker: Mutex<Option<BrokerConnection>>,
     /// The backoff configuration on error
     backoff_config: BackoffConfig,
+    /// TLS configuration if any
+    tls_config: Option<Arc<rustls::ClientConfig>>,
 }
 
 impl BrokerPool {
-    pub fn new(bootstrap_brokers: Vec<String>) -> Self {
+    pub fn new(
+        bootstrap_brokers: Vec<String>,
+        tls_config: Option<Arc<rustls::ClientConfig>>,
+    ) -> Self {
         Self {
             bootstrap_brokers,
             discovered_brokers: vec![],
             current_broker: Mutex::new(None),
             backoff_config: Default::default(),
+            tls_config,
         }
     }
 
@@ -89,16 +97,15 @@ impl BrokerPool {
 
         loop {
             for broker in brokers {
-                let stream = match TcpStream::connect(&broker).await {
-                    Ok(stream) => stream,
+                let transport = match Transport::connect(broker, self.tls_config.clone()).await {
+                    Ok(transport) => transport,
                     Err(e) => {
                         println!("Error connecting to broker {}: {}", broker, e);
                         continue;
                     }
                 };
 
-                let stream = BufStream::new(stream);
-                let messenger = Arc::new(Messenger::new(stream));
+                let messenger = Arc::new(Messenger::new(BufStream::new(transport)));
                 messenger.sync_versions().await;
 
                 *current_broker = Some(Arc::clone(&messenger));

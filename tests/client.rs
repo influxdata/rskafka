@@ -1,4 +1,5 @@
 use minikafka::client::Client;
+use std::sync::Arc;
 
 /// Get the testing Kafka connection string or return current scope.
 ///
@@ -47,7 +48,46 @@ macro_rules! maybe_skip_kafka_integration {
 }
 
 #[tokio::test]
-async fn test_connect() {
+async fn test_plain() {
     let connection = maybe_skip_kafka_integration!();
-    Client::new(vec![connection]).await;
+    Client::new_plain(vec![connection]).await;
+}
+
+// Disabled as currently no TLS integration tests
+#[ignore]
+#[tokio::test]
+async fn test_tls() {
+    let mut root_store = rustls::RootCertStore::empty();
+
+    let file = std::fs::File::open("/tmp/cluster-ca.crt").unwrap();
+    let mut reader = std::io::BufReader::new(file);
+    match rustls_pemfile::read_one(&mut reader).unwrap().unwrap() {
+        rustls_pemfile::Item::X509Certificate(key) => {
+            root_store.add(&rustls::Certificate(key)).unwrap();
+        }
+        _ => unreachable!(),
+    }
+
+    let file = std::fs::File::open("/tmp/ca.crt").unwrap();
+    let mut reader = std::io::BufReader::new(file);
+    let producer_root = match rustls_pemfile::read_one(&mut reader).unwrap().unwrap() {
+        rustls_pemfile::Item::X509Certificate(key) => rustls::Certificate(key),
+        _ => unreachable!(),
+    };
+
+    let file = std::fs::File::open("/tmp/ca.key").unwrap();
+    let mut reader = std::io::BufReader::new(file);
+    let private_key = match rustls_pemfile::read_one(&mut reader).unwrap().unwrap() {
+        rustls_pemfile::Item::PKCS8Key(key) => rustls::PrivateKey(key),
+        _ => unreachable!(),
+    };
+
+    let config = rustls::ClientConfig::builder()
+        .with_safe_defaults()
+        .with_root_certificates(root_store)
+        .with_single_cert(vec![producer_root], private_key)
+        .unwrap();
+
+    let connection = maybe_skip_kafka_integration!();
+    Client::new_with_tls(vec![connection], Arc::new(config)).await;
 }
