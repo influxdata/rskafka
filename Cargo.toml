@@ -8,10 +8,12 @@ edition = "2021"
 [dependencies]
 async-trait = "0.1"
 crc = "2"
-pin-project-lite = "0.2"
+pin-project = "0.4"
 rand = "0.8"
 thiserror = "1.0"
-tokio = {version = "1.14", default-features = false, features = ["io-util", "net", "rt", "sync", "time"]}
+tokio = { version = "1.14", default-features = false, features = ["io-util", "net", "rt", "sync", "time"] }
+rustls = "0.20"
+tokio-rustls = "0.23"
 varint-rs = "2.2"
 
 [dev-dependencies]
@@ -19,4 +21,5 @@ assert_matches = "1.5"
 dotenv = "0.15"
 proptest = "1"
 proptest-derive = "0.3"
-tokio = {version = "1.14", features = ["macros"]}
+rustls-pemfile = "0.2"
+tokio = { version = "1.14", features = ["macros"] }
