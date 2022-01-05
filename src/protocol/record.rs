@@ -7,6 +7,12 @@ use super::{
     traits::{ReadError, ReadType, WriteError, WriteType},
 };
 
+/// CRC used to check payload data.
+///
+/// # References
+/// - <https://kafka.apache.org/documentation/#recordbatch>
+/// - <https://docs.oracle.com/javase/9/docs/api/java/util/zip/CRC32C.html>
+/// - <https://reveng.sourceforge.io/crc-catalogue/all.htm>
 const CASTAGNOLI: Crc<u32> = Crc::<u32>::new(&CRC_32_ISCSI);
 
 /// Record Header
@@ -289,6 +295,9 @@ where
         let base_offset = Int64::read(reader)?.0;
 
         // batchLength
+        //
+        // Contains all fields AFTER the length field (so excluding `baseOffset` and `batchLength`). To determine the
+        // size of the CRC-checked part we must substract all sized from this field to and including the CRC field.
         let len = Int32::read(reader)?;
         let len = usize::try_from(len.0).map_err(|e| ReadError::Malformed(Box::new(e)))?;
         let len = len
@@ -486,7 +495,10 @@ where
         Int64(self.base_offset).write(writer)?;
 
         // batchLength
-        // Apparently this is all the data AFTER the length field.
+        //
+        // Contains all fields AFTER the length field (so excluding `baseOffset` and `batchLength`, but including
+        // `partitionLeaderEpoch`, `magic`, and `crc).
+        //
         // See
         // https://github.com/kafka-rust/kafka-rust/blob/657202832806cda77d0a1801d618dc6c382b4d79/src/protocol/produce.rs#L224-L226
         let l = i32::try_from(
