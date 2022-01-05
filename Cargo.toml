@@ -20,7 +20,10 @@ varint-rs = "2.2"
 [dev-dependencies]
 assert_matches = "1.5"
 dotenv = "0.15"
+futures = "0.3"
 proptest = "1"
 proptest-derive = "0.3"
 rustls-pemfile = "0.2"
-tokio = { version = "1.14", features = ["macros"] }
+rdkafka = "0.28"
+tokio = {version = "1.14", features = ["macros"]}
+uuid = { version = "0.8", features = ["v4"] }
