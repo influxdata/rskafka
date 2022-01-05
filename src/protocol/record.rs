@@ -1,13 +1,13 @@
 use std::io::{Cursor, Read, Write};
 
-use crc::{Crc, CRC_32_ISO_HDLC};
+use crc::{Crc, CRC_32_ISCSI};
 
 use super::{
     primitives::{Array, Int16, Int32, Int64, Int8, Varint, Varlong},
     traits::{ReadError, ReadType, WriteError, WriteType},
 };
 
-const CASTAGNOLI: Crc<u32> = Crc::<u32>::new(&CRC_32_ISO_HDLC);
+const CASTAGNOLI: Crc<u32> = Crc::<u32>::new(&CRC_32_ISCSI);
 
 /// Record Header
 ///
@@ -81,7 +81,9 @@ where
 {
     fn read(reader: &mut R) -> Result<Self, ReadError> {
         // length
-        Varint::read(reader)?;
+        let len = Varint::read(reader)?;
+        let len = usize::try_from(len.0).map_err(|e| ReadError::Malformed(Box::new(e)))?;
+        let reader = &mut reader.take(len as u64);
 
         // attributes
         Int8::read(reader)?;
@@ -105,7 +107,14 @@ where
         reader.read_exact(&mut value)?;
 
         // headers
-        let headers = Array::<RecordHeader>::read(reader)?.0.unwrap_or_default();
+        // Note: This is NOT a normal array but uses a Varint instead.
+        let n_headers = Varint::read(reader)?;
+        let n_headers =
+            usize::try_from(n_headers.0).map_err(|e| ReadError::Malformed(Box::new(e)))?;
+        let mut headers = Vec::with_capacity(n_headers);
+        for _ in 0..n_headers {
+            headers.push(RecordHeader::read(reader)?);
+        }
 
         Ok(Self {
             timestamp_delta,
@@ -147,7 +156,13 @@ where
         data.write_all(&self.value)?;
 
         // headers
-        Array(Some(self.headers.clone())).write(&mut data)?;
+        // Note: This is NOT a normal array but uses a Varint instead.
+        let l =
+            i32::try_from(self.headers.len()).map_err(|e| WriteError::Malformed(Box::new(e)))?;
+        Varint(l).write(&mut data)?;
+        for header in &self.headers {
+            header.write(&mut data)?;
+        }
 
         // ============================================================================================
         // ============================================================================================
@@ -276,6 +291,15 @@ where
         // batchLength
         let len = Int32::read(reader)?;
         let len = usize::try_from(len.0).map_err(|e| ReadError::Malformed(Box::new(e)))?;
+        let len = len
+            .checked_sub(
+                4 // partitionLeaderEpoch
+            + 1 // magic
+            + 4, // crc
+            )
+            .ok_or_else(|| {
+                ReadError::Malformed(format!("Record batch len too small: {}", len).into())
+            })?;
 
         // partitionLeaderEpoch
         let partition_leader_epoch = Int32::read(reader)?.0;
@@ -298,7 +322,7 @@ where
         let actual_crc = CASTAGNOLI.checksum(&data);
         if crc != actual_crc {
             return Err(ReadError::Malformed(
-                format!("CRC error, got {}, expected {}", actual_crc, crc).into(),
+                format!("CRC error, got 0x{:x}, expected 0x{:x}", actual_crc, crc).into(),
             ));
         }
 
@@ -462,10 +486,16 @@ where
         Int64(self.base_offset).write(writer)?;
 
         // batchLength
-        // Apparently this is all the data AFTER the CRC calculation.
+        // Apparently this is all the data AFTER the length field.
         // See
         // https://github.com/kafka-rust/kafka-rust/blob/657202832806cda77d0a1801d618dc6c382b4d79/src/protocol/produce.rs#L224-L226
-        let l = i32::try_from(data.len()).map_err(|e| WriteError::Malformed(Box::new(e)))?;
+        let l = i32::try_from(
+            data.len()
+            + 4 // partitionLeaderEpoch
+            + 1 // magic
+            + 4, // crc
+        )
+        .map_err(|e| WriteError::Malformed(Box::new(e)))?;
         Int32(l).write(writer)?;
 
         // partitionLeaderEpoch
@@ -475,7 +505,9 @@ where
         Int8(2).write(writer)?;
 
         // crc
-        // See https://github.com/kafka-rust/kafka-rust/blob/a551b6231a7adc9b715552b635a69ac2856ec8a1/src/protocol/mod.rs#L161-L163
+        // See
+        // https://github.com/kafka-rust/kafka-rust/blob/a551b6231a7adc9b715552b635a69ac2856ec8a1/src/protocol/mod.rs#L161-L163
+        // WARNING: the range in the code linked above is correct but the polynomial is wrong!
         let crc = CASTAGNOLI.checksum(&data);
         let crc = i32::from_be_bytes(crc.to_be_bytes());
         Int32(crc).write(writer)?;
@@ -528,4 +560,48 @@ mod tests {
     }
 
     test_roundtrip!(RecordBatch, test_record_batch_roundtrip);
+
+    #[test]
+    fn test_decode_fixture() {
+        // This data was obtained by watching rdkafka.
+        let data = [
+            b"\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x4b\x00\x00\x00\x00".to_vec(),
+            b"\x02\x27\x24\xfe\xcd\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x61".to_vec(),
+            b"\xd5\x9b\x77\x00\x00\x00\x00\x61\xd5\x9b\x77\xff\xff\xff\xff\xff".to_vec(),
+            b"\xff\xff\xff\xff\xff\xff\xff\xff\xff\x00\x00\x00\x01\x32\x00\x00".to_vec(),
+            b"\x00\x00\x16\x68\x65\x6c\x6c\x6f\x20\x6b\x61\x66\x6b\x61\x02\x06".to_vec(),
+            b"\x66\x6f\x6f\x06\x62\x61\x72".to_vec(),
+        ]
+        .concat();
+
+        let actual = RecordBatch::read(&mut Cursor::new(data.clone())).unwrap();
+        let expected = RecordBatch {
+            base_offset: 0,
+            partition_leader_epoch: 0,
+            last_offset_delta: 0,
+            first_timestamp: 1641388919,
+            max_timestamp: 1641388919,
+            producer_id: -1,
+            producer_epoch: -1,
+            base_sequence: -1,
+            records: ControlBatchOrRecords::Records(vec![Record {
+                timestamp_delta: 0,
+                offset_delta: 0,
+                key: vec![],
+                value: b"hello kafka".to_vec(),
+                headers: vec![RecordHeader {
+                    key: "foo".to_owned(),
+                    value: b"bar".to_vec(),
+                }],
+            }]),
+            compression: RecordBatchCompression::NoCompression,
+            is_transactional: false,
+            timestamp_type: RecordBatchTimestampType::CreateTime,
+        };
+        assert_eq!(actual, expected);
+
+        let mut data2 = vec![];
+        actual.write(&mut data2).unwrap();
+        assert_eq!(data, data2);
+    }
 }
