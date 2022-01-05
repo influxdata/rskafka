@@ -438,7 +438,7 @@ where
     R: Read,
 {
     fn read(reader: &mut R) -> Result<Self, ReadError> {
-        let len = Int16::read(reader)?;
+        let len = Int32::read(reader)?;
         match len.0 {
             l if l < -1 => Err(ReadError::Malformed(
                 format!("Invalid negative length for nullable bytes: {}", l).into(),
@@ -460,12 +460,12 @@ where
     fn write(&self, writer: &mut W) -> Result<(), WriteError> {
         match &self.0 {
             Some(s) => {
-                let l = i16::try_from(s.len()).map_err(|e| WriteError::Malformed(Box::new(e)))?;
-                Int16(l).write(writer)?;
+                let l = i32::try_from(s.len()).map_err(|e| WriteError::Malformed(Box::new(e)))?;
+                Int32(l).write(writer)?;
                 writer.write_all(s)?;
                 Ok(())
             }
-            None => Int16(-1).write(writer),
+            None => Int32(-1).write(writer),
         }
     }
 }
@@ -660,7 +660,7 @@ mod tests {
     #[test]
     fn test_nullable_bytes_read_negative_length() {
         let mut buf = Cursor::new(Vec::<u8>::new());
-        Int16(-2).write(&mut buf).unwrap();
+        Int32(-2).write(&mut buf).unwrap();
         buf.set_position(0);
 
         let err = NullableBytes::read(&mut buf).unwrap_err();
