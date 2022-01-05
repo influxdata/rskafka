@@ -31,6 +31,8 @@ impl RequestBody for MetadataRequest {
     /// At the time of writing this is the same subset supported by rdkafka
     const API_VERSION_RANGE: (ApiVersion, ApiVersion) =
         (ApiVersion(Int16(0)), ApiVersion(Int16(4)));
+
+    const FIRST_TAGGED_FIELD_VERSION: ApiVersion = ApiVersion(Int16(9));
 }
 
 impl<W> WriteVersionedType<W> for MetadataRequest
@@ -51,8 +53,12 @@ where
         }
 
         write_versioned_array(writer, version, Some(&self.topics))?;
-        if let Some(b) = self.allow_auto_topic_creation {
-            b.write(writer)?
+        if v >= 4 {
+            match self.allow_auto_topic_creation {
+                // The default behaviour is to allow topic creation
+                None => Boolean(true).write(writer)?,
+                Some(b) => b.write(writer)?,
+            }
         }
         Ok(())
     }

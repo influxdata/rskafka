@@ -139,10 +139,29 @@ where
     }
 }
 
+/// Specifies a request body.
 pub trait RequestBody {
+    /// The response type that will follow when issuing this request.
     type ResponseBody;
+
+    /// Kafka API key.
+    ///
+    /// This will be added to the request header.
     const API_KEY: ApiKey;
+
+    /// Supported version range.
+    ///
+    /// From this range and the range that the broker reports, we will pick the highest version that both support.
     const API_VERSION_RANGE: (ApiVersion, ApiVersion);
+
+    /// The first version of the messages (not of the header) that uses tagged fields, if any.
+    ///
+    /// To determine the version just look for the `_tagged_fields` or `TAG_BUFFER` in the protocol description.
+    ///
+    /// This will be used to control which request and response header versions will be used.
+    ///
+    /// It's OK to specify a version here that is larger then the highest supported version.
+    const FIRST_TAGGED_FIELD_VERSION: ApiVersion;
 }
 
 pub struct ApiVersionsRequest {
@@ -183,6 +202,7 @@ impl RequestBody for ApiVersionsRequest {
     const API_KEY: ApiKey = ApiKey::ApiVersions;
     const API_VERSION_RANGE: (ApiVersion, ApiVersion) =
         (ApiVersion(Int16(0)), ApiVersion(Int16(3)));
+    const FIRST_TAGGED_FIELD_VERSION: ApiVersion = ApiVersion(Int16(3));
 }
 
 #[derive(Debug)]
