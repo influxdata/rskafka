@@ -15,7 +15,9 @@ use super::{
     traits::{ReadError, ReadType, WriteError, WriteType},
 };
 
+mod create_topic;
 mod metadata;
+pub use create_topic::*;
 pub use metadata::*;
 
 #[derive(Error, Debug)]

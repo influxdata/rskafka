@@ -1,4 +1,5 @@
 use minikafka::client::Client;
+use std::str::FromStr;
 use std::sync::Arc;
 
 /// Get the testing Kafka connection string or return current scope.
@@ -50,7 +51,37 @@ macro_rules! maybe_skip_kafka_integration {
 #[tokio::test]
 async fn test_plain() {
     let connection = maybe_skip_kafka_integration!();
-    Client::new_plain(vec![connection]).await;
+    Client::new_plain(vec![connection]).await.unwrap();
+}
+
+#[tokio::test]
+async fn test_topic_crud() {
+    let connection = maybe_skip_kafka_integration!();
+    let client = Client::new_plain(vec![connection]).await.unwrap();
+    let topics = client.list_topics().await.unwrap();
+
+    let prefix = "test_topic_crud_";
+
+    let mut max_id = 0;
+    for topic in topics {
+        if let Some(maybe_int) = topic.strip_prefix(prefix) {
+            if let Ok(i) = usize::from_str(maybe_int) {
+                max_id = max_id.max(i);
+            }
+        }
+    }
+
+    let new_topic = format!("{}{}", prefix, max_id + 1);
+    client.create_topic(&new_topic, 1, 1).await.unwrap();
+
+    let topics = client.list_topics().await.unwrap();
+
+    assert!(
+        topics.contains(&new_topic),
+        "topic {} not found in {:?}",
+        new_topic,
+        topics
+    )
 }
 
 // Disabled as currently no TLS integration tests
@@ -89,5 +120,7 @@ async fn test_tls() {
         .unwrap();
 
     let connection = maybe_skip_kafka_integration!();
-    Client::new_with_tls(vec![connection], Arc::new(config)).await;
+    Client::new_with_tls(vec![connection], Arc::new(config))
+        .await
+        .unwrap();
 }
