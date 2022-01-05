@@ -4,11 +4,14 @@
 //! - <https://kafka.apache.org/protocol#protocol_types>
 //! - <https://cwiki.apache.org/confluence/display/KAFKA/KIP-482%3A+The+Kafka+Protocol+should+Support+Optional+Tagged+Fields#KIP482:TheKafkaProtocolshouldSupportOptionalTaggedFields-UnsignedVarints>
 
-use std::io::{Read, Write};
+use std::io::{Cursor, Read, Write};
 
 use varint_rs::{VarintReader, VarintWriter};
 
-use super::traits::{ReadError, ReadType, WriteError, WriteType};
+use super::{
+    record::RecordBatch,
+    traits::{ReadError, ReadType, WriteError, WriteType},
+};
 
 /// Represents a boolean
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Clone, Copy)]
@@ -561,6 +564,34 @@ where
     }
 }
 
+/// Represents a sequence of Kafka records as NULLABLE_BYTES.
+#[derive(Debug, PartialEq, Eq)]
+#[cfg_attr(test, derive(proptest_derive::Arbitrary))]
+pub struct Records(pub RecordBatch);
+
+impl<R> ReadType<R> for Records
+where
+    R: Read,
+{
+    fn read(reader: &mut R) -> Result<Self, ReadError> {
+        let buf = NullableBytes::read(reader)?.0.unwrap_or_default();
+        let record_batch = RecordBatch::read(&mut Cursor::new(buf))?;
+        Ok(Self(record_batch))
+    }
+}
+
+impl<W> WriteType<W> for Records
+where
+    W: Write,
+{
+    fn write(&self, writer: &mut W) -> Result<(), WriteError> {
+        let mut buf = vec![];
+        self.0.write(&mut buf)?;
+        NullableBytes(Some(buf)).write(writer)?;
+        Ok(())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::io::Cursor;
@@ -674,4 +705,6 @@ mod tests {
     test_roundtrip!(TaggedFields, test_tagged_fields_roundtrip);
 
     test_roundtrip!(Array<Int32>, test_array_roundtrip);
+
+    test_roundtrip!(Records, test_records_roundtrip);
 }
