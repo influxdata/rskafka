@@ -51,8 +51,12 @@ where
         }
 
         write_versioned_array(writer, version, Some(&self.topics))?;
-        if let Some(b) = self.allow_auto_topic_creation {
-            b.write(writer)?
+        if v >= 4 {
+            match self.allow_auto_topic_creation {
+                // The default behaviour is to allow topic creation
+                None => Boolean(true).write(writer)?,
+                Some(b) => b.write(writer)?,
+            }
         }
         Ok(())
     }
