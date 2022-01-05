@@ -13,7 +13,7 @@ use super::{
     api_key::ApiKey,
     api_version::ApiVersion,
     error::Error as ApiError,
-    primitives::{Array, CompactString, Int16, Int32, NullableString},
+    primitives::{CompactString, Int16, Int32, NullableString},
     traits::{ReadError, ReadType, WriteError, WriteType},
 };
 
@@ -31,25 +31,6 @@ where
     R: Read,
 {
     fn read_versioned(reader: &mut R, version: ApiVersion) -> Result<Self, ReadVersionedError>;
-}
-
-struct ReadVersionedAdapter<T, const V: i16>(T);
-
-impl<T, W, const V: i16> ReadType<W> for ReadVersionedAdapter<T, V>
-where
-    T: ReadVersionedType<W>,
-    W: Read,
-{
-    fn read(writer: &mut W) -> Result<Self, ReadError> {
-        Ok(Self(
-            T::read_versioned(writer, ApiVersion(Int16(V))).map_err(|e| match e {
-                ReadVersionedError::InvalidVersion { version } => {
-                    panic!("Invalid version: {:?}", version)
-                }
-                ReadVersionedError::ReadError(e) => e,
-            })?,
-        ))
-    }
 }
 
 #[derive(Error, Debug)]
@@ -70,25 +51,6 @@ where
         writer: &mut W,
         version: ApiVersion,
     ) -> Result<(), WriteVersionedError>;
-}
-
-struct WriteVersionedAdapter<T, const V: i16>(T);
-
-impl<T, W, const V: i16> WriteType<W> for WriteVersionedAdapter<T, V>
-where
-    T: WriteVersionedType<W>,
-    W: Write,
-{
-    fn write(&self, writer: &mut W) -> Result<(), WriteError> {
-        self.0
-            .write_versioned(writer, ApiVersion(Int16(V)))
-            .map_err(|e| match e {
-                WriteVersionedError::InvalidVersion { version } => {
-                    panic!("Invalid version: {:?}", version)
-                }
-                WriteVersionedError::WriteError(e) => e,
-            })
-    }
 }
 
 #[derive(Debug)]
@@ -231,7 +193,9 @@ pub struct ApiVersionsResponseApiKey {
     pub max_version: ApiVersion,
 
     /// The tagged fields.
-    pub tagged_fields: TaggedFields,
+    ///
+    /// Added in version 3
+    pub tagged_fields: Option<TaggedFields>,
 }
 
 impl<R> ReadVersionedType<R> for ApiVersionsResponseApiKey
@@ -244,13 +208,13 @@ where
                 api_key: Int16::read(reader)?.into(),
                 min_version: ApiVersion(Int16::read(reader)?),
                 max_version: ApiVersion(Int16::read(reader)?),
-                tagged_fields: TaggedFields::default(),
+                tagged_fields: None,
             }),
             3 => Ok(Self {
                 api_key: Int16::read(reader)?.into(),
                 min_version: ApiVersion(Int16::read(reader)?),
                 max_version: ApiVersion(Int16::read(reader)?),
-                tagged_fields: TaggedFields::read(reader)?,
+                tagged_fields: Some(TaggedFields::read(reader)?),
             }),
             _ => Err(ReadVersionedError::InvalidVersion { version }),
         }
@@ -266,10 +230,14 @@ pub struct ApiVersionsResponse {
     pub api_keys: Vec<ApiVersionsResponseApiKey>,
 
     /// The duration in milliseconds for which the request was throttled due to a quota violation, or zero if the request did not violate any quota.
-    pub throttle_time_ms: Int32,
+    ///
+    /// Added in version 1
+    pub throttle_time_ms: Option<Int32>,
 
     /// The tagged fields.
-    pub tagged_fields: TaggedFields,
+    ///
+    /// Added in version 3
+    pub tagged_fields: Option<TaggedFields>,
 }
 
 impl<R> ReadVersionedType<R> for ApiVersionsResponse
@@ -277,60 +245,120 @@ where
     R: Read,
 {
     fn read_versioned(reader: &mut R, version: ApiVersion) -> Result<Self, ReadVersionedError> {
-        match version.0 .0 {
-            0 => Ok(Self {
-                error_code: ApiError::new(Int16::read(reader)?),
-                api_keys: Array::<ReadVersionedAdapter<ApiVersionsResponseApiKey, 0>>::read(
-                    reader,
-                )?
-                .0
-                .unwrap_or_default()
-                .into_iter()
-                .map(|x| x.0)
-                .collect(),
-                throttle_time_ms: Int32(0),
-                tagged_fields: TaggedFields::default(),
-            }),
-            1 => Ok(Self {
-                error_code: ApiError::new(Int16::read(reader)?),
-                api_keys: Array::<ReadVersionedAdapter<ApiVersionsResponseApiKey, 1>>::read(
-                    reader,
-                )?
-                .0
-                .unwrap_or_default()
-                .into_iter()
-                .map(|x| x.0)
-                .collect(),
-                throttle_time_ms: Int32::read(reader)?,
-                tagged_fields: TaggedFields::default(),
-            }),
-            2 => Ok(Self {
-                error_code: ApiError::new(Int16::read(reader)?),
-                api_keys: Array::<ReadVersionedAdapter<ApiVersionsResponseApiKey, 2>>::read(
-                    reader,
-                )?
-                .0
-                .unwrap_or_default()
-                .into_iter()
-                .map(|x| x.0)
-                .collect(),
-                throttle_time_ms: Int32::read(reader)?,
-                tagged_fields: TaggedFields::default(),
-            }),
-            3 => Ok(Self {
-                error_code: ApiError::new(Int16::read(reader)?),
-                api_keys: Array::<ReadVersionedAdapter<ApiVersionsResponseApiKey, 3>>::read(
-                    reader,
-                )?
-                .0
-                .unwrap_or_default()
-                .into_iter()
-                .map(|x| x.0)
-                .collect(),
-                throttle_time_ms: Int32::read(reader)?,
-                tagged_fields: TaggedFields::read(reader)?,
-            }),
-            _ => Err(ReadVersionedError::InvalidVersion { version }),
+        let v = version.0 .0;
+        if v > 3 {
+            return Err(ReadVersionedError::InvalidVersion { version });
         }
+
+        let error_code = ApiError::new(Int16::read(reader)?);
+        let api_keys = read_versioned_array(reader, version)?.unwrap_or_default();
+        let throttle_time_ms = (v > 0).then(|| Int32::read(reader)).transpose()?;
+        let tagged_fields = (v >= 3).then(|| TaggedFields::read(reader)).transpose()?;
+
+        Ok(Self {
+            error_code,
+            api_keys,
+            throttle_time_ms,
+            tagged_fields,
+        })
+    }
+}
+
+fn read_versioned_array<R: Read, T: ReadVersionedType<R>>(
+    reader: &mut R,
+    version: ApiVersion,
+) -> Result<Option<Vec<T>>, ReadVersionedError> {
+    let len = Int32::read(reader)?.0;
+    match len {
+        -1 => Ok(None),
+        l if l < -1 => Err(ReadVersionedError::ReadError(ReadError::Malformed(
+            format!("Invalid negative length for array: {}", l).into(),
+        ))),
+        _ => {
+            let len = len as usize;
+            Ok(Some(
+                (0..len)
+                    .map(|_| T::read_versioned(reader, version))
+                    .collect::<Result<_, _>>()?,
+            ))
+        }
+    }
+}
+
+#[allow(dead_code)]
+fn write_versioned_array<W: Write, T: WriteVersionedType<W>>(
+    writer: &mut W,
+    version: ApiVersion,
+    data: Option<&[T]>,
+) -> Result<(), WriteVersionedError> {
+    match data {
+        None => Ok(Int32(-1).write(writer)?),
+        Some(inner) => {
+            let len = i32::try_from(inner.len()).map_err(WriteError::from)?;
+            Int32(len).write(writer)?;
+
+            for element in inner {
+                element.write_versioned(writer, version)?
+            }
+
+            Ok(())
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[derive(Debug, Copy, Clone, PartialEq)]
+    struct VersionTest {
+        version: ApiVersion,
+    }
+
+    impl<W: Write> WriteVersionedType<W> for VersionTest {
+        fn write_versioned(
+            &self,
+            _writer: &mut W,
+            version: ApiVersion,
+        ) -> Result<(), WriteVersionedError> {
+            assert_eq!(version, self.version);
+            Ok(())
+        }
+    }
+
+    impl<R: Read> ReadVersionedType<R> for VersionTest {
+        fn read_versioned(
+            _reader: &mut R,
+            version: ApiVersion,
+        ) -> Result<Self, ReadVersionedError> {
+            Ok(Self { version })
+        }
+    }
+
+    #[test]
+    fn test_read_write_versioned() {
+        for len in [0, 6] {
+            for i in 0..3 {
+                let version = ApiVersion(Int16(i));
+                let test = VersionTest { version };
+                let input = vec![test; len];
+
+                let mut buffer = vec![];
+                write_versioned_array(&mut buffer, version, Some(&input)).unwrap();
+
+                let mut cursor = std::io::Cursor::new(buffer);
+                let output = read_versioned_array(&mut cursor, version).unwrap().unwrap();
+
+                assert_eq!(input, output);
+            }
+        }
+
+        let version = ApiVersion(Int16(0));
+        let mut buffer = vec![];
+        write_versioned_array::<_, VersionTest>(&mut buffer, version, None).unwrap();
+        let mut cursor = std::io::Cursor::new(buffer);
+        assert!(read_versioned_array::<_, VersionTest>(&mut cursor, version)
+            .unwrap()
+            .is_none())
     }
 }
