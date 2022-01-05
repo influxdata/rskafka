@@ -17,7 +17,6 @@ use tokio::{
     task::JoinHandle,
 };
 
-use crate::protocol::messages::ApiVersionsRequest;
 use crate::protocol::primitives::CompactString;
 use crate::protocol::{
     api_key::ApiKey,
@@ -29,11 +28,17 @@ use crate::protocol::{
     },
     primitives::{Int16, Int32, NullableString, TaggedFields},
 };
+use crate::protocol::{messages::ApiVersionsRequest, traits::ReadType};
 
 struct Response {
     #[allow(dead_code)]
     header: ResponseHeader,
     data: Cursor<Vec<u8>>,
+}
+
+struct ActiveRequest {
+    channel: Sender<Response>,
+    use_tagged_fields: bool,
 }
 
 /// A connection to a single broker
@@ -44,7 +49,7 @@ pub struct Messenger<RW> {
     stream_write: Mutex<WriteHalf<RW>>,
     correlation_id: AtomicI32,
     version_ranges: RwLock<HashMap<ApiKey, (ApiVersion, ApiVersion)>>,
-    channels: Arc<Mutex<HashMap<i32, Sender<Response>>>>,
+    active_requests: Arc<Mutex<HashMap<i32, ActiveRequest>>>,
     join_handle: JoinHandle<()>,
 }
 
@@ -72,29 +77,41 @@ where
 {
     pub fn new(stream: RW) -> Self {
         let (stream_read, stream_write) = tokio::io::split(stream);
-        let channels: Arc<Mutex<HashMap<i32, Sender<Response>>>> =
+        let active_requests: Arc<Mutex<HashMap<i32, ActiveRequest>>> =
             Arc::new(Mutex::new(HashMap::new()));
-        let channels_captured = Arc::clone(&channels);
+        let active_requests_captured = Arc::clone(&active_requests);
 
         let join_handle = tokio::spawn(async move {
             let mut stream_read = stream_read;
 
             loop {
+                // TODO: don't unwrap and silently kill the background worker
                 let msg = stream_read.read_message(1024 * 1024).await.unwrap();
                 let mut cursor = Cursor::new(msg);
-                let header =
+
+                // read header as version 0 (w/o tagged fields) first since this is a strict prefix or the more advanced
+                // header version
+                let mut header =
                     ResponseHeader::read_versioned(&mut cursor, ApiVersion(Int16(0))).unwrap();
-                if let Some(tx) = channels_captured
+
+                if let Some(active_request) = active_requests_captured
                     .lock()
                     .await
                     .remove(&header.correlation_id.0)
                 {
+                    // optionally read tagged fields from the header as well
+                    if active_request.use_tagged_fields {
+                        header.tagged_fields = TaggedFields::read(&mut cursor).unwrap();
+                    }
+
                     // we don't care if the other side is gone
-                    tx.send(Response {
-                        header,
-                        data: cursor,
-                    })
-                    .ok();
+                    active_request
+                        .channel
+                        .send(Response {
+                            header,
+                            data: cursor,
+                        })
+                        .ok();
                 }
             }
         });
@@ -102,7 +119,7 @@ where
             stream_write: Mutex::new(stream_write),
             correlation_id: AtomicI32::new(0),
             version_ranges: RwLock::new(HashMap::new()),
-            channels,
+            active_requests,
             join_handle,
         }
     }
@@ -126,6 +143,14 @@ where
             .ok_or(RequestError::NoVersionMatch {
                 api_key: R::API_KEY,
             })?;
+
+        // determine if our request and response headers shall contain tagged fields. This system is borrowed from
+        // rdkafka ("flexver"), see:
+        // - https://github.com/edenhill/librdkafka/blob/2b76b65212e5efda213961d5f84e565038036270/src/rdkafka_request.c#L973
+        // - https://github.com/edenhill/librdkafka/blob/2b76b65212e5efda213961d5f84e565038036270/src/rdkafka_buf.c#L167-L174
+        let use_tagged_fields = body_api_version >= R::FIRST_TAGGED_FIELD_VERSION;
+
+        // Correlcation ID so that we can de-multiplex the responses.
         let correlation_id = self.correlation_id.fetch_add(1, Ordering::SeqCst);
 
         let header = RequestHeader {
@@ -135,15 +160,26 @@ where
             client_id: NullableString(None),
             tagged_fields: TaggedFields::default(),
         };
+        let header_version = if use_tagged_fields {
+            ApiVersion(Int16(2))
+        } else {
+            ApiVersion(Int16(1))
+        };
 
         let mut buf = Vec::new();
         header
-            .write_versioned(&mut buf, ApiVersion(Int16(2)))
-            .unwrap();
+            .write_versioned(&mut buf, header_version)
+            .expect("Writing header to buffer should always work");
         msg.write_versioned(&mut buf, body_api_version)?;
 
         let (tx, rx) = channel();
-        self.channels.lock().await.insert(correlation_id, tx);
+        self.active_requests.lock().await.insert(
+            correlation_id,
+            ActiveRequest {
+                channel: tx,
+                use_tagged_fields,
+            },
+        );
 
         {
             let mut stream_write = self.stream_write.lock().await;
@@ -151,7 +187,7 @@ where
             stream_write.flush().await?;
         }
 
-        let mut response = rx.await.unwrap();
+        let mut response = rx.await.expect("Who closed this channel?!");
         let body = R::ResponseBody::read_versioned(&mut response.data, body_api_version)?;
 
         Ok(body)
@@ -190,8 +226,10 @@ where
                 self.set_version_ranges(ranges);
                 return;
             }
+            // TODO: don't ignore all errors (e.g. IO errors)
         }
 
+        // TODO: don't panic
         panic!("cannot sync")
     }
 }
