@@ -327,10 +327,18 @@ where
 {
     fn read(reader: &mut R) -> Result<Self, ReadError> {
         let len = UnsignedVarint::read(reader)?;
-        let mut buf = vec![0; len.0 as usize];
-        reader.read_exact(&mut buf)?;
-        let s = String::from_utf8(buf).map_err(|e| ReadError::Malformed(Box::new(e)))?;
-        Ok(Self(s))
+        match len.0 {
+            0 => Err(ReadError::Malformed(
+                "CompactString must have non-zero length".into(),
+            )),
+            len => {
+                let len = len - 1;
+                let mut buf = vec![0; len as usize];
+                reader.read_exact(&mut buf)?;
+                let s = String::from_utf8(buf).map_err(|e| ReadError::Malformed(Box::new(e)))?;
+                Ok(Self(s))
+            }
+        }
     }
 }
 
@@ -339,7 +347,7 @@ where
     W: Write,
 {
     fn write(&self, writer: &mut W) -> Result<(), WriteError> {
-        UnsignedVarint(self.0.len() as u64).write(writer)?;
+        UnsignedVarint(self.0.len() as u64 + 1).write(writer)?;
         writer.write_all(self.0.as_bytes())?;
         Ok(())
     }
