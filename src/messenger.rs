@@ -150,7 +150,7 @@ where
         // - https://github.com/edenhill/librdkafka/blob/2b76b65212e5efda213961d5f84e565038036270/src/rdkafka_buf.c#L167-L174
         let use_tagged_fields = body_api_version >= R::FIRST_TAGGED_FIELD_VERSION;
 
-        // Correlcation ID so that we can de-multiplex the responses.
+        // Correlation ID so that we can de-multiplex the responses.
         let correlation_id = self.correlation_id.fetch_add(1, Ordering::SeqCst);
 
         let header = RequestHeader {
