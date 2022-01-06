@@ -104,7 +104,7 @@ impl PartitionClient {
         };
 
         // build request
-        let request = ProduceRequest {
+        let request = &ProduceRequest {
             transactional_id: crate::protocol::primitives::NullableString(None),
             acks: Int16(-1),
             timeout_ms: Int32(30_000),
@@ -114,44 +114,46 @@ impl PartitionClient {
             }],
         };
 
-        let broker = self.get_cached_broker().await?;
-        let response = broker.request(request).await?;
+        self.maybe_retry("produce", || async move {
+            let broker = self.get_cached_broker().await?;
+            let response = broker.request(&request).await?;
 
-        if response.responses.len() != 1 {
-            return Err(Error::InvalidResponse(format!(
-                "Expected one topic in response got: {}",
-                response.responses.len()
-            )));
-        }
+            if response.responses.len() != 1 {
+                return Err(Error::InvalidResponse(format!(
+                    "Expected one topic in response got: {}",
+                    response.responses.len()
+                )));
+            }
 
-        let response = response.responses.into_iter().next().unwrap();
-        if response.name.0 != self.topic {
-            return Err(Error::InvalidResponse(format!(
-                "Expected write for topic \"{}\" got \"{}\"",
-                self.topic, response.name.0,
-            )));
-        }
+            let response = response.responses.into_iter().next().unwrap();
+            if response.name.0 != self.topic {
+                return Err(Error::InvalidResponse(format!(
+                    "Expected write for topic \"{}\" got \"{}\"",
+                    self.topic, response.name.0,
+                )));
+            }
 
-        if response.partition_responses.len() != 1 {
-            return Err(Error::InvalidResponse(format!(
-                "Expected one partition got: {}",
-                response.partition_responses.len()
-            )));
-        }
+            if response.partition_responses.len() != 1 {
+                return Err(Error::InvalidResponse(format!(
+                    "Expected one partition got: {}",
+                    response.partition_responses.len()
+                )));
+            }
 
-        let response = response.partition_responses.into_iter().next().unwrap();
-        if response.index.0 != self.partition {
-            return Err(Error::InvalidResponse(format!(
-                "Expected partition {} for topic \"{}\" got {}",
-                self.partition, self.topic, response.index.0,
-            )));
-        }
+            let response = response.partition_responses.into_iter().next().unwrap();
+            if response.index.0 != self.partition {
+                return Err(Error::InvalidResponse(format!(
+                    "Expected partition {} for topic \"{}\" got {}",
+                    self.partition, self.topic, response.index.0,
+                )));
+            }
 
-        if let Some(error) = response.error {
-            return Err(Error::ServerError(error, Default::default()));
-        }
-
-        Ok(response.base_offset.0)
+            match response.error {
+                Some(e) => Err(Error::ServerError(e, Default::default())),
+                None => Ok(response.base_offset.0),
+            }
+        })
+        .await
     }
 
     /// Fetch `bytes` bytes of record data starting at sequence number `offset`
