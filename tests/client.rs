@@ -1,6 +1,8 @@
-use minikafka::client::Client;
-use std::str::FromStr;
-use std::sync::Arc;
+use minikafka::{client::Client, record::Record};
+use std::{collections::BTreeMap, str::FromStr, sync::Arc};
+use time::OffsetDateTime;
+
+mod rdkafka_helper;
 
 /// Get the testing Kafka connection string or return current scope.
 ///
@@ -46,6 +48,19 @@ macro_rules! maybe_skip_kafka_integration {
             }
         }
     }};
+}
+
+/// Generated random topic name for testing.
+fn random_topic_name() -> String {
+    format!("test_topic_{}", uuid::Uuid::new_v4())
+}
+
+/// UTC "now" w/o nanoseconds
+///
+/// This is required because Kafka doesn't support such fine-grained resolution.
+fn now() -> OffsetDateTime {
+    let x = OffsetDateTime::now_utc().unix_timestamp_nanos();
+    OffsetDateTime::from_unix_timestamp_nanos((x / 1_000_000) * 1_000_000).unwrap()
 }
 
 #[tokio::test]
@@ -123,4 +138,139 @@ async fn test_tls() {
     Client::new_with_tls(vec![connection], Arc::new(config))
         .await
         .unwrap();
+}
+
+#[tokio::test]
+async fn test_produce_empty() {
+    let connection = maybe_skip_kafka_integration!();
+    let topic_name = random_topic_name();
+    let n_partitions = 2;
+
+    let client = Client::new_plain(vec![connection]).await.unwrap();
+    client
+        .create_topic(&topic_name, n_partitions, 1)
+        .await
+        .unwrap();
+
+    let results = client.produce(vec![]).await.unwrap();
+    let results = results.unpack().unwrap();
+    assert!(results.is_empty());
+}
+
+#[tokio::test]
+async fn test_produce_rdkafka_consume_rdkafka() {
+    let connection = maybe_skip_kafka_integration!();
+    let topic_name = random_topic_name();
+    let n_partitions = 2;
+
+    let client = Client::new_plain(vec![connection.clone()]).await.unwrap();
+    client
+        .create_topic(&topic_name, n_partitions, 1)
+        .await
+        .unwrap();
+
+    let record = Record {
+        key: b"".to_vec(),
+        value: b"hello kafka".to_vec(),
+        headers: BTreeMap::from([("foo".to_owned(), b"bar".to_vec())]),
+        timestamp: now(),
+    };
+
+    // produce
+    rdkafka_helper::produce(&connection, vec![(topic_name.clone(), 1, record.clone())]).await;
+
+    // consume
+    let mut records = rdkafka_helper::consume(&connection, &topic_name, 1, 1).await;
+    assert_eq!(records.len(), 1);
+    let actual = records.pop().unwrap();
+    assert_eq!(actual, record);
+}
+
+#[tokio::test]
+async fn test_produce_minikafka_consume_rdkafka() {
+    let connection = maybe_skip_kafka_integration!();
+    let topic_name = random_topic_name();
+    let n_partitions = 2;
+
+    let record = Record {
+        key: b"".to_vec(),
+        value: b"hello kafka".to_vec(),
+        headers: BTreeMap::from([("foo".to_owned(), b"bar".to_vec())]),
+        timestamp: now(),
+    };
+
+    // produce
+    let client = Client::new_plain(vec![connection.clone()]).await.unwrap();
+    client
+        .create_topic(&topic_name, n_partitions, 1)
+        .await
+        .unwrap();
+
+    let results = client
+        .produce(vec![(topic_name.clone(), 1, record.clone())])
+        .await
+        .unwrap();
+    let results = results.unpack().unwrap();
+    assert_eq!(results.len(), 1);
+
+    // consume
+    let mut records = rdkafka_helper::consume(&connection, &topic_name, 1, 1).await;
+    assert_eq!(records.len(), 1);
+    let actual = records.pop().unwrap();
+    assert_eq!(actual, record);
+}
+
+#[tokio::test]
+async fn test_produce_rdkafka_consume_minikafka() {
+    let connection = maybe_skip_kafka_integration!();
+    let topic_name = random_topic_name();
+    let n_partitions = 2;
+
+    let client = Client::new_plain(vec![connection.clone()]).await.unwrap();
+    client
+        .create_topic(&topic_name, n_partitions, 1)
+        .await
+        .unwrap();
+
+    let record = Record {
+        key: b"".to_vec(),
+        value: b"hello kafka".to_vec(),
+        headers: BTreeMap::from([("foo".to_owned(), b"bar".to_vec())]),
+        timestamp: now(),
+    };
+
+    // produce
+    rdkafka_helper::produce(&connection, vec![(topic_name, 1, record)]).await;
+
+    // TODO: consume
+}
+
+#[tokio::test]
+async fn test_produce_minikafka_consume_minikafka() {
+    let connection = maybe_skip_kafka_integration!();
+    let topic_name = random_topic_name();
+    let n_partitions = 2;
+
+    let client = Client::new_plain(vec![connection.clone()]).await.unwrap();
+    client
+        .create_topic(&topic_name, n_partitions, 1)
+        .await
+        .unwrap();
+
+    let record = Record {
+        key: b"".to_vec(),
+        value: b"hello kafka".to_vec(),
+        headers: BTreeMap::from([("foo".to_owned(), b"bar".to_vec())]),
+        timestamp: now(),
+    };
+
+    // produce
+    let results = client
+        .produce(vec![(topic_name.clone(), 1, record.clone())])
+        .await
+        .unwrap();
+    let results = results.unpack().unwrap();
+    assert_eq!(results.len(), 1);
+
+    // TODO: consume
 }

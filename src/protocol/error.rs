@@ -5,7 +5,7 @@
 
 use super::primitives::Int16;
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[allow(clippy::enum_variant_names)]
 pub enum Error {
     UnknownServerError,
@@ -353,3 +353,11 @@ impl From<Option<Error>> for Int16 {
         }
     }
 }
+
+impl std::fmt::Display for Error {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{:?}", self)
+    }
+}
+
+impl std::error::Error for Error {}

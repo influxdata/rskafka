@@ -1,0 +1,58 @@
+version: '3.7'
+services:
+  redpanda-0:
+    image: vectorized/redpanda:v21.9.2
+    container_name: redpanda-0
+    ports:
+      - '9092:9092'
+    command:
+      - redpanda
+      - start
+      - --smp 1
+      - --memory 1G
+      - --reserve-memory 0M
+      - --overprovisioned
+      - --node-id 0
+      - --check=false
+      - --kafka-addr 0.0.0.0:9092
+      - --advertise-kafka-addr 127.0.0.1:9092
+      - --rpc-addr 0.0.0.0:33145
+      - --advertise-rpc-addr redpanda-0:33145
+  redpanda-1:
+    image: vectorized/redpanda:v21.9.2
+    container_name: redpanda-1
+    ports:
+      - '9093:9093'
+    command:
+      - redpanda
+      - start
+      - --smp 1
+      - --memory 1G
+      - --reserve-memory 0M
+      - --overprovisioned
+      - --node-id 1
+      - --seeds "redpanda-0:33145"
+      - --check=false
+      - --kafka-addr 0.0.0.0:9093
+      - --advertise-kafka-addr 127.0.0.1:9093
+      - --rpc-addr 0.0.0.0:33146
+      - --advertise-rpc-addr redpanda-1:33146
+  redpanda-2:
+    image: vectorized/redpanda:v21.9.2
+    container_name: redpanda-2
+    ports:
+      - '9094:9094'
+    command:
+      - redpanda
+      - start
+      - --smp 1
+      - --memory 1G
+      - --reserve-memory 0M
+      - --overprovisioned
+      - --node-id 2
+      - --seeds "redpanda-0:33145"
+      - --check=false
+      - --kafka-addr 0.0.0.0:9094
+      - --advertise-kafka-addr 127.0.0.1:9094
+      - --rpc-addr 0.0.0.0:33147
+      - --advertise-rpc-addr redpanda-2:33147

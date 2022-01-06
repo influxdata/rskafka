@@ -19,6 +19,7 @@ mod create_topic;
 mod metadata;
 pub use create_topic::*;
 pub use metadata::*;
+pub mod produce;
 
 #[derive(Error, Debug)]
 pub enum ReadVersionedError {
