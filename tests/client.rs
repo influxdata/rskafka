@@ -346,18 +346,20 @@ async fn consume_minikafka(
     _partition_index: i32,
     n: usize,
 ) -> Vec<Record> {
-    // TODO: use a proper stream here (the offset calculation is also a hack)
+    // TODO: use a proper stream here
     let mut records = vec![];
     let mut offset = 0;
     while records.len() < n {
-        let mut res = partition_client
+        let res = partition_client
             .fetch_records(offset, 0..1_000_000)
             .await
             .unwrap()
             .0;
         assert!(!res.is_empty());
-        offset += res.len() as i64;
-        records.append(&mut res);
+        for record in res {
+            offset = offset.max(record.offset);
+            records.push(record.record);
+        }
     }
     records.into_iter().take(n).collect()
 }
