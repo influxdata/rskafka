@@ -2,6 +2,7 @@ use std::{collections::HashMap, sync::Arc};
 
 use thiserror::Error;
 
+use crate::client::partition::PartitionClient;
 use crate::{
     connection::BrokerPool,
     error::ResultVec,
@@ -16,6 +17,8 @@ use crate::{
     },
     record::Record,
 };
+
+mod partition;
 
 #[derive(Debug, Error)]
 pub enum ProduceError {
@@ -50,8 +53,7 @@ pub enum Error {
 pub type Result<T, E = Error> = std::result::Result<T, E>;
 
 pub struct Client {
-    #[allow(dead_code)]
-    brokers: BrokerPool,
+    brokers: Arc<BrokerPool>,
 }
 
 impl Client {
@@ -75,7 +77,22 @@ impl Client {
         let mut brokers = BrokerPool::new(boostrap_brokers, tls_config);
         brokers.refresh_metadata().await?;
 
-        Ok(Self { brokers })
+        Ok(Self {
+            brokers: Arc::new(brokers),
+        })
+    }
+
+    /// Returns a client for performing operations on a specific partition
+    pub async fn partition_client(
+        &self,
+        topic: impl Into<String>,
+        partition: i32,
+    ) -> Result<PartitionClient> {
+        Ok(PartitionClient::new(
+            topic.into(),
+            partition,
+            Arc::clone(&self.brokers),
+        ))
     }
 
     /// Returns a list of topics in the cluster
