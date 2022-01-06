@@ -1,5 +1,6 @@
 use crate::backoff::{Backoff, BackoffConfig};
 use crate::protocol::messages::{FetchRequest, FetchRequestPartition, FetchRequestTopic};
+use crate::record::RecordAndOffset;
 use crate::{
     client::error::{Error, Result},
     connection::{BrokerConnection, BrokerConnector},
@@ -165,7 +166,7 @@ impl PartitionClient {
         &self,
         offset: i64,
         bytes: Range<i32>,
-    ) -> Result<(Vec<Record>, i64)> {
+    ) -> Result<(Vec<RecordAndOffset>, i64)> {
         let partition = self
             .maybe_retry("fetch_records", || async move {
                 let response = self
@@ -255,15 +256,18 @@ impl PartitionClient {
                             Error::InvalidResponse(format!("Cannot parse timestamp: {}", e))
                         })?;
 
-                        records.push(Record {
-                            key: record.key,
-                            value: record.value,
-                            headers: record
-                                .headers
-                                .into_iter()
-                                .map(|header| (header.key, header.value))
-                                .collect(),
-                            timestamp,
+                        records.push(RecordAndOffset {
+                            record: Record {
+                                key: record.key,
+                                value: record.value,
+                                headers: record
+                                    .headers
+                                    .into_iter()
+                                    .map(|header| (header.key, header.value))
+                                    .collect(),
+                                timestamp,
+                            },
+                            offset: batch.base_offset + record.offset_delta as i64,
                         })
                     }
                 }
