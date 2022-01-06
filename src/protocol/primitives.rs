@@ -565,9 +565,18 @@ where
 }
 
 /// Represents a sequence of Kafka records as NULLABLE_BYTES.
+///
+/// This primitive actually depends on the message version and evolved twice in [KIP-32] and [KIP-98]. We only support
+/// the latest generation (message version 2).
+///
+/// It seems that during `Produce` this must contain exactly one batch, but during `Fetch` this can contain zero, one or
+/// more batches -- however I could not find any documentation stating this behavior.
+///
+/// [KIP-32]: https://cwiki.apache.org/confluence/display/KAFKA/KIP-32+-+Add+timestamps+to+Kafka+message
+/// [KIP-98]: https://cwiki.apache.org/confluence/display/KAFKA/KIP-98+-+Exactly+Once+Delivery+and+Transactional+Messaging
 #[derive(Debug, PartialEq, Eq)]
 #[cfg_attr(test, derive(proptest_derive::Arbitrary))]
-pub struct Records(pub RecordBatch);
+pub struct Records(pub Vec<RecordBatch>);
 
 impl<R> ReadType<R> for Records
 where
@@ -575,8 +584,15 @@ where
 {
     fn read(reader: &mut R) -> Result<Self, ReadError> {
         let buf = NullableBytes::read(reader)?.0.unwrap_or_default();
-        let record_batch = RecordBatch::read(&mut Cursor::new(buf))?;
-        Ok(Self(record_batch))
+        let len = buf.len() as u64;
+        let mut buf = Cursor::new(buf);
+
+        let mut batches = vec![];
+        while buf.position() < len {
+            batches.push(RecordBatch::read(&mut buf)?);
+        }
+
+        Ok(Self(batches))
     }
 }
 
@@ -585,8 +601,11 @@ where
     W: Write,
 {
     fn write(&self, writer: &mut W) -> Result<(), WriteError> {
+        // TODO: it would be nice if we could avoid the copy here by writing the records and then seeking back.
         let mut buf = vec![];
-        self.0.write(&mut buf)?;
+        for record in &self.0 {
+            record.write(&mut buf)?;
+        }
         NullableBytes(Some(buf)).write(writer)?;
         Ok(())
     }
@@ -596,11 +615,12 @@ where
 mod tests {
     use std::io::Cursor;
 
-    use crate::protocol::test_utils::test_roundtrip;
+    use crate::protocol::{record::RecordBatchCompression, test_utils::test_roundtrip};
 
     use super::*;
 
     use assert_matches::assert_matches;
+    use proptest::strategy::ValueTree;
 
     test_roundtrip!(Boolean, test_bool_roundtrip);
 
@@ -706,5 +726,39 @@ mod tests {
 
     test_roundtrip!(Array<Int32>, test_array_roundtrip);
 
-    test_roundtrip!(Records, test_records_roundtrip);
+    // This will take forever
+    // ```rust
+    // test_roundtrip!(Records, test_records_roundtrip);
+    // ``
+    // So let's use a manual test:
+    #[test]
+    fn test_records_roundtrip_manual() {
+        let strategy = RecordBatch::arbitrary();
+        let mut runner = proptest::test_runner::TestRunner::default();
+
+        let orig = Records(vec![
+            strategy.new_tree(&mut runner).unwrap().current(),
+            strategy.new_tree(&mut runner).unwrap().current(),
+        ]);
+        let orig = Records(
+            orig.0
+                .into_iter()
+                .map(|batch| RecordBatch {
+                    compression: RecordBatchCompression::NoCompression,
+                    ..batch
+                })
+                .collect(),
+        );
+
+        let mut buf = Cursor::new(Vec::<u8>::new());
+        orig.write(&mut buf).unwrap();
+
+        let l = buf.position();
+        buf.set_position(0);
+
+        let restored = Records::read(&mut buf).unwrap();
+        assert_eq!(orig, restored);
+
+        assert_eq!(buf.position(), l);
+    }
 }

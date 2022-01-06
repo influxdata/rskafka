@@ -18,6 +18,8 @@ mod api_versions;
 pub use api_versions::*;
 mod create_topic;
 pub use create_topic::*;
+mod fetch;
+pub use fetch::*;
 mod header;
 pub use header::*;
 mod list_offsets;

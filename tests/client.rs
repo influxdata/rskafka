@@ -1,5 +1,5 @@
 use minikafka::{
-    client::{error::Error as ClientError, Client},
+    client::{error::Error as ClientError, partition::PartitionClient, Client},
     record::Record,
     ProtocolError,
 };
@@ -161,9 +161,8 @@ async fn test_tls() {
         .unwrap();
 }
 
-// TODO: Temporarily disabled as not supported
-#[ignore]
 #[tokio::test]
+#[should_panic(expected = "records must be non-empty")]
 async fn test_produce_empty() {
     let connection = maybe_skip_kafka_integration!();
     let topic_name = random_topic_name();
@@ -181,100 +180,22 @@ async fn test_produce_empty() {
 
 #[tokio::test]
 async fn test_produce_rdkafka_consume_rdkafka() {
-    let connection = maybe_skip_kafka_integration!();
-    let topic_name = random_topic_name();
-    let n_partitions = 2;
-
-    let client = Client::new_plain(vec![connection.clone()]).await.unwrap();
-    client
-        .create_topic(&topic_name, n_partitions, 1)
-        .await
-        .unwrap();
-
-    let record = record();
-
-    // produce
-    rdkafka_helper::produce(&connection, vec![(topic_name.clone(), 1, record.clone())]).await;
-
-    // consume
-    let mut records = rdkafka_helper::consume(&connection, &topic_name, 1, 1).await;
-    assert_eq!(records.len(), 1);
-    let actual = records.pop().unwrap();
-    assert_eq!(actual, record);
+    assert_produce_consume(produce_rdkafka, consume_rdkafka).await;
 }
 
 #[tokio::test]
 async fn test_produce_minikafka_consume_rdkafka() {
-    let connection = maybe_skip_kafka_integration!();
-    let topic_name = random_topic_name();
-    let n_partitions = 2;
-
-    let record = record();
-
-    // produce
-    let client = Client::new_plain(vec![connection.clone()]).await.unwrap();
-    client
-        .create_topic(&topic_name, n_partitions, 1)
-        .await
-        .unwrap();
-
-    let partition_client = client.partition_client(&topic_name, 1).await.unwrap();
-
-    partition_client
-        .produce(vec![record.clone()])
-        .await
-        .unwrap();
-
-    // consume
-    let mut records = rdkafka_helper::consume(&connection, &topic_name, 1, 1).await;
-    assert_eq!(records.len(), 1);
-    let actual = records.pop().unwrap();
-    assert_eq!(actual, record);
+    assert_produce_consume(produce_minikafka, consume_rdkafka).await;
 }
 
 #[tokio::test]
 async fn test_produce_rdkafka_consume_minikafka() {
-    let connection = maybe_skip_kafka_integration!();
-    let topic_name = random_topic_name();
-    let n_partitions = 2;
-
-    let client = Client::new_plain(vec![connection.clone()]).await.unwrap();
-    client
-        .create_topic(&topic_name, n_partitions, 1)
-        .await
-        .unwrap();
-
-    let record = record();
-
-    // produce
-    rdkafka_helper::produce(&connection, vec![(topic_name, 1, record)]).await;
-
-    // TODO: consume
+    assert_produce_consume(produce_rdkafka, consume_minikafka).await;
 }
 
 #[tokio::test]
 async fn test_produce_minikafka_consume_minikafka() {
-    let connection = maybe_skip_kafka_integration!();
-    let topic_name = random_topic_name();
-    let n_partitions = 2;
-
-    let client = Client::new_plain(vec![connection.clone()]).await.unwrap();
-    client
-        .create_topic(&topic_name, n_partitions, 1)
-        .await
-        .unwrap();
-
-    let partition_client = client.partition_client(&topic_name, 1).await.unwrap();
-
-    let record = record();
-
-    // produce
-    partition_client
-        .produce(vec![record.clone()])
-        .await
-        .unwrap();
-
-    // TODO: consume
+    assert_produce_consume(produce_minikafka, consume_minikafka).await;
 }
 
 #[tokio::test]
@@ -318,6 +239,127 @@ async fn test_get_high_watermark() {
         partition_client.get_high_watermark().await.unwrap(),
         expected
     );
+}
+
+async fn assert_produce_consume<F1, G1, F2, G2>(f_produce: F1, f_consume: F2)
+where
+    F1: Fn(Arc<PartitionClient>, String, String, i32, Vec<Record>) -> G1,
+    G1: std::future::Future<Output = ()>,
+    F2: Fn(Arc<PartitionClient>, String, String, i32, usize) -> G2,
+    G2: std::future::Future<Output = Vec<Record>>,
+{
+    let connection = maybe_skip_kafka_integration!();
+    let topic_name = random_topic_name();
+    let n_partitions = 2;
+
+    let client = Client::new_plain(vec![connection.clone()]).await.unwrap();
+    client
+        .create_topic(&topic_name, n_partitions, 1)
+        .await
+        .unwrap();
+    let partition_client = Arc::new(
+        client
+            .partition_client(topic_name.clone(), 1)
+            .await
+            .unwrap(),
+    );
+
+    let record_1 = record();
+    let record_2 = Record {
+        value: b"some value".to_vec(),
+        timestamp: now(),
+        ..record_1.clone()
+    };
+    let record_3 = Record {
+        value: b"more value".to_vec(),
+        timestamp: now(),
+        ..record_1.clone()
+    };
+
+    // produce
+    f_produce(
+        Arc::clone(&partition_client),
+        connection.clone(),
+        topic_name.clone(),
+        1,
+        vec![record_1.clone(), record_2.clone()],
+    )
+    .await;
+    f_produce(
+        Arc::clone(&partition_client),
+        connection.clone(),
+        topic_name.clone(),
+        1,
+        vec![record_3.clone()],
+    )
+    .await;
+
+    // consume
+    let records = f_consume(partition_client, connection, topic_name, 1, 3).await;
+    assert_eq!(records, vec![record_1, record_2, record_3]);
+}
+
+async fn produce_rdkafka(
+    _partition_client: Arc<PartitionClient>,
+    connection: String,
+    topic_name: String,
+    partition_index: i32,
+    records: Vec<Record>,
+) {
+    rdkafka_helper::produce(
+        &connection,
+        records
+            .into_iter()
+            .map(|record| (topic_name.clone(), partition_index, record))
+            .collect(),
+    )
+    .await;
+}
+
+async fn produce_minikafka(
+    partition_client: Arc<PartitionClient>,
+    _connection: String,
+    _topic_name: String,
+    _partition_index: i32,
+    records: Vec<Record>,
+) {
+    // TODO: remove this hack
+    tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+
+    partition_client.produce(records).await.unwrap();
+}
+
+async fn consume_rdkafka(
+    _partition_client: Arc<PartitionClient>,
+    connection: String,
+    topic_name: String,
+    partition_index: i32,
+    n: usize,
+) -> Vec<Record> {
+    rdkafka_helper::consume(&connection, &topic_name, partition_index, n).await
+}
+
+async fn consume_minikafka(
+    partition_client: Arc<PartitionClient>,
+    _connection: String,
+    _topic_name: String,
+    _partition_index: i32,
+    n: usize,
+) -> Vec<Record> {
+    // TODO: use a proper stream here (the offset calculation is also a hack)
+    let mut records = vec![];
+    let mut offset = 0;
+    while records.len() < n {
+        let mut res = partition_client
+            .fetch_records(offset, 0..1_000_000)
+            .await
+            .unwrap()
+            .0;
+        assert!(!res.is_empty());
+        offset += res.len() as i64;
+        records.append(&mut res);
+    }
+    records.into_iter().take(n).collect()
 }
 
 fn record() -> Record {

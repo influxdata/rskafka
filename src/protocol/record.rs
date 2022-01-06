@@ -1,3 +1,14 @@
+//! The actual payload message which is also the on-disk format for Kafka.
+//!
+/// The format evolved twice in [KIP-32] and [KIP-98]. We only support the latest generation (message version 2).
+///
+/// # References
+/// - [KIP-32]
+/// - [KIP-98]
+/// - <https://kafka.apache.org/documentation/#messageformat>
+///
+/// [KIP-32]: https://cwiki.apache.org/confluence/display/KAFKA/KIP-32+-+Add+timestamps+to+Kafka+message
+/// [KIP-98]: https://cwiki.apache.org/confluence/display/KAFKA/KIP-98+-+Exactly+Once+Delivery+and+Transactional+Messaging
 use std::io::{Cursor, Read, Write};
 
 use crc::{Crc, CRC_32_ISCSI};
@@ -120,6 +131,13 @@ where
         let mut headers = Vec::with_capacity(n_headers);
         for _ in 0..n_headers {
             headers.push(RecordHeader::read(reader)?);
+        }
+
+        // check if there is any trailing data because this is likely a bug
+        if reader.limit() != 0 {
+            return Err(ReadError::Malformed(
+                format!("Found {} trailing bytes after Record", reader.limit()).into(),
+            ));
         }
 
         Ok(Self {
@@ -400,6 +418,16 @@ where
             let records = Array::<Record>::read(&mut data)?.0.unwrap_or_default();
             ControlBatchOrRecords::Records(records)
         };
+
+        // check if there is any trailing data because this is likely a bug
+        let bytes_read = data.position();
+        let bytes_total = data.into_inner().len() as u64;
+        let bytes_left = bytes_total - bytes_read;
+        if bytes_left != 0 {
+            return Err(ReadError::Malformed(
+                format!("Found {} trailing bytes after RecordBatch", bytes_left).into(),
+            ));
+        }
 
         // ==========================================================================================
         // ==========================================================================================

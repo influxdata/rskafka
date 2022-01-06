@@ -116,8 +116,13 @@ impl RequestBody for ProduceRequest {
     const API_KEY: ApiKey = ApiKey::Produce;
 
     /// That's enough for for.
+    ///
+    /// Note that we do not support produce request prior to version 3, since this is the version when message version 2
+    /// was introduced ([KIP-98]).
+    ///
+    /// [KIP-98]: https://cwiki.apache.org/confluence/display/KAFKA/KIP-98+-+Exactly+Once+Delivery+and+Transactional+Messaging
     const API_VERSION_RANGE: (ApiVersion, ApiVersion) =
-        (ApiVersion(Int16(0)), ApiVersion(Int16(3)));
+        (ApiVersion(Int16(3)), ApiVersion(Int16(3)));
 
     const FIRST_TAGGED_FIELD_VERSION: ApiVersion = ApiVersion(Int16(9));
 }
