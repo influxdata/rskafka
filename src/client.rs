@@ -61,6 +61,9 @@ impl Client {
     }
 
     /// Submit records.
+    ///
+    /// TODO: make this a per-partition operation (either on a per-method or per-client basis) so we can simplify
+    /// grouping and don't need to publish to multiple partition leaders at the same time.
     pub async fn produce(
         &self,
         records: Vec<(String, i32, Record)>,
