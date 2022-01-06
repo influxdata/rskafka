@@ -1,4 +1,5 @@
 use crate::backoff::{Backoff, BackoffConfig};
+use crate::protocol::messages::{FetchRequest, FetchRequestPartition, FetchRequestTopic};
 use crate::{
     client::error::{Error, Result},
     connection::{BrokerConnection, BrokerConnector},
@@ -15,6 +16,7 @@ use crate::{
 };
 use std::ops::Range;
 use std::sync::Arc;
+use time::OffsetDateTime;
 use tokio::sync::Mutex;
 
 /// Many operations must be performed on the leader for a partition
@@ -153,12 +155,118 @@ impl PartitionClient {
     /// Fetch `bytes` bytes of record data starting at sequence number `offset`
     ///
     /// Returns the records, and the current high watermark
+    ///
+    /// TODO: this should probably also return the offsets so we can issue the next request correctly
     pub async fn fetch_records(
         &self,
-        _offset: i64,
-        _bytes: Range<i32>,
+        offset: i64,
+        bytes: Range<i32>,
     ) -> Result<(Vec<Record>, i64)> {
-        todo!()
+        let partition = self
+            .maybe_retry("fetch_records", || async move {
+                let response = self
+                    .brokers
+                    .get_cached_broker()
+                    .await?
+                    .request(FetchRequest {
+                        // normal consumer
+                        replica_id: Int32(-1),
+                        max_wait_ms: Int32(10_000),
+                        min_bytes: Int32(bytes.start),
+                        max_bytes: Some(Int32(bytes.end.saturating_sub(1))),
+                        // `READ_COMMITTED`
+                        isolation_level: Some(Int8(1)),
+                        topics: vec![FetchRequestTopic {
+                            topic: String_(self.topic.clone()),
+                            partitions: vec![FetchRequestPartition {
+                                partition: Int32(self.partition),
+                                fetch_offset: Int64(offset),
+                                partition_max_bytes: Int32(bytes.end.saturating_sub(1)),
+                            }],
+                        }],
+                    })
+                    .await?;
+
+                if response.responses.len() != 1 {
+                    return Err(Error::InvalidResponse(format!(
+                        "Expected 1 topic to be returned but got {}",
+                        response.responses.len()
+                    )));
+                }
+                let topic = response
+                    .responses
+                    .into_iter()
+                    .next()
+                    .expect("just checked the length");
+
+                if topic.topic.0 != self.topic {
+                    return Err(Error::InvalidResponse(format!(
+                        "Expected data for topic '{}' but got data for topic '{}'",
+                        self.topic, topic.topic.0
+                    )));
+                }
+
+                if topic.partitions.len() != 1 {
+                    return Err(Error::InvalidResponse(format!(
+                        "Expected 1 partition to be returned but got {}",
+                        topic.partitions.len()
+                    )));
+                }
+                let partition = topic
+                    .partitions
+                    .into_iter()
+                    .next()
+                    .expect("just checked length");
+
+                if partition.partition_index.0 != self.partition {
+                    return Err(Error::InvalidResponse(format!(
+                        "Expected data for partition {} but got data for partition {}",
+                        self.partition, partition.partition_index.0
+                    )));
+                }
+
+                if let Some(err) = partition.error_code {
+                    return Err(Error::ServerError(err, String::new()));
+                }
+
+                Ok(partition)
+            })
+            .await?;
+
+        // extract records
+        let mut records = vec![];
+        for batch in partition.records.0 {
+            match batch.records {
+                ControlBatchOrRecords::ControlBatch(_) => {
+                    // ignore
+                }
+                ControlBatchOrRecords::Records(protocol_records) => {
+                    records.reserve(protocol_records.len());
+
+                    for record in protocol_records {
+                        let timestamp = OffsetDateTime::from_unix_timestamp_nanos(
+                            (batch.first_timestamp + record.timestamp_delta) as i128 * 1_000_000,
+                        )
+                        .map_err(|e| {
+                            Error::InvalidResponse(format!("Cannot parse timestamp: {}", e))
+                        })?;
+
+                        records.push(Record {
+                            key: record.key,
+                            value: record.value,
+                            headers: record
+                                .headers
+                                .into_iter()
+                                .map(|header| (header.key, header.value))
+                                .collect(),
+                            timestamp,
+                        })
+                    }
+                }
+            }
+        }
+
+        Ok((records, partition.high_watermark.0))
     }
 
     /// Get high watermark for this partition.
