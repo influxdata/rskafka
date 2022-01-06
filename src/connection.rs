@@ -5,10 +5,13 @@ use tokio::io::BufStream;
 use tokio::sync::Mutex;
 
 use crate::backoff::{Backoff, BackoffConfig};
+use crate::connection::topology::BrokerTopology;
 use crate::connection::transport::Transport;
 use crate::messenger::{Messenger, RequestError};
-use crate::protocol::messages::MetadataRequest;
+use crate::protocol::messages::{MetadataRequest, MetadataRequestTopic, MetadataResponse};
+use crate::protocol::primitives::String_;
 
+mod topology;
 mod transport;
 
 /// A connection to a broker
@@ -18,16 +21,27 @@ pub type BrokerConnection = Arc<Messenger<BufStream<transport::Transport>>>;
 pub enum Error {
     #[error("error getting cluster metadata: {0}")]
     MetadataError(RequestError),
+
+    #[error("error connecting to broker \"{broker}\": {error}")]
+    TransportError {
+        broker: String,
+        error: transport::Error,
+    },
 }
 
 pub type Result<T, E = Error> = std::result::Result<T, E>;
 
+/// Caches the broker topology and provides the ability to
+///
+/// * Get a cached connection to an arbitrary broker
+/// * Obtain a connection to a specific broker
+///
 /// Maintains a list of brokers within the cluster and caches a connection to a broker
-pub struct BrokerPool {
+pub struct BrokerConnector {
     /// Brokers used to boostrap this pool
     bootstrap_brokers: Vec<String>,
     /// Discovered brokers in the cluster, including bootstrap brokers
-    discovered_brokers: Vec<String>,
+    topology: BrokerTopology,
     /// The current cached broker
     current_broker: Mutex<Option<BrokerConnection>>,
     /// The backoff configuration on error
@@ -36,14 +50,14 @@ pub struct BrokerPool {
     tls_config: Option<Arc<rustls::ClientConfig>>,
 }
 
-impl BrokerPool {
+impl BrokerConnector {
     pub fn new(
         bootstrap_brokers: Vec<String>,
         tls_config: Option<Arc<rustls::ClientConfig>>,
     ) -> Self {
         Self {
             bootstrap_brokers,
-            discovered_brokers: vec![],
+            topology: Default::default(),
             current_broker: Mutex::new(None),
             backoff_config: Default::default(),
             tls_config,
@@ -51,26 +65,33 @@ impl BrokerPool {
     }
 
     /// Fetch and cache broker metadata
-    pub async fn refresh_metadata(&mut self) -> Result<()> {
+    pub async fn refresh_metadata(&self) -> Result<()> {
+        // Not interested in topic metadata
+        self.request_metadata(Some(vec![])).await?;
+        Ok(())
+    }
+
+    /// Requests metadata for the provided topics, updating the cached broker information
+    ///
+    /// Requests data for all topics if `topics` is `None`
+    pub async fn request_metadata(&self, topics: Option<Vec<String>>) -> Result<MetadataResponse> {
+        // TODO: Add retry logic
         let broker = self.get_cached_broker().await?;
 
         let response = broker
             .request(MetadataRequest {
-                // Not interested in topic metadata
-                topics: Some(vec![]),
+                topics: topics.map(|t| {
+                    t.into_iter()
+                        .map(|x| MetadataRequestTopic { name: String_(x) })
+                        .collect()
+                }),
                 allow_auto_topic_creation: None,
             })
             .await
             .map_err(Error::MetadataError)?;
 
-        self.discovered_brokers = response
-            .brokers
-            .into_iter()
-            .map(|broker| format!("{}:{}", broker.host.0, broker.port.0))
-            .collect();
-        println!("Found brokers: {:?}", self.discovered_brokers);
-
-        Ok(())
+        self.topology.update(&response.brokers);
+        Ok(response)
     }
 
     /// Invalidates the current cached broker
@@ -81,6 +102,28 @@ impl BrokerPool {
         self.current_broker.lock().await.take();
     }
 
+    /// Returns a new connection to the broker with the provided id
+    pub async fn connect(&self, broker_id: i32) -> Result<Option<BrokerConnection>> {
+        match self.topology.get_broker_url(broker_id).await {
+            Some(url) => Ok(Some(self.connect_impl(&url).await?)),
+            None => Ok(None),
+        }
+    }
+
+    async fn connect_impl(&self, url: &str) -> Result<BrokerConnection> {
+        println!("Establishing new connection to: {}", url);
+        let transport = Transport::connect(url, self.tls_config.clone())
+            .await
+            .map_err(|error| Error::TransportError {
+                broker: url.to_string(),
+                error,
+            })?;
+
+        let messenger = Arc::new(Messenger::new(BufStream::new(transport)));
+        messenger.sync_versions().await;
+        Ok(messenger)
+    }
+
     /// Gets a cached [`BrokerConnection`] to any broker
     pub async fn get_cached_broker(&self) -> Result<BrokerConnection> {
         let mut current_broker = self.current_broker.lock().await;
@@ -88,30 +131,27 @@ impl BrokerPool {
             return Ok(Arc::clone(broker));
         }
 
-        let brokers = if self.discovered_brokers.is_empty() {
-            &self.bootstrap_brokers
+        let brokers = if self.topology.is_empty() {
+            self.bootstrap_brokers.clone()
         } else {
-            &self.discovered_brokers
+            self.topology.get_broker_urls()
         };
 
         let mut backoff = Backoff::new(&self.backoff_config);
 
         loop {
-            for broker in brokers {
-                let transport = match Transport::connect(broker, self.tls_config.clone()).await {
+            for broker in &brokers {
+                let connection = match self.connect_impl(broker).await {
                     Ok(transport) => transport,
                     Err(e) => {
-                        println!("Error connecting to broker {}: {}", broker, e);
+                        println!("{}", e);
                         continue;
                     }
                 };
 
-                let messenger = Arc::new(Messenger::new(BufStream::new(transport)));
-                messenger.sync_versions().await;
+                *current_broker = Some(Arc::clone(&connection));
 
-                *current_broker = Some(Arc::clone(&messenger));
-
-                return Ok(messenger);
+                return Ok(connection);
             }
 
             let backoff = backoff.next();
