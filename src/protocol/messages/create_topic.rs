@@ -3,6 +3,7 @@ use std::io::{Read, Write};
 use super::{
     ReadVersionedError, ReadVersionedType, RequestBody, WriteVersionedError, WriteVersionedType,
 };
+use crate::protocol::error::Error;
 use crate::protocol::messages::{read_versioned_array, write_versioned_array};
 use crate::protocol::{
     api_key::ApiKey,
@@ -193,7 +194,7 @@ pub struct CreateTopicResponse {
     pub name: String_,
 
     /// The error code, or 0 if there was no error.
-    pub error_code: Int16,
+    pub error: Option<Error>,
 
     /// The error message
     ///
@@ -209,12 +210,12 @@ where
         let v = version.0 .0;
 
         let name = String_::read(reader)?;
-        let error_code = Int16::read(reader)?;
+        let error = Error::new(Int16::read(reader)?);
         let error_message = (v >= 1).then(|| NullableString::read(reader)).transpose()?;
 
         Ok(Self {
             name,
-            error_code,
+            error,
             error_message,
         })
     }

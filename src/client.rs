@@ -129,7 +129,7 @@ impl Client {
 
         let topic = response.topics.into_iter().next().unwrap();
 
-        match ProtocolError::new(topic.error_code) {
+        match topic.error {
             None => Ok(()),
             Some(protocol_error) => match topic.error_message {
                 Some(NullableString(Some(msg))) => Err(Error::ServerError(protocol_error, msg)),

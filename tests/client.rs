@@ -1,4 +1,8 @@
-use minikafka::{client::Client, record::Record};
+use minikafka::{
+    client::{Client, Error as ClientError},
+    record::Record,
+    ProtocolError,
+};
 use std::{collections::BTreeMap, str::FromStr, sync::Arc};
 use time::OffsetDateTime;
 
@@ -96,7 +100,13 @@ async fn test_topic_crud() {
         "topic {} not found in {:?}",
         new_topic,
         topics
-    )
+    );
+
+    let err = client.create_topic(&new_topic, 1, 1).await.unwrap_err();
+    match err {
+        ClientError::ServerError(ProtocolError::TopicAlreadyExists, _) => {}
+        _ => panic!("Unexpected error: {}", err),
+    }
 }
 
 // Disabled as currently no TLS integration tests
