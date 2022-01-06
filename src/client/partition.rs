@@ -53,11 +53,12 @@ impl PartitionClient {
     }
 
     /// Produce a batch of records to the partition
-    ///
-    /// # Panics
-    /// If `records` is empty.
     pub async fn produce(&self, records: Vec<Record>) -> Result<Vec<i64>> {
-        assert!(!records.is_empty(), "records must be non-empty");
+        // skip request entirely if `records` is empty
+        if records.is_empty() {
+            return Ok(vec![]);
+        }
+
         let n = records.len() as i64;
 
         // TODO: Retry on failure
