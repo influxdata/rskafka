@@ -569,6 +569,9 @@ where
 /// This primitive actually depends on the message version and evolved twice in [KIP-32] and [KIP-98]. We only support
 /// the latest generation (message version 2).
 ///
+/// It seems that during `Produce` this must contain exactly one batch, but during `Fetch` this can contain zero, one or
+/// more batches -- however I could not find any documentation stating this behavior.
+///
 /// [KIP-32]: https://cwiki.apache.org/confluence/display/KAFKA/KIP-32+-+Add+timestamps+to+Kafka+message
 /// [KIP-98]: https://cwiki.apache.org/confluence/display/KAFKA/KIP-98+-+Exactly+Once+Delivery+and+Transactional+Messaging
 #[derive(Debug, PartialEq, Eq)]
