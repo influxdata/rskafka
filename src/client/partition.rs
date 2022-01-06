@@ -4,8 +4,12 @@ use crate::{
     connection::{BrokerConnection, BrokerConnector},
     protocol::{
         error::Error as ProtocolError,
-        messages::{ListOffsetsRequest, ListOffsetsRequestPartition, ListOffsetsRequestTopic},
-        primitives::{Int32, Int64, Int8, String_},
+        messages::{
+            ListOffsetsRequest, ListOffsetsRequestPartition, ListOffsetsRequestTopic,
+            ProduceRequest, ProduceRequestPartitionData, ProduceRequestTopicData,
+        },
+        primitives::*,
+        record::{Record as ProtocolRecord, *},
     },
     record::Record,
 };
@@ -46,8 +50,104 @@ impl PartitionClient {
     }
 
     /// Produce a batch of records to the partition
-    pub async fn produce_batch(&self, _records: Vec<Record>) -> Result<()> {
-        todo!()
+    pub async fn produce(&self, records: Vec<Record>) -> Result<i64> {
+        // TODO: Retry on failure
+
+        // TODO: Permit empty `records`
+        assert!(!records.is_empty(), "records must be non-zero");
+
+        // TODO: Verify this is the first timestamp in the batch and not the min
+        let first_timestamp = records.first().unwrap().timestamp;
+        let mut max_timestamp = first_timestamp;
+
+        let records = records
+            .into_iter()
+            .enumerate()
+            .map(|(offset_delta, record)| {
+                max_timestamp = max_timestamp.max(record.timestamp);
+
+                ProtocolRecord {
+                    key: record.key,
+                    value: record.value,
+                    timestamp_delta: (record.timestamp - first_timestamp).whole_milliseconds()
+                        as i64,
+                    offset_delta: offset_delta as i32,
+                    headers: record
+                        .headers
+                        .into_iter()
+                        .map(|(key, value)| RecordHeader { key, value })
+                        .collect(),
+                }
+            })
+            .collect();
+
+        let record_batch = ProduceRequestPartitionData {
+            index: Int32(self.partition),
+            records: Records(RecordBatch {
+                base_offset: 0,
+                partition_leader_epoch: 0,
+                last_offset_delta: 0,
+                is_transactional: false,
+                base_sequence: -1,
+                compression: RecordBatchCompression::NoCompression,
+                timestamp_type: RecordBatchTimestampType::CreateTime,
+                producer_id: -1,
+                producer_epoch: -1,
+                first_timestamp: (first_timestamp.unix_timestamp_nanos() / 1_000_000) as i64,
+                max_timestamp: (max_timestamp.unix_timestamp_nanos() / 1_000_000) as i64,
+                records: ControlBatchOrRecords::Records(records),
+            }),
+        };
+
+        // build request
+        let request = ProduceRequest {
+            transactional_id: crate::protocol::primitives::NullableString(None),
+            acks: Int16(-1),
+            timeout_ms: Int32(30_000),
+            topic_data: vec![ProduceRequestTopicData {
+                name: String_(self.topic.clone()),
+                partition_data: vec![record_batch],
+            }],
+        };
+
+        let broker = self.get_cached_broker().await?;
+        let response = broker.request(request).await?;
+
+        if response.responses.len() != 1 {
+            return Err(Error::InvalidResponse(format!(
+                "Expected one topic in response got: {}",
+                response.responses.len()
+            )));
+        }
+
+        let response = response.responses.into_iter().next().unwrap();
+        if response.name.0 != self.topic {
+            return Err(Error::InvalidResponse(format!(
+                "Expected write for topic \"{}\" got \"{}\"",
+                self.topic, response.name.0,
+            )));
+        }
+
+        if response.partition_responses.len() != 1 {
+            return Err(Error::InvalidResponse(format!(
+                "Expected one partition got: {}",
+                response.partition_responses.len()
+            )));
+        }
+
+        let response = response.partition_responses.into_iter().next().unwrap();
+        if response.index.0 != self.partition {
+            return Err(Error::InvalidResponse(format!(
+                "Expected partition {} for topic \"{}\" got {}",
+                self.partition, self.topic, response.index.0,
+            )));
+        }
+
+        if let Some(error) = response.error {
+            return Err(Error::ServerError(error, Default::default()));
+        }
+
+        Ok(response.base_offset.0)
     }
 
     /// Fetch `bytes` bytes of record data starting at sequence number `offset`
