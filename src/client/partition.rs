@@ -50,12 +50,10 @@ impl PartitionClient {
     }
 
     /// Produce a batch of records to the partition
-    ///
-    /// # Panic
-    ///
-    /// Panics if `records` is empty
     pub async fn produce(&self, records: Vec<Record>) -> Result<i64> {
         // TODO: Retry on failure
+
+        // TODO: Permit empty `records`
         assert!(!records.is_empty(), "records must be non-zero");
 
         // TODO: Verify this is the first timestamp in the batch and not the min

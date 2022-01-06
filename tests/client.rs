@@ -3,7 +3,7 @@ use minikafka::{
     record::Record,
     ProtocolError,
 };
-use std::{collections::BTreeMap, str::FromStr, sync::Arc, time::Duration};
+use std::{collections::BTreeMap, str::FromStr, sync::Arc};
 use time::OffsetDateTime;
 
 mod rdkafka_helper;
@@ -161,6 +161,24 @@ async fn test_tls() {
         .unwrap();
 }
 
+// TODO: Temporarily disabled as not supported
+#[ignore]
+#[tokio::test]
+async fn test_produce_empty() {
+    let connection = maybe_skip_kafka_integration!();
+    let topic_name = random_topic_name();
+    let n_partitions = 2;
+
+    let client = Client::new_plain(vec![connection]).await.unwrap();
+    client
+        .create_topic(&topic_name, n_partitions, 1)
+        .await
+        .unwrap();
+
+    let partition_client = client.partition_client(&topic_name, 1).await.unwrap();
+    partition_client.produce(vec![]).await.unwrap();
+}
+
 #[tokio::test]
 async fn test_produce_rdkafka_consume_rdkafka() {
     let connection = maybe_skip_kafka_integration!();
@@ -276,6 +294,8 @@ async fn test_get_high_watermark() {
         .await
         .unwrap();
 
+    assert_eq!(partition_client.get_high_watermark().await.unwrap(), 0);
+
     // add some data
     // use out-of order timestamps to ensure our "lastest offset" logic works
     let record_early = record();
@@ -294,18 +314,10 @@ async fn test_get_high_watermark() {
         .unwrap()
         + 1;
 
-    // this might take a while to converge
-    tokio::time::timeout(Duration::from_secs(10), async move {
-        loop {
-            let res = partition_client.get_high_watermark().await.unwrap();
-            if res == expected {
-                return;
-            }
-            tokio::time::sleep(Duration::from_millis(100)).await;
-        }
-    })
-    .await
-    .unwrap();
+    assert_eq!(
+        partition_client.get_high_watermark().await.unwrap(),
+        expected
+    );
 }
 
 fn record() -> Record {
