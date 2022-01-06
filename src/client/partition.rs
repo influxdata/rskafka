@@ -83,7 +83,7 @@ impl PartitionClient {
 
         let record_batch = ProduceRequestPartitionData {
             index: Int32(self.partition),
-            records: Records(RecordBatch {
+            records: Records(vec![RecordBatch {
                 base_offset: 0,
                 partition_leader_epoch: 0,
                 last_offset_delta: 0,
@@ -96,7 +96,7 @@ impl PartitionClient {
                 first_timestamp: (first_timestamp.unix_timestamp_nanos() / 1_000_000) as i64,
                 max_timestamp: (max_timestamp.unix_timestamp_nanos() / 1_000_000) as i64,
                 records: ControlBatchOrRecords::Records(records),
-            }),
+            }]),
         };
 
         // build request

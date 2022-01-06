@@ -122,6 +122,13 @@ where
             headers.push(RecordHeader::read(reader)?);
         }
 
+        // check if there is any trailing data because this is likely a bug
+        if reader.limit() != 0 {
+            return Err(ReadError::Malformed(
+                format!("Found {} trailing bytes after Record", reader.limit()).into(),
+            ));
+        }
+
         Ok(Self {
             timestamp_delta,
             offset_delta,
@@ -400,6 +407,16 @@ where
             let records = Array::<Record>::read(&mut data)?.0.unwrap_or_default();
             ControlBatchOrRecords::Records(records)
         };
+
+        // check if there is any trailing data because this is likely a bug
+        let bytes_read = data.position();
+        let bytes_total = data.into_inner().len() as u64;
+        let bytes_left = bytes_total - bytes_read;
+        if bytes_left != 0 {
+            return Err(ReadError::Malformed(
+                format!("Found {} trailing bytes after RecordBatch", bytes_left).into(),
+            ));
+        }
 
         // ==========================================================================================
         // ==========================================================================================
