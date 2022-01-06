@@ -188,7 +188,6 @@ impl PartitionClient {
     }
 
     /// Invalidate the cached broker connection
-    #[allow(dead_code)]
     async fn invalidate_cached_broker(&self) {
         *self.current_broker.lock().await = None
     }
