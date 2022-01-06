@@ -5,6 +5,7 @@ use super::{
 };
 use crate::protocol::messages::{read_versioned_array, write_versioned_array};
 use crate::protocol::{
+    error::Error,
     api_key::ApiKey,
     api_version::ApiVersion,
     primitives::*,
@@ -173,8 +174,8 @@ where
 
 #[derive(Debug)]
 pub struct MetadataResponseTopic {
-    /// The topic error, or 0 if there was no error
-    pub error_code: Int16,
+    /// The topic error if any
+    pub error: Option<Error>,
     /// The topic name
     pub name: String_,
     /// True if the topic is internal
@@ -191,13 +192,13 @@ where
         let v = version.0 .0;
         assert!(v <= 4);
 
-        let error_code = Int16::read(reader)?;
+        let error = Error::new(Int16::read(reader)?);
         let name = String_::read(reader)?;
         let is_internal = (v >= 1).then(|| Boolean::read(reader)).transpose()?;
         let partitions = read_versioned_array(reader, version)?.unwrap_or_default();
 
         Ok(Self {
-            error_code,
+            error,
             name,
             is_internal,
             partitions,
@@ -207,8 +208,8 @@ where
 
 #[derive(Debug)]
 pub struct MetadataResponsePartition {
-    /// The partition error, or 0 if there was no error
-    pub error_code: Int16,
+    /// The partition error if any
+    pub error: Option<Error>,
     /// The partition index
     pub partition_index: Int32,
     /// The ID of the leader broker
@@ -228,7 +229,7 @@ where
         assert!(v <= 4);
 
         Ok(Self {
-            error_code: Int16::read(reader)?,
+            error: Error::new(Int16::read(reader)?),
             partition_index: Int32::read(reader)?,
             leader_id: Int32::read(reader)?,
             replica_nodes: Array::read(reader)?,

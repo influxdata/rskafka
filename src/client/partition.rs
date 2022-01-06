@@ -1,8 +1,9 @@
-use super::Result;
-use crate::connection::BrokerPool;
+use super::{Error, Result};
+use crate::connection::{BrokerConnection, BrokerPool};
 use crate::record::Record;
 use std::ops::Range;
 use std::sync::Arc;
+use tokio::sync::Mutex;
 
 /// Many operations must be performed on the leader for a partition
 ///
@@ -23,6 +24,9 @@ pub struct PartitionClient {
 
     #[allow(dead_code)]
     brokers: Arc<BrokerPool>,
+
+    /// Current broker connection if any
+    current_broker: Mutex<Option<BrokerConnection>>,
 }
 
 impl PartitionClient {
@@ -31,6 +35,7 @@ impl PartitionClient {
             topic,
             partition,
             brokers,
+            current_broker: Mutex::new(None),
         }
     }
 
@@ -48,5 +53,88 @@ impl PartitionClient {
         _bytes: Range<i32>,
     ) -> Result<(Vec<Record>, i64)> {
         todo!()
+    }
+
+    /// Invalidate the cached broker connection
+    #[allow(dead_code)]
+    async fn invalidate_cached_broker(&self) {
+        *self.current_broker.lock().await = None
+    }
+
+    /// Get the raw broker connection
+    ///
+    /// TODO: Make this private
+    pub async fn get_cached_broker(&self) -> Result<BrokerConnection> {
+        let mut current_broker = self.current_broker.lock().await;
+        if let Some(broker) = &*current_broker {
+            return Ok(Arc::clone(broker));
+        }
+
+        let leader = self.get_leader().await?;
+        let broker = self.brokers.connect(leader).await?.ok_or_else(|| {
+            Error::InvalidResponse(format!(
+                "Partition leader {} not found in metadata response",
+                leader
+            ))
+        })?;
+        *current_broker = Some(Arc::clone(&broker));
+        Ok(broker)
+    }
+
+    /// Retrieve the broker ID of the partition leader
+    async fn get_leader(&self) -> Result<i32> {
+        let metadata = self
+            .brokers
+            .request_metadata(Some(vec![self.topic.clone()]))
+            .await?;
+
+        if metadata.topics.len() != 1 {
+            return Err(Error::InvalidResponse(format!(
+                "Expected one topic in response, got {}",
+                metadata.topics.len()
+            )));
+        }
+
+        let topic = metadata.topics.into_iter().next().unwrap();
+
+        if topic.name.0 != self.topic {
+            return Err(Error::InvalidResponse(format!(
+                "Expected metadata for topic \"{}\" got \"{}\"",
+                self.topic, topic.name.0
+            )));
+        }
+
+        if let Some(e) = topic.error {
+            // TODO: Add retry logic
+            return Err(Error::ServerError(
+                e,
+                format!("error getting metadata for topic \"{}\"", self.topic),
+            ));
+        }
+
+        let partition = topic
+            .partitions
+            .iter()
+            .find(|p| p.partition_index.0 == self.partition)
+            .ok_or_else(|| {
+                Error::InvalidResponse(format!(
+                    "Could not find metadata for partition {} in topic \"{}\"",
+                    self.partition, self.topic
+                ))
+            })?;
+
+        if let Some(e) = partition.error {
+            // TODO: Add retry logic
+            return Err(Error::ServerError(
+                e,
+                format!(
+                    "error getting metadata for partition {} in topic \"{}\"",
+                    self.partition, self.topic
+                ),
+            ));
+        }
+
+        println!("Partition {} in topic \"{}\" has leader {}", self.partition, self.topic, partition.leader_id.0);
+        Ok(partition.leader_id.0)
     }
 }

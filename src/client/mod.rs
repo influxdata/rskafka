@@ -8,7 +8,7 @@ use crate::{
     error::ResultVec,
     protocol::{
         error::Error as ProtocolError,
-        messages::{CreateTopicRequest, CreateTopicsRequest, MetadataRequest},
+        messages::{CreateTopicRequest, CreateTopicsRequest},
         primitives::*,
         record::{
             ControlBatchOrRecords, Record as ProtocolRecord, RecordBatch, RecordBatchCompression,
@@ -74,12 +74,10 @@ impl Client {
         boostrap_brokers: Vec<String>,
         tls_config: Option<Arc<rustls::ClientConfig>>,
     ) -> Result<Self> {
-        let mut brokers = BrokerPool::new(boostrap_brokers, tls_config);
+        let brokers = Arc::new(BrokerPool::new(boostrap_brokers, tls_config));
         brokers.refresh_metadata().await?;
 
-        Ok(Self {
-            brokers: Arc::new(brokers),
-        })
+        Ok(Self { brokers })
     }
 
     /// Returns a client for performing operations on a specific partition
@@ -97,14 +95,7 @@ impl Client {
 
     /// Returns a list of topics in the cluster
     pub async fn list_topics(&self) -> Result<Vec<String>> {
-        let broker = self.brokers.get_cached_broker().await?;
-        let response = broker
-            .request(MetadataRequest {
-                // Fetch all topics
-                topics: None,
-                allow_auto_topic_creation: Some(Boolean(false)),
-            })
-            .await?;
+        let response = self.brokers.request_metadata(None).await?;
 
         Ok(response
             .topics

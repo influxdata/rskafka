@@ -74,6 +74,17 @@ async fn test_plain() {
 }
 
 #[tokio::test]
+async fn test_partition_leader() {
+    let connection = maybe_skip_kafka_integration!();
+    let client = Client::new_plain(vec![connection]).await.unwrap();
+    let topic_name = random_topic_name();
+
+    client.create_topic(&topic_name, 2, 1).await.unwrap();
+    let client = client.partition_client(&topic_name, 0).await.unwrap();
+    client.get_cached_broker().await.unwrap();
+}
+
+#[tokio::test]
 async fn test_topic_crud() {
     let connection = maybe_skip_kafka_integration!();
     let client = Client::new_plain(vec![connection]).await.unwrap();
