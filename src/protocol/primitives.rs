@@ -565,6 +565,12 @@ where
 }
 
 /// Represents a sequence of Kafka records as NULLABLE_BYTES.
+///
+/// This primitive actually depends on the message version and evolved twice in [KIP-32] and [KIP-98]. We only support
+/// the latest generation (message version 2).
+///
+/// [KIP-32]: https://cwiki.apache.org/confluence/display/KAFKA/KIP-32+-+Add+timestamps+to+Kafka+message
+/// [KIP-98]: https://cwiki.apache.org/confluence/display/KAFKA/KIP-98+-+Exactly+Once+Delivery+and+Transactional+Messaging
 #[derive(Debug, PartialEq, Eq)]
 #[cfg_attr(test, derive(proptest_derive::Arbitrary))]
 pub struct Records(pub Vec<RecordBatch>);
@@ -592,6 +598,7 @@ where
     W: Write,
 {
     fn write(&self, writer: &mut W) -> Result<(), WriteError> {
+        // TODO: it would be nice if we could avoid the copy here by writing the records and then seeking back.
         let mut buf = vec![];
         for record in &self.0 {
             record.write(&mut buf)?;

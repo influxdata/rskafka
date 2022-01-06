@@ -150,8 +150,13 @@ impl RequestBody for FetchRequest {
     const API_KEY: ApiKey = ApiKey::Fetch;
 
     /// That's enough for now.
+    ///
+    /// Note that we do not support fetch request prior to version 4, since this is the version when message version 2
+    /// was introduced ([KIP-98]).
+    ///
+    /// [KIP-98]: https://cwiki.apache.org/confluence/display/KAFKA/KIP-98+-+Exactly+Once+Delivery+and+Transactional+Messaging
     const API_VERSION_RANGE: (ApiVersion, ApiVersion) =
-        (ApiVersion(Int16(0)), ApiVersion(Int16(4)));
+        (ApiVersion(Int16(4)), ApiVersion(Int16(4)));
 
     const FIRST_TAGGED_FIELD_VERSION: ApiVersion = ApiVersion(Int16(12));
 }

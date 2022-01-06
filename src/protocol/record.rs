@@ -1,3 +1,14 @@
+//! The actual payload message which is also the on-disk format for Kafka.
+//!
+/// The format evolved twice in [KIP-32] and [KIP-98]. We only support the latest generation (message version 2).
+///
+/// # References
+/// - [KIP-32]
+/// - [KIP-98]
+/// - <https://kafka.apache.org/documentation/#messageformat>
+///
+/// [KIP-32]: https://cwiki.apache.org/confluence/display/KAFKA/KIP-32+-+Add+timestamps+to+Kafka+message
+/// [KIP-98]: https://cwiki.apache.org/confluence/display/KAFKA/KIP-98+-+Exactly+Once+Delivery+and+Transactional+Messaging
 use std::io::{Cursor, Read, Write};
 
 use crc::{Crc, CRC_32_ISCSI};
