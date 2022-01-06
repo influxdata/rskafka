@@ -144,7 +144,7 @@ impl PartitionClient {
         }
 
         if let Some(error) = response.error {
-            return Err(Error::ServerError(error, Default::default()))
+            return Err(Error::ServerError(error, Default::default()));
         }
 
         Ok(response.base_offset.0)
