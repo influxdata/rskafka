@@ -17,6 +17,7 @@ use super::{
 
 mod metadata;
 pub use metadata::*;
+pub mod produce;
 
 #[derive(Error, Debug)]
 pub enum ReadVersionedError {
