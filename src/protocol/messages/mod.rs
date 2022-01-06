@@ -20,6 +20,8 @@ mod create_topic;
 pub use create_topic::*;
 mod header;
 pub use header::*;
+mod list_offsets;
+pub use list_offsets::*;
 mod metadata;
 pub use metadata::*;
 mod produce;
