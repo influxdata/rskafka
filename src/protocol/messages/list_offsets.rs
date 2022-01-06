@@ -2,6 +2,7 @@
 //!
 //! # References
 //! - [KIP-79](https://cwiki.apache.org/confluence/pages/viewpage.action?pageId=65868090)
+//! - [KIP-98](https://cwiki.apache.org/confluence/display/KAFKA/KIP-98+-+Exactly+Once+Delivery+and+Transactional+Messaging)
 use std::io::{Read, Write};
 
 use crate::protocol::{
@@ -39,8 +40,10 @@ pub struct ListOffsetsRequestPartition {
 
     /// The maximum number of offsets to report.
     ///
+    /// Defaults to 1.
+    ///
     /// Removed in version 1.
-    pub max_num_offsets: Int32,
+    pub max_num_offsets: Option<Int32>,
 }
 
 impl<W> WriteVersionedType<W> for ListOffsetsRequestPartition
@@ -59,7 +62,8 @@ where
         self.timestamp.write(writer)?;
 
         if v < 1 {
-            self.max_num_offsets.write(writer)?;
+            // Only fetch 1 offset by default.
+            self.max_num_offsets.unwrap_or(Int32(1)).write(writer)?;
         }
 
         Ok(())
@@ -107,8 +111,12 @@ pub struct ListOffsetsRequest {
     /// enables the inclusion of the list of aborted transactions in the result, which allows consumers to discard
     /// `ABORTED` transactional records.
     ///
+    /// As per [KIP-98] the default is default is `READ_UNCOMMITTED`.
+    ///
     /// Added in version 2.
-    pub isolation_level: Int8,
+    ///
+    /// [KIP-98]: https://cwiki.apache.org/confluence/display/KAFKA/KIP-98+-+Exactly+Once+Delivery+and+Transactional+Messaging
+    pub isolation_level: Option<Int8>,
 
     /// Each topic in the request.
     pub topics: Vec<ListOffsetsRequestTopic>,
@@ -129,7 +137,8 @@ where
         self.replica_id.write(writer)?;
 
         if v >= 2 {
-            self.isolation_level.write(writer)?;
+            // The default is default is `READ_UNCOMMITTED`.
+            self.isolation_level.unwrap_or(Int8(0)).write(writer)?;
         }
 
         write_versioned_array(writer, version, Some(&self.topics))?;

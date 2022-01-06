@@ -61,14 +61,14 @@ impl PartitionClient {
                 // `-1` because we're a normal consumer
                 replica_id: Int32(-1),
                 // `READ_COMMITTED`
-                isolation_level: Int8(1),
+                isolation_level: Some(Int8(1)),
                 topics: vec![ListOffsetsRequestTopic {
                     name: String_(self.topic.to_owned()),
                     partitions: vec![ListOffsetsRequestPartition {
                         partition_index: Int32(self.partition),
                         // latest offset
                         timestamp: Int64(-1),
-                        max_num_offsets: Int32(1),
+                        max_num_offsets: Some(Int32(1)),
                     }],
                 }],
             })
