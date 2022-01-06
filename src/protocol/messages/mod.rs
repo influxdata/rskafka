@@ -62,6 +62,16 @@ where
     ) -> Result<(), WriteVersionedError>;
 }
 
+impl<'a, W: Write, T: WriteVersionedType<W>> WriteVersionedType<W> for &'a T {
+    fn write_versioned(
+        &self,
+        writer: &mut W,
+        version: ApiVersion,
+    ) -> Result<(), WriteVersionedError> {
+        T::write_versioned(self, writer, version)
+    }
+}
+
 /// Specifies a request body.
 pub trait RequestBody {
     /// The response type that will follow when issuing this request.
@@ -85,6 +95,13 @@ pub trait RequestBody {
     ///
     /// It's OK to specify a version here that is larger then the highest supported version.
     const FIRST_TAGGED_FIELD_VERSION: ApiVersion;
+}
+
+impl<'a, T: RequestBody> RequestBody for &T {
+    type ResponseBody = T::ResponseBody;
+    const API_KEY: ApiKey = T::API_KEY;
+    const API_VERSION_RANGE: (ApiVersion, ApiVersion) = T::API_VERSION_RANGE;
+    const FIRST_TAGGED_FIELD_VERSION: ApiVersion = T::FIRST_TAGGED_FIELD_VERSION;
 }
 
 fn read_versioned_array<R: Read, T: ReadVersionedType<R>>(
