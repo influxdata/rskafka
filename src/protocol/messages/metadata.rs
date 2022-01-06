@@ -5,9 +5,9 @@ use super::{
 };
 use crate::protocol::messages::{read_versioned_array, write_versioned_array};
 use crate::protocol::{
-    error::Error,
     api_key::ApiKey,
     api_version::ApiVersion,
+    error::Error,
     primitives::*,
     traits::{ReadType, WriteType},
 };
