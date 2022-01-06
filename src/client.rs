@@ -167,6 +167,8 @@ impl Client {
         };
 
         // perform request
+        // TODO: Need to publish to the partition leader, not to some arbitrary broker. This also needs to be taken into
+        //       account while grouping the records, since we might need to publish to multiple brokers.
         let broker = self.brokers.get_cached_broker().await?;
         let response = broker.request(request).await?;
 
