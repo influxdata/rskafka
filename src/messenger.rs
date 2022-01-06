@@ -41,6 +41,13 @@ struct ActiveRequest {
     use_tagged_fields: bool,
 }
 
+pub struct EncodedRequest {
+    correlation_id: i32,
+    data: Vec<u8>,
+    use_tagged_fields: bool,
+    body_api_version: ApiVersion,
+}
+
 /// A connection to a single broker
 ///
 /// Note: Requests to the same [`Messenger`] will be pipelined by Kafka
@@ -133,10 +140,9 @@ where
         *self.version_ranges.write().expect("lock poisoned") = ranges;
     }
 
-    pub async fn request<R>(&self, msg: R) -> Result<R::ResponseBody, RequestError>
+    pub fn encode_request<R>(&self, msg: R) -> Result<EncodedRequest, RequestError>
     where
         R: RequestBody + WriteVersionedType<Vec<u8>>,
-        R::ResponseBody: ReadVersionedType<Cursor<Vec<u8>>>,
     {
         let body_api_version = self
             .version_ranges
@@ -177,23 +183,58 @@ where
             .expect("Writing header to buffer should always work");
         msg.write_versioned(&mut buf, body_api_version)?;
 
-        let (tx, rx) = channel();
-        self.active_requests.lock().await.insert(
+        Ok(EncodedRequest {
+            data: buf,
             correlation_id,
-            ActiveRequest {
-                channel: tx,
-                use_tagged_fields,
-            },
+            use_tagged_fields,
+            body_api_version,
+        })
+    }
+
+    pub async fn request<R>(&self, msg: R) -> Result<R::ResponseBody, RequestError>
+    where
+        R: RequestBody + WriteVersionedType<Vec<u8>>,
+        R::ResponseBody: ReadVersionedType<Cursor<Vec<u8>>>,
+    {
+        let encoded = self.encode_request(msg)?;
+        self.request_encoded(&encoded).await
+    }
+
+    /// Perform a request with an already [`EncodedRequest`]
+    ///
+    /// # Panic
+    ///
+    /// Panics if a concurrent call is in progress with the same [`EncodedRequest`]
+    ///
+    pub async fn request_encoded<R>(&self, encoded: &EncodedRequest) -> Result<R, RequestError>
+    where
+        R: ReadVersionedType<Cursor<Vec<u8>>>,
+    {
+        let (tx, rx) = channel();
+
+        assert!(
+            self.active_requests
+                .lock()
+                .await
+                .insert(
+                    encoded.correlation_id,
+                    ActiveRequest {
+                        channel: tx,
+                        use_tagged_fields: encoded.use_tagged_fields,
+                    },
+                )
+                .is_none(),
+            "In-progress request with same correlation ID"
         );
 
         {
             let mut stream_write = self.stream_write.lock().await;
-            stream_write.write_message(&buf).await?;
+            stream_write.write_message(&encoded.data).await?;
             stream_write.flush().await?;
         }
 
         let mut response = rx.await.expect("Who closed this channel?!");
-        let body = R::ResponseBody::read_versioned(&mut response.data, body_api_version)?;
+        let body = R::read_versioned(&mut response.data, encoded.body_api_version)?;
 
         // check if we fully consumed the message, otherwise there might be a bug in our protocol code
         let read_bytes = response.data.position();
