@@ -56,8 +56,9 @@ impl PartitionClient {
     ///
     /// # Panics
     /// If `records` is empty.
-    pub async fn produce(&self, records: Vec<Record>) -> Result<i64> {
+    pub async fn produce(&self, records: Vec<Record>) -> Result<Vec<i64>> {
         assert!(!records.is_empty(), "records must be non-empty");
+        let n = records.len() as i64;
 
         // TODO: Retry on failure
 
@@ -91,7 +92,7 @@ impl PartitionClient {
             records: Records(vec![RecordBatch {
                 base_offset: 0,
                 partition_leader_epoch: 0,
-                last_offset_delta: 0,
+                last_offset_delta: n as i32 - 1,
                 is_transactional: false,
                 base_sequence: -1,
                 compression: RecordBatchCompression::NoCompression,
@@ -151,7 +152,7 @@ impl PartitionClient {
 
             match response.error {
                 Some(e) => Err(Error::ServerError(e, Default::default())),
-                None => Ok(response.base_offset.0),
+                None => Ok((0..n).map(|x| x + response.base_offset.0).collect()),
             }
         })
         .await

@@ -1,6 +1,6 @@
 use minikafka::{
     client::{error::Error as ClientError, partition::PartitionClient, Client},
-    record::Record,
+    record::{Record, RecordAndOffset},
     ProtocolError,
 };
 use std::{collections::BTreeMap, str::FromStr, sync::Arc};
@@ -229,11 +229,12 @@ async fn test_get_high_watermark() {
         .await
         .unwrap();
 
-    let expected = partition_client
+    let offsets = partition_client
         .produce(vec![record_early.clone()])
         .await
-        .unwrap()
-        + 1;
+        .unwrap();
+    assert_eq!(offsets.len(), 1);
+    let expected = offsets[0] + 1;
 
     assert_eq!(
         partition_client.get_high_watermark().await.unwrap(),
@@ -244,9 +245,9 @@ async fn test_get_high_watermark() {
 async fn assert_produce_consume<F1, G1, F2, G2>(f_produce: F1, f_consume: F2)
 where
     F1: Fn(Arc<PartitionClient>, String, String, i32, Vec<Record>) -> G1,
-    G1: std::future::Future<Output = ()>,
+    G1: std::future::Future<Output = Vec<i64>>,
     F2: Fn(Arc<PartitionClient>, String, String, i32, usize) -> G2,
-    G2: std::future::Future<Output = Vec<Record>>,
+    G2: std::future::Future<Output = Vec<RecordAndOffset>>,
 {
     let connection = maybe_skip_kafka_integration!();
     let topic_name = random_topic_name();
@@ -277,26 +278,36 @@ where
     };
 
     // produce
-    f_produce(
-        Arc::clone(&partition_client),
-        connection.clone(),
-        topic_name.clone(),
-        1,
-        vec![record_1.clone(), record_2.clone()],
-    )
-    .await;
-    f_produce(
-        Arc::clone(&partition_client),
-        connection.clone(),
-        topic_name.clone(),
-        1,
-        vec![record_3.clone()],
-    )
-    .await;
+    let mut offsets = vec![];
+    offsets.append(
+        &mut f_produce(
+            Arc::clone(&partition_client),
+            connection.clone(),
+            topic_name.clone(),
+            1,
+            vec![record_1.clone(), record_2.clone()],
+        )
+        .await,
+    );
+    offsets.append(
+        &mut f_produce(
+            Arc::clone(&partition_client),
+            connection.clone(),
+            topic_name.clone(),
+            1,
+            vec![record_3.clone()],
+        )
+        .await,
+    );
 
     // consume
-    let records = f_consume(partition_client, connection, topic_name, 1, 3).await;
-    assert_eq!(records, vec![record_1, record_2, record_3]);
+    let actual = f_consume(partition_client, connection, topic_name, 1, 3).await;
+    let expected: Vec<_> = offsets
+        .into_iter()
+        .zip([record_1, record_2, record_3])
+        .map(|(offset, record)| RecordAndOffset { record, offset })
+        .collect();
+    assert_eq!(actual, expected);
 }
 
 async fn produce_rdkafka(
@@ -305,7 +316,7 @@ async fn produce_rdkafka(
     topic_name: String,
     partition_index: i32,
     records: Vec<Record>,
-) {
+) -> Vec<i64> {
     rdkafka_helper::produce(
         &connection,
         records
@@ -313,7 +324,7 @@ async fn produce_rdkafka(
             .map(|record| (topic_name.clone(), partition_index, record))
             .collect(),
     )
-    .await;
+    .await
 }
 
 async fn produce_minikafka(
@@ -322,11 +333,11 @@ async fn produce_minikafka(
     _topic_name: String,
     _partition_index: i32,
     records: Vec<Record>,
-) {
+) -> Vec<i64> {
     // TODO: remove this hack
     tokio::time::sleep(std::time::Duration::from_secs(1)).await;
 
-    partition_client.produce(records).await.unwrap();
+    partition_client.produce(records).await.unwrap()
 }
 
 async fn consume_rdkafka(
@@ -335,7 +346,7 @@ async fn consume_rdkafka(
     topic_name: String,
     partition_index: i32,
     n: usize,
-) -> Vec<Record> {
+) -> Vec<RecordAndOffset> {
     rdkafka_helper::consume(&connection, &topic_name, partition_index, n).await
 }
 
@@ -345,7 +356,7 @@ async fn consume_minikafka(
     _topic_name: String,
     _partition_index: i32,
     n: usize,
-) -> Vec<Record> {
+) -> Vec<RecordAndOffset> {
     // TODO: use a proper stream here
     let mut records = vec![];
     let mut offset = 0;
@@ -358,7 +369,7 @@ async fn consume_minikafka(
         assert!(!res.is_empty());
         for record in res {
             offset = offset.max(record.offset);
-            records.push(record.record);
+            records.push(record);
         }
     }
     records.into_iter().take(n).collect()
