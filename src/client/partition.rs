@@ -63,77 +63,64 @@ impl PartitionClient {
 
     /// Get high watermark for this partition.
     pub async fn get_high_watermark(&self) -> Result<i64> {
-        let mut refreshed_broker = false;
-        let mut backoff = Backoff::new(&self.backoff_config);
-        let partition = loop {
-            let response = self
-                .get_cached_broker()
-                .await?
-                .request(ListOffsetsRequest {
-                    // `-1` because we're a normal consumer
-                    replica_id: Int32(-1),
-                    // `READ_COMMITTED`
-                    isolation_level: Some(Int8(1)),
-                    topics: vec![ListOffsetsRequestTopic {
-                        name: String_(self.topic.to_owned()),
-                        partitions: vec![ListOffsetsRequestPartition {
-                            partition_index: Int32(self.partition),
-                            // latest offset
-                            timestamp: Int64(-1),
-                            max_num_offsets: Some(Int32(1)),
+        let partition = self
+            .maybe_retry("get_high_watermark", || async move {
+                let response = self
+                    .get_cached_broker()
+                    .await?
+                    .request(ListOffsetsRequest {
+                        // `-1` because we're a normal consumer
+                        replica_id: Int32(-1),
+                        // `READ_COMMITTED`
+                        isolation_level: Some(Int8(1)),
+                        topics: vec![ListOffsetsRequestTopic {
+                            name: String_(self.topic.to_owned()),
+                            partitions: vec![ListOffsetsRequestPartition {
+                                partition_index: Int32(self.partition),
+                                // latest offset
+                                timestamp: Int64(-1),
+                                max_num_offsets: Some(Int32(1)),
+                            }],
                         }],
-                    }],
-                })
-                .await?;
+                    })
+                    .await?;
 
-            if response.topics.len() != 1 {
-                return Err(Error::InvalidResponse(format!(
-                    "Expected 1 topic to be returned but got {}",
-                    response.topics.len()
-                )));
-            }
-            let topic = response.topics.into_iter().next().unwrap();
-
-            if topic.name.0 != self.topic {
-                return Err(Error::InvalidResponse(format!(
-                    "Expected data for topic '{}' but got data for topic '{}'",
-                    self.topic, topic.name.0
-                )));
-            }
-
-            if topic.partitions.len() != 1 {
-                return Err(Error::InvalidResponse(format!(
-                    "Expected 1 partition to be returned but got {}",
-                    topic.partitions.len()
-                )));
-            }
-            let partition = topic.partitions.into_iter().next().unwrap();
-
-            if partition.partition_index.0 != self.partition {
-                return Err(Error::InvalidResponse(format!(
-                    "Expected data for partition {} but got data for partition {}",
-                    self.partition, partition.partition_index.0
-                )));
-            }
-
-            match partition.error_code {
-                Some(ProtocolError::NotLeaderOrFollower) if !refreshed_broker => {
-                    // Try getting a new broker connection
-                    self.invalidate_cached_broker().await;
-                    refreshed_broker = true;
+                if response.topics.len() != 1 {
+                    return Err(Error::InvalidResponse(format!(
+                        "Expected 1 topic to be returned but got {}",
+                        response.topics.len()
+                    )));
                 }
-                Some(ProtocolError::LeaderNotAvailable | ProtocolError::OffsetNotAvailable) => {
-                    let backoff = backoff.next();
-                    println!(
-                        "Leader not available - backing off for {} seconds",
-                        backoff.as_secs()
-                    );
-                    tokio::time::sleep(backoff).await;
+                let topic = response.topics.into_iter().next().unwrap();
+
+                if topic.name.0 != self.topic {
+                    return Err(Error::InvalidResponse(format!(
+                        "Expected data for topic '{}' but got data for topic '{}'",
+                        self.topic, topic.name.0
+                    )));
                 }
-                Some(err) => return Err(Error::ServerError(err, String::new())),
-                _ => break partition,
-            }
-        };
+
+                if topic.partitions.len() != 1 {
+                    return Err(Error::InvalidResponse(format!(
+                        "Expected 1 partition to be returned but got {}",
+                        topic.partitions.len()
+                    )));
+                }
+                let partition = topic.partitions.into_iter().next().unwrap();
+
+                if partition.partition_index.0 != self.partition {
+                    return Err(Error::InvalidResponse(format!(
+                        "Expected data for partition {} but got data for partition {}",
+                        self.partition, partition.partition_index.0
+                    )));
+                }
+
+                match partition.error_code {
+                    Some(err) => Err(Error::ServerError(err, String::new())),
+                    None => Ok(partition),
+                }
+            })
+            .await?;
 
         match (
             partition.old_style_offsets.as_ref(),
@@ -158,6 +145,48 @@ impl PartitionClient {
         }
     }
 
+    /// Takes a `request_name` and a function yielding a fallible future
+    /// and handles certain classes of error
+    async fn maybe_retry<R, F, T>(&self, request_name: &str, f: R) -> Result<T>
+    where
+        R: Fn() -> F,
+        F: std::future::Future<Output = Result<T>>,
+    {
+        let mut backoff = Backoff::new(&self.backoff_config);
+
+        loop {
+            let error = match f().await {
+                Ok(v) => return Ok(v),
+                Err(e) => e,
+            };
+
+            match error {
+                Error::Connection(_) => self.invalidate_cached_broker().await,
+                Error::ServerError(ProtocolError::LeaderNotAvailable, _) => {}
+                Error::ServerError(ProtocolError::OffsetNotAvailable, _) => {}
+                Error::ServerError(ProtocolError::NotLeaderOrFollower, _) => {
+                    self.invalidate_cached_broker().await;
+                }
+                _ => {
+                    println!(
+                        "{} request encountered fatal error: {}",
+                        request_name, error
+                    );
+                    return Err(error);
+                }
+            }
+
+            let backoff = backoff.next();
+            println!(
+                "{} request encountered non-fatal error \"{}\" - backing off for {} seconds",
+                request_name,
+                error,
+                backoff.as_secs()
+            );
+            tokio::time::sleep(backoff).await;
+        }
+    }
+
     /// Invalidate the cached broker connection
     #[allow(dead_code)]
     async fn invalidate_cached_broker(&self) {
@@ -172,6 +201,11 @@ impl PartitionClient {
         if let Some(broker) = &*current_broker {
             return Ok(Arc::clone(broker));
         }
+
+        println!(
+            "Creating new broker connection for partition {} in topic \"{}\"",
+            self.partition, self.topic
+        );
 
         let leader = self.get_leader().await?;
         let broker = self.brokers.connect(leader).await?.ok_or_else(|| {

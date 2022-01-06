@@ -111,6 +111,7 @@ impl BrokerConnector {
     }
 
     async fn connect_impl(&self, url: &str) -> Result<BrokerConnection> {
+        println!("Establishing new connection to: {}", url);
         let transport = Transport::connect(url, self.tls_config.clone())
             .await
             .map_err(|error| Error::TransportError {
