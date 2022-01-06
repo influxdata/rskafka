@@ -302,9 +302,19 @@ async fn test_get_high_watermark() {
     .unwrap();
 
     // add some data
-    let record = record();
+    // use out-of order timestamps to ensure our "lastest offset" logic works
+    let record_early = record();
+    let record_late = Record {
+        timestamp: record_early.timestamp + time::Duration::SECOND,
+        ..record_early.clone()
+    };
     let results = client
-        .produce(vec![(topic_name.clone(), 0, record.clone())])
+        .produce(vec![(topic_name.clone(), 0, record_late.clone())])
+        .await
+        .unwrap();
+    results.unpack().unwrap();
+    let results = client
+        .produce(vec![(topic_name.clone(), 0, record_early.clone())])
         .await
         .unwrap();
     let results = results.unpack().unwrap();
