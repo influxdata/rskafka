@@ -5,3 +5,5 @@ pub mod error;
 mod messenger;
 mod protocol;
 pub mod record;
+
+pub type ProtocolError = protocol::error::Error;

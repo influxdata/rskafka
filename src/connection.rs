@@ -56,7 +56,8 @@ impl BrokerPool {
 
         let response = broker
             .request(MetadataRequest {
-                topics: vec![],
+                // Not interested in topic metadata
+                topics: Some(vec![]),
                 allow_auto_topic_creation: None,
             })
             .await

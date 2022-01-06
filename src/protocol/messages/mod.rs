@@ -16,6 +16,8 @@ use super::{
 
 mod api_versions;
 pub use api_versions::*;
+mod create_topic;
+pub use create_topic::*;
 mod header;
 pub use header::*;
 mod metadata;

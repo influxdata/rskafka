@@ -14,7 +14,9 @@ use crate::protocol::{
 #[derive(Debug)]
 pub struct MetadataRequest {
     /// The topics to fetch metadata for
-    pub topics: Vec<MetadataRequestTopic>,
+    ///
+    /// Requests data for all topics if None
+    pub topics: Option<Vec<MetadataRequestTopic>>,
 
     /// If this is true, the broker may auto-create topics that we requested
     /// which do not already exist, if it is configured to do so.
@@ -54,7 +56,7 @@ where
             });
         }
 
-        write_versioned_array(writer, version, Some(&self.topics))?;
+        write_versioned_array(writer, version, self.topics.as_deref())?;
         if v >= 4 {
             match self.allow_auto_topic_creation {
                 // The default behaviour is to allow topic creation
@@ -172,13 +174,13 @@ where
 #[derive(Debug)]
 pub struct MetadataResponseTopic {
     /// The topic error, or 0 if there was no error
-    pub error_code: Int32,
+    pub error_code: Int16,
     /// The topic name
     pub name: String_,
-    /// Each partition in the topic
-    pub partitions: Vec<MetadataResponsePartition>,
     /// True if the topic is internal
     pub is_internal: Option<Boolean>,
+    /// Each partition in the topic
+    pub partitions: Vec<MetadataResponsePartition>,
 }
 
 impl<R> ReadVersionedType<R> for MetadataResponseTopic
@@ -189,16 +191,16 @@ where
         let v = version.0 .0;
         assert!(v <= 4);
 
-        let error_code = Int32::read(reader)?;
+        let error_code = Int16::read(reader)?;
         let name = String_::read(reader)?;
-        let partitions = read_versioned_array(reader, version)?.unwrap_or_default();
         let is_internal = (v >= 1).then(|| Boolean::read(reader)).transpose()?;
+        let partitions = read_versioned_array(reader, version)?.unwrap_or_default();
 
         Ok(Self {
             error_code,
             name,
-            partitions,
             is_internal,
+            partitions,
         })
     }
 }
@@ -212,9 +214,9 @@ pub struct MetadataResponsePartition {
     /// The ID of the leader broker
     pub leader_id: Int32,
     /// The set of all nodes that host this partition
-    pub replica_nodes: Int32,
+    pub replica_nodes: Array<Int32>,
     /// The set of all nodes that are in sync with the leader for this partition
-    pub isr_nodes: Int32,
+    pub isr_nodes: Array<Int32>,
 }
 
 impl<R> ReadVersionedType<R> for MetadataResponsePartition
@@ -229,8 +231,8 @@ where
             error_code: Int16::read(reader)?,
             partition_index: Int32::read(reader)?,
             leader_id: Int32::read(reader)?,
-            replica_nodes: Int32::read(reader)?,
-            isr_nodes: Int32::read(reader)?,
+            replica_nodes: Array::read(reader)?,
+            isr_nodes: Array::read(reader)?,
         })
     }
 }

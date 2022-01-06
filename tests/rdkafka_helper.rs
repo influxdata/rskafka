@@ -3,7 +3,6 @@ use std::time::Duration;
 use futures::{StreamExt, TryStreamExt};
 use minikafka::record::Record;
 use rdkafka::{
-    admin::{AdminClient, AdminOptions, NewTopic, TopicReplication},
     consumer::{Consumer, StreamConsumer},
     message::{Headers, OwnedHeaders},
     producer::{FutureProducer, FutureRecord},
@@ -11,26 +10,6 @@ use rdkafka::{
     ClientConfig, Message, TopicPartitionList,
 };
 use time::OffsetDateTime;
-
-/// Create topic
-pub async fn create_topic(connection: &str, topic_name: &str, n_partitions: usize) {
-    // TODO: use minikafka instead of rdkafka
-
-    // create client
-    let mut cfg = ClientConfig::new();
-    cfg.set("bootstrap.servers", connection);
-    cfg.set("message.timeout.ms", "5000");
-    let client: AdminClient<_> = cfg.create().unwrap();
-
-    // setup request
-    let topic = NewTopic::new(topic_name, n_partitions as i32, TopicReplication::Fixed(1));
-
-    let opts = AdminOptions::default();
-    let mut results = client.create_topics([&topic], &opts).await.unwrap();
-    assert_eq!(results.len(), 1, "created exactly one topic");
-    let result = results.pop().expect("just checked the vector length");
-    result.unwrap();
-}
 
 /// Produce.
 pub async fn produce(connection: &str, records: Vec<(String, i32, Record)>) {

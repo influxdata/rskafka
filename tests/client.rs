@@ -1,6 +1,9 @@
-use std::{collections::BTreeMap, sync::Arc};
-
-use minikafka::{client::Client, record::Record};
+use minikafka::{
+    client::{Client, Error as ClientError},
+    record::Record,
+    ProtocolError,
+};
+use std::{collections::BTreeMap, str::FromStr, sync::Arc};
 use time::OffsetDateTime;
 
 mod rdkafka_helper;
@@ -67,7 +70,43 @@ fn now() -> OffsetDateTime {
 #[tokio::test]
 async fn test_plain() {
     let connection = maybe_skip_kafka_integration!();
-    Client::new_plain(vec![connection]).await;
+    Client::new_plain(vec![connection]).await.unwrap();
+}
+
+#[tokio::test]
+async fn test_topic_crud() {
+    let connection = maybe_skip_kafka_integration!();
+    let client = Client::new_plain(vec![connection]).await.unwrap();
+    let topics = client.list_topics().await.unwrap();
+
+    let prefix = "test_topic_crud_";
+
+    let mut max_id = 0;
+    for topic in topics {
+        if let Some(maybe_int) = topic.strip_prefix(prefix) {
+            if let Ok(i) = usize::from_str(maybe_int) {
+                max_id = max_id.max(i);
+            }
+        }
+    }
+
+    let new_topic = format!("{}{}", prefix, max_id + 1);
+    client.create_topic(&new_topic, 1, 1).await.unwrap();
+
+    let topics = client.list_topics().await.unwrap();
+
+    assert!(
+        topics.contains(&new_topic),
+        "topic {} not found in {:?}",
+        new_topic,
+        topics
+    );
+
+    let err = client.create_topic(&new_topic, 1, 1).await.unwrap_err();
+    match err {
+        ClientError::ServerError(ProtocolError::TopicAlreadyExists, _) => {}
+        _ => panic!("Unexpected error: {}", err),
+    }
 }
 
 // Disabled as currently no TLS integration tests
@@ -106,7 +145,9 @@ async fn test_tls() {
         .unwrap();
 
     let connection = maybe_skip_kafka_integration!();
-    Client::new_with_tls(vec![connection], Arc::new(config)).await;
+    Client::new_with_tls(vec![connection], Arc::new(config))
+        .await
+        .unwrap();
 }
 
 #[tokio::test]
@@ -115,10 +156,13 @@ async fn test_produce_empty() {
     let topic_name = random_topic_name();
     let n_partitions = 2;
 
-    rdkafka_helper::create_topic(&connection, &topic_name, n_partitions).await;
+    let client = Client::new_plain(vec![connection]).await.unwrap();
+    client
+        .create_topic(&topic_name, n_partitions, 1)
+        .await
+        .unwrap();
 
-    let c_minikafka = Client::new_plain(vec![connection]).await;
-    let results = c_minikafka.produce(vec![]).await.unwrap();
+    let results = client.produce(vec![]).await.unwrap();
     let results = results.unpack().unwrap();
     assert!(results.is_empty());
 }
@@ -129,7 +173,11 @@ async fn test_produce_rdkafka_consume_rdkafka() {
     let topic_name = random_topic_name();
     let n_partitions = 2;
 
-    rdkafka_helper::create_topic(&connection, &topic_name, n_partitions).await;
+    let client = Client::new_plain(vec![connection.clone()]).await.unwrap();
+    client
+        .create_topic(&topic_name, n_partitions, 1)
+        .await
+        .unwrap();
 
     let record = Record {
         key: b"".to_vec(),
@@ -154,8 +202,6 @@ async fn test_produce_minikafka_consume_rdkafka() {
     let topic_name = random_topic_name();
     let n_partitions = 2;
 
-    rdkafka_helper::create_topic(&connection, &topic_name, n_partitions).await;
-
     let record = Record {
         key: b"".to_vec(),
         value: b"hello kafka".to_vec(),
@@ -164,8 +210,13 @@ async fn test_produce_minikafka_consume_rdkafka() {
     };
 
     // produce
-    let c_minikafka = Client::new_plain(vec![connection.clone()]).await;
-    let results = c_minikafka
+    let client = Client::new_plain(vec![connection.clone()]).await.unwrap();
+    client
+        .create_topic(&topic_name, n_partitions, 1)
+        .await
+        .unwrap();
+
+    let results = client
         .produce(vec![(topic_name.clone(), 1, record.clone())])
         .await
         .unwrap();
@@ -185,7 +236,11 @@ async fn test_produce_rdkafka_consume_minikafka() {
     let topic_name = random_topic_name();
     let n_partitions = 2;
 
-    rdkafka_helper::create_topic(&connection, &topic_name, n_partitions).await;
+    let client = Client::new_plain(vec![connection.clone()]).await.unwrap();
+    client
+        .create_topic(&topic_name, n_partitions, 1)
+        .await
+        .unwrap();
 
     let record = Record {
         key: b"".to_vec(),
@@ -206,7 +261,11 @@ async fn test_produce_minikafka_consume_minikafka() {
     let topic_name = random_topic_name();
     let n_partitions = 2;
 
-    rdkafka_helper::create_topic(&connection, &topic_name, n_partitions).await;
+    let client = Client::new_plain(vec![connection.clone()]).await.unwrap();
+    client
+        .create_topic(&topic_name, n_partitions, 1)
+        .await
+        .unwrap();
 
     let record = Record {
         key: b"".to_vec(),
@@ -216,8 +275,7 @@ async fn test_produce_minikafka_consume_minikafka() {
     };
 
     // produce
-    let c_minikafka = Client::new_plain(vec![connection.clone()]).await;
-    let results = c_minikafka
+    let results = client
         .produce(vec![(topic_name.clone(), 1, record.clone())])
         .await
         .unwrap();
