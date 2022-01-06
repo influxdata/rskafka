@@ -161,9 +161,8 @@ async fn test_tls() {
         .unwrap();
 }
 
-// TODO: Temporarily disabled as not supported
-#[ignore]
 #[tokio::test]
+#[should_panic(expected = "records must be non-empty")]
 async fn test_produce_empty() {
     let connection = maybe_skip_kafka_integration!();
     let topic_name = random_topic_name();
