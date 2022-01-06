@@ -45,6 +45,8 @@ where
         version: ApiVersion,
     ) -> Result<(), WriteVersionedError> {
         let v = version.0 .0;
+        assert!(v <= 4);
+
         if v < 4 && self.allow_auto_topic_creation.is_some() {
             return Err(WriteVersionedError::FieldNotAvailable {
                 version,

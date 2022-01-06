@@ -101,7 +101,7 @@ where
                 {
                     // optionally read tagged fields from the header as well
                     if active_request.use_tagged_fields {
-                        header.tagged_fields = TaggedFields::read(&mut cursor).unwrap();
+                        header.tagged_fields = Some(TaggedFields::read(&mut cursor).unwrap());
                     }
 
                     // we don't care if the other side is gone

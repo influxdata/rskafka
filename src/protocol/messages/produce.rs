@@ -138,7 +138,7 @@ pub struct ProduceResponsePartitionResponse {
     /// If CreateTime is used for the topic, the timestamp will be -1. If LogAppendTime is used for the topic, the
     /// timestamp will be the broker local time when the messages are appended.
     ///
-    /// Added in version 3.
+    /// Added in version 2.
     pub log_append_time_ms: Option<Int64>,
 }
 
