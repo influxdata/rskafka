@@ -1,7 +1,9 @@
+use crate::backoff::{Backoff, BackoffConfig};
 use crate::{
     client::error::{Error, Result},
     connection::{BrokerConnection, BrokerConnector},
     protocol::{
+        error::Error as ProtocolError,
         messages::{ListOffsetsRequest, ListOffsetsRequestPartition, ListOffsetsRequestTopic},
         primitives::{Int32, Int64, Int8, String_},
     },
@@ -26,6 +28,8 @@ pub struct PartitionClient {
     partition: i32,
     brokers: Arc<BrokerConnector>,
 
+    backoff_config: BackoffConfig,
+
     /// Current broker connection if any
     current_broker: Mutex<Option<BrokerConnection>>,
 }
@@ -36,6 +40,7 @@ impl PartitionClient {
             topic,
             partition,
             brokers,
+            backoff_config: Default::default(),
             current_broker: Mutex::new(None),
         }
     }
@@ -58,59 +63,77 @@ impl PartitionClient {
 
     /// Get high watermark for this partition.
     pub async fn get_high_watermark(&self) -> Result<i64> {
-        let response = self
-            .get_cached_broker()
-            .await?
-            .request(ListOffsetsRequest {
-                // `-1` because we're a normal consumer
-                replica_id: Int32(-1),
-                // `READ_COMMITTED`
-                isolation_level: Some(Int8(1)),
-                topics: vec![ListOffsetsRequestTopic {
-                    name: String_(self.topic.to_owned()),
-                    partitions: vec![ListOffsetsRequestPartition {
-                        partition_index: Int32(self.partition),
-                        // latest offset
-                        timestamp: Int64(-1),
-                        max_num_offsets: Some(Int32(1)),
+        let mut refreshed_broker = false;
+        let mut backoff = Backoff::new(&self.backoff_config);
+        let partition = loop {
+            let response = self
+                .get_cached_broker()
+                .await?
+                .request(ListOffsetsRequest {
+                    // `-1` because we're a normal consumer
+                    replica_id: Int32(-1),
+                    // `READ_COMMITTED`
+                    isolation_level: Some(Int8(1)),
+                    topics: vec![ListOffsetsRequestTopic {
+                        name: String_(self.topic.to_owned()),
+                        partitions: vec![ListOffsetsRequestPartition {
+                            partition_index: Int32(self.partition),
+                            // latest offset
+                            timestamp: Int64(-1),
+                            max_num_offsets: Some(Int32(1)),
+                        }],
                     }],
-                }],
-            })
-            .await?;
+                })
+                .await?;
 
-        if response.topics.len() != 1 {
-            return Err(Error::InvalidResponse(format!(
-                "Expected 1 topic to be returned but got {}",
-                response.topics.len()
-            )));
-        }
-        let topic = &response.topics[0];
+            if response.topics.len() != 1 {
+                return Err(Error::InvalidResponse(format!(
+                    "Expected 1 topic to be returned but got {}",
+                    response.topics.len()
+                )));
+            }
+            let topic = response.topics.into_iter().next().unwrap();
 
-        if topic.name.0 != self.topic {
-            return Err(Error::InvalidResponse(format!(
-                "Expected data for topic '{}' but got data for topic '{}'",
-                self.topic, topic.name.0
-            )));
-        }
+            if topic.name.0 != self.topic {
+                return Err(Error::InvalidResponse(format!(
+                    "Expected data for topic '{}' but got data for topic '{}'",
+                    self.topic, topic.name.0
+                )));
+            }
 
-        if topic.partitions.len() != 1 {
-            return Err(Error::InvalidResponse(format!(
-                "Expected 1 partition to be returned but got {}",
-                topic.partitions.len()
-            )));
-        }
-        let partition = &topic.partitions[0];
+            if topic.partitions.len() != 1 {
+                return Err(Error::InvalidResponse(format!(
+                    "Expected 1 partition to be returned but got {}",
+                    topic.partitions.len()
+                )));
+            }
+            let partition = topic.partitions.into_iter().next().unwrap();
 
-        if partition.partition_index.0 != self.partition {
-            return Err(Error::InvalidResponse(format!(
-                "Expected data for partition {} but got data for partition {}",
-                self.partition, partition.partition_index.0
-            )));
-        }
+            if partition.partition_index.0 != self.partition {
+                return Err(Error::InvalidResponse(format!(
+                    "Expected data for partition {} but got data for partition {}",
+                    self.partition, partition.partition_index.0
+                )));
+            }
 
-        if let Some(err) = partition.error_code {
-            return Err(Error::ServerError(err, String::new()));
-        }
+            match partition.error_code {
+                Some(ProtocolError::NotLeaderOrFollower) if !refreshed_broker => {
+                    // Try getting a new broker connection
+                    self.invalidate_cached_broker().await;
+                    refreshed_broker = true;
+                }
+                Some(ProtocolError::LeaderNotAvailable | ProtocolError::OffsetNotAvailable) => {
+                    let backoff = backoff.next();
+                    println!(
+                        "Leader not available - backing off for {} seconds",
+                        backoff.as_secs()
+                    );
+                    tokio::time::sleep(backoff).await;
+                }
+                Some(err) => return Err(Error::ServerError(err, String::new())),
+                _ => break partition,
+            }
+        };
 
         match (
             partition.old_style_offsets.as_ref(),
