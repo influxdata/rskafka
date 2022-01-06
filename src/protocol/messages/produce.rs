@@ -166,12 +166,6 @@ pub struct ProduceResponseResponse {
 
     /// Each partition that we produced to within the topic.
     pub partition_responses: Vec<ProduceResponsePartitionResponse>,
-
-    /// The duration in milliseconds for which the request was throttled due to a quota violation, or zero if the
-    /// request did not violate any quota.
-    ///
-    /// Added in version 1.
-    pub throttle_time_ms: Option<Int32>,
 }
 
 impl<R> ReadVersionedType<R> for ProduceResponseResponse
@@ -185,7 +179,6 @@ where
         Ok(Self {
             name: String_::read(reader)?,
             partition_responses: read_versioned_array(reader, version)?.unwrap_or_default(),
-            throttle_time_ms: (v >= 1).then(|| Int32::read(reader)).transpose()?,
         })
     }
 }
@@ -194,6 +187,11 @@ where
 pub struct ProduceResponse {
     /// Each produce response
     pub responses: Vec<ProduceResponseResponse>,
+
+    /// The duration in milliseconds for which the request was throttled due to a quota violation, or zero if the request did not violate any quota.
+    ///
+    /// Added in version 1.
+    pub throttle_time_ms: Option<Int32>,
 }
 
 impl<R> ReadVersionedType<R> for ProduceResponse
@@ -206,6 +204,7 @@ where
 
         Ok(Self {
             responses: read_versioned_array(reader, version)?.unwrap_or_default(),
+            throttle_time_ms: (v >= 1).then(|| Int32::read(reader)).transpose()?,
         })
     }
 }

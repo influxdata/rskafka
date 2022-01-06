@@ -69,6 +69,11 @@ pub enum RequestError {
 
     #[error("Cannot read/write data")]
     IO(#[from] std::io::Error),
+
+    #[error(
+        "Data left at the end of the message. Got {message_size} bytes but only read {read} bytes"
+    )]
+    TooMuchData { message_size: u64, read: u64 },
 }
 
 impl<RW> Messenger<RW>
@@ -189,6 +194,16 @@ where
 
         let mut response = rx.await.expect("Who closed this channel?!");
         let body = R::ResponseBody::read_versioned(&mut response.data, body_api_version)?;
+
+        // check if we fully consumed the message, otherwise there might be a bug in our protocol code
+        let read_bytes = response.data.position();
+        let message_bytes = response.data.into_inner().len() as u64;
+        if read_bytes != message_bytes {
+            return Err(RequestError::TooMuchData {
+                message_size: message_bytes,
+                read: read_bytes,
+            });
+        }
 
         Ok(body)
     }
