@@ -146,7 +146,7 @@ impl Client {
         &self,
         records: Vec<(String, i32, Record)>,
     ) -> Result<ResultVec<i64, ProtocolError>, ProduceError> {
-        use crate::protocol::messages::produce::{
+        use crate::protocol::messages::{
             ProduceRequest, ProduceRequestPartitionData, ProduceRequestTopicData,
         };
 
