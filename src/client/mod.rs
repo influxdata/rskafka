@@ -4,7 +4,7 @@ use thiserror::Error;
 
 use crate::client::partition::PartitionClient;
 use crate::{
-    connection::BrokerPool,
+    connection::BrokerConnector,
     error::ResultVec,
     protocol::{
         error::Error as ProtocolError,
@@ -53,7 +53,7 @@ pub enum Error {
 pub type Result<T, E = Error> = std::result::Result<T, E>;
 
 pub struct Client {
-    brokers: Arc<BrokerPool>,
+    brokers: Arc<BrokerConnector>,
 }
 
 impl Client {
@@ -74,7 +74,7 @@ impl Client {
         boostrap_brokers: Vec<String>,
         tls_config: Option<Arc<rustls::ClientConfig>>,
     ) -> Result<Self> {
-        let brokers = Arc::new(BrokerPool::new(boostrap_brokers, tls_config));
+        let brokers = Arc::new(BrokerConnector::new(boostrap_brokers, tls_config));
         brokers.refresh_metadata().await?;
 
         Ok(Self { brokers })

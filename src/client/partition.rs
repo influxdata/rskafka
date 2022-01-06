@@ -1,5 +1,5 @@
 use super::{Error, Result};
-use crate::connection::{BrokerConnection, BrokerPool};
+use crate::connection::{BrokerConnection, BrokerConnector};
 use crate::record::Record;
 use std::ops::Range;
 use std::sync::Arc;
@@ -23,14 +23,14 @@ pub struct PartitionClient {
     partition: i32,
 
     #[allow(dead_code)]
-    brokers: Arc<BrokerPool>,
+    brokers: Arc<BrokerConnector>,
 
     /// Current broker connection if any
     current_broker: Mutex<Option<BrokerConnection>>,
 }
 
 impl PartitionClient {
-    pub(super) fn new(topic: String, partition: i32, brokers: Arc<BrokerPool>) -> Self {
+    pub(super) fn new(topic: String, partition: i32, brokers: Arc<BrokerConnector>) -> Self {
         Self {
             topic,
             partition,

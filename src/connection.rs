@@ -31,8 +31,13 @@ pub enum Error {
 
 pub type Result<T, E = Error> = std::result::Result<T, E>;
 
+/// Caches the broker topology and provides the ability to
+///
+/// * Get a cached connection to an arbitrary broker
+/// * Obtain a connection to a specific broker
+///
 /// Maintains a list of brokers within the cluster and caches a connection to a broker
-pub struct BrokerPool {
+pub struct BrokerConnector {
     /// Brokers used to boostrap this pool
     bootstrap_brokers: Vec<String>,
     /// Discovered brokers in the cluster, including bootstrap brokers
@@ -45,7 +50,7 @@ pub struct BrokerPool {
     tls_config: Option<Arc<rustls::ClientConfig>>,
 }
 
-impl BrokerPool {
+impl BrokerConnector {
     pub fn new(
         bootstrap_brokers: Vec<String>,
         tls_config: Option<Arc<rustls::ClientConfig>>,

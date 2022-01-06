@@ -6,6 +6,7 @@ use std::fmt::{Display, Formatter};
 
 #[derive(Debug, Default)]
 pub struct BrokerTopology {
+    /// Brokers keyed by broker ID
     topology: RwLock<HashMap<i32, Broker>>,
 }
 
