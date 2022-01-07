@@ -41,6 +41,12 @@ pub struct PartitionClient {
     current_broker: Mutex<Option<BrokerConnection>>,
 }
 
+impl std::fmt::Debug for PartitionClient {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "PartitionClient({}:{})", self.topic, self.partition)
+    }
+}
+
 impl PartitionClient {
     pub(super) fn new(topic: String, partition: i32, brokers: Arc<BrokerConnector>) -> Self {
         Self {

@@ -13,6 +13,7 @@ use crate::{
 
 pub mod error;
 pub mod partition;
+pub mod producer;
 
 use error::{Error, Result};
 

@@ -11,6 +11,20 @@ pub struct Record {
     pub timestamp: OffsetDateTime,
 }
 
+impl Record {
+    /// Returns the approximate uncompressed size of this [`Record`]
+    pub fn approximate_size(&self) -> usize {
+        self.key.len()
+            + self.value.len()
+            + self
+                .headers
+                .iter()
+                .map(|(k, v)| k.len() + v.len())
+                .sum::<usize>()
+    }
+}
+
+
 /// Record that has offset information attached.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RecordAndOffset {
