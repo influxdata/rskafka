@@ -62,3 +62,58 @@ impl RecordAggregator {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use time::OffsetDateTime;
+
+    #[test]
+    fn test_record_aggregator() {
+        let r1 = Record {
+            key: vec![0; 45],
+            value: vec![0; 2],
+            headers: Default::default(),
+            timestamp: OffsetDateTime::from_unix_timestamp(20).unwrap(),
+        };
+
+        let r2 = Record {
+            value: vec![0; 34],
+            ..r1.clone()
+        };
+
+        assert!(r1.approximate_size() < r2.approximate_size());
+        assert!(r2.approximate_size() < r2.approximate_size() * 2);
+
+        let mut aggregator = RecordAggregator::new(r1.approximate_size() * 2);
+        assert!(aggregator.try_push(r1.clone()).unwrap().is_none());
+        assert!(aggregator.try_push(r1.clone()).unwrap().is_none());
+
+        // Cannot add more data once full
+        assert!(aggregator.try_push(r1.clone()).unwrap().is_some());
+        assert!(aggregator.try_push(r1.clone()).unwrap().is_some());
+
+        assert_eq!(aggregator.flush().len(), 2);
+
+        // Test early flush
+        assert!(aggregator.try_push(r1.clone()).unwrap().is_none());
+        assert_eq!(aggregator.flush().len(), 1);
+
+        assert!(aggregator.try_push(r1.clone()).unwrap().is_none());
+        assert!(aggregator.try_push(r1.clone()).unwrap().is_none());
+        assert_eq!(aggregator.flush().len(), 2);
+
+        // Test empty flush
+        assert_eq!(aggregator.flush().len(), 0);
+
+        // Test flush to make space for larger record
+        assert!(aggregator.try_push(r1.clone()).unwrap().is_none());
+        assert!(aggregator.try_push(r2.clone()).unwrap().is_some());
+        assert_eq!(aggregator.flush().len(), 1);
+        assert!(aggregator.try_push(r2.clone()).unwrap().is_none());
+
+        // Test too large record
+        let mut aggregator = RecordAggregator::new(r1.approximate_size());
+        assert!(aggregator.try_push(r2).unwrap().is_some());
+    }
+}

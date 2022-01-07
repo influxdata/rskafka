@@ -1,8 +1,6 @@
-use crate::client::error::Error as ClientError;
 use futures::future::{Future, FutureExt};
 use pin_project::pin_project;
 use std::pin::Pin;
-use std::sync::Arc;
 use std::task::{Context, Poll};
 use tokio::sync::oneshot;
 
@@ -10,18 +8,18 @@ use tokio::sync::oneshot;
 ///
 /// - Receivers can be created with `BroadcastOnce::receiver`
 /// - The value can be produced with `BroadcastOnce::broadcast`
-pub struct BroadcastOnce {
-    receiver: futures::future::Shared<ReceiveFut>,
-    sender: oneshot::Sender<Result<(), Arc<ClientError>>>,
+pub struct BroadcastOnce<T: Clone> {
+    receiver: futures::future::Shared<ReceiveFut<T>>,
+    sender: oneshot::Sender<T>,
 }
 
-impl std::fmt::Debug for BroadcastOnce {
+impl<T: Clone> std::fmt::Debug for BroadcastOnce<T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "ResultSlot")
     }
 }
 
-impl Default for BroadcastOnce {
+impl<T: Clone> Default for BroadcastOnce<T> {
     fn default() -> Self {
         let (sender, receiver) = oneshot::channel();
         Self {
@@ -31,14 +29,14 @@ impl Default for BroadcastOnce {
     }
 }
 
-impl BroadcastOnce {
+impl<T: Clone> BroadcastOnce<T> {
     /// Returns a [`Future`] that completes when [`BroadcastOnce::broadcast`] is called
-    pub fn receive(&self) -> impl Future<Output = Result<(), Arc<ClientError>>> {
+    pub fn receive(&self) -> futures::future::Shared<impl Future<Output = T>> {
         self.receiver.clone()
     }
 
     /// Broadcast a value to all [`BroadcastOnce::receive`] handles
-    pub fn broadcast(self, r: Result<(), Arc<ClientError>>) {
+    pub fn broadcast(self, r: T) {
         // Don't care if no receivers
         let _ = self.sender.send(r);
     }
@@ -46,10 +44,10 @@ impl BroadcastOnce {
 
 /// A future that completes when [`BroadcastOnce::broadcast`] is called
 #[pin_project]
-struct ReceiveFut(#[pin] oneshot::Receiver<Result<(), Arc<ClientError>>>);
+struct ReceiveFut<T>(#[pin] oneshot::Receiver<T>);
 
-impl std::future::Future for ReceiveFut {
-    type Output = Result<(), Arc<ClientError>>;
+impl<T: Clone> std::future::Future for ReceiveFut<T> {
+    type Output = T;
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         Poll::Ready(
@@ -58,5 +56,39 @@ impl std::future::Future for ReceiveFut {
             futures::ready!(self.project().0.poll(cx))
                 .expect("producer dropped without signalling"),
         )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn test_broadcast_once() {
+        // Test no receiver
+        let broadcast: BroadcastOnce<usize> = Default::default();
+        broadcast.broadcast(1);
+
+        // Test simple receiver
+        let broadcast: BroadcastOnce<usize> = Default::default();
+        let receiver = broadcast.receive();
+        broadcast.broadcast(2);
+        assert_eq!(receiver.await, 2);
+
+        // Test multiple receiver
+        let broadcast: BroadcastOnce<usize> = Default::default();
+        let r1 = broadcast.receive();
+        let r2 = broadcast.receive();
+        broadcast.broadcast(4);
+        assert_eq!(r1.await, 4);
+        assert_eq!(r2.await, 4);
+
+        // Test drop
+        let broadcast: BroadcastOnce<usize> = Default::default();
+        let r1 = broadcast.receive();
+        let r2 = broadcast.receive();
+        assert!(r1.now_or_never().is_none());
+        broadcast.broadcast(5);
+        assert_eq!(r2.await, 5);
     }
 }
