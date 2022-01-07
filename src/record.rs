@@ -24,7 +24,6 @@ impl Record {
     }
 }
 
-
 /// Record that has offset information attached.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RecordAndOffset {
