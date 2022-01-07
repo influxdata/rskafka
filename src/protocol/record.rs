@@ -13,6 +13,9 @@ use std::io::{Cursor, Read, Write};
 
 use crc::{Crc, CRC_32_ISCSI};
 
+#[cfg(test)]
+use proptest::prelude::*;
+
 use super::{
     primitives::{Array, Int16, Int32, Int64, Int8, Varint, Varlong},
     traits::{ReadError, ReadType, WriteError, WriteType},
@@ -259,6 +262,13 @@ where
 #[cfg_attr(test, derive(proptest_derive::Arbitrary))]
 pub enum ControlBatchOrRecords {
     ControlBatch(ControlBatchRecord),
+
+    #[cfg_attr(
+        test,
+        proptest(
+            strategy = "prop::collection::vec(any::<Record>(), 0..2).prop_map(ControlBatchOrRecords::Records)"
+        )
+    )]
     Records(Vec<Record>),
 }
 
