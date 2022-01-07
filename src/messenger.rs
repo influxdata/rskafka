@@ -78,8 +78,8 @@ pub enum RequestError {
 
 #[derive(Error, Debug)]
 pub enum SyncVersionsError {
-    #[error("Unable to sync versions with server")]
-    Cannot,
+    #[error("Did not found a version for ApiVersion that works with that broker")]
+    NoWorkingVersion,
 
     #[error(transparent)]
     RequestError(#[from] RequestError),
@@ -289,7 +289,7 @@ where
             }
         }
 
-        Err(SyncVersionsError::Cannot)
+        Err(SyncVersionsError::NoWorkingVersion)
     }
 }
 
