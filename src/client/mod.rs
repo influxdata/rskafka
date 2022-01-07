@@ -11,6 +11,7 @@ use crate::{
     },
 };
 
+pub mod consumer;
 pub mod error;
 pub mod partition;
 pub mod producer;

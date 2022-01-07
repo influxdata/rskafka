@@ -304,7 +304,7 @@ async fn consume_minikafka(
     let mut offset = 0;
     while records.len() < n {
         let res = partition_client
-            .fetch_records(offset, 0..1_000_000)
+            .fetch_records(offset, 0..1_000_000, 1_000)
             .await
             .unwrap()
             .0;
