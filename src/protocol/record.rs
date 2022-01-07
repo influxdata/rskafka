@@ -17,7 +17,7 @@ use crc::{Crc, CRC_32_ISCSI};
 use proptest::prelude::*;
 
 use super::{
-    primitives::{Array, Int16, Int32, Int64, Int8, Varint, Varlong},
+    primitives::{Array, ArrayRef, Int16, Int32, Int64, Int8, Varint, Varlong},
     traits::{ReadError, ReadType, WriteError, WriteType},
 };
 
@@ -33,7 +33,7 @@ const CASTAGNOLI: Crc<u32> = Crc::<u32>::new(&CRC_32_ISCSI);
 ///
 /// # References
 /// - <https://kafka.apache.org/documentation/#recordheader>
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq)]
 #[cfg_attr(test, derive(proptest_derive::Arbitrary))]
 pub struct RecordHeader {
     pub key: String,
@@ -85,7 +85,7 @@ where
 ///
 /// # References
 /// - <https://kafka.apache.org/documentation/#record>
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq)]
 #[cfg_attr(test, derive(proptest_derive::Arbitrary))]
 pub struct Record {
     pub timestamp_delta: i64,
@@ -522,7 +522,7 @@ where
                 Array::<ControlBatchRecord>(Some(records)).write(&mut data)?;
             }
             ControlBatchOrRecords::Records(records) => {
-                Array::<Record>(Some(records.clone())).write(&mut data)?;
+                ArrayRef::<Record>(Some(records)).write(&mut data)?;
             }
         }
 
