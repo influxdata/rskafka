@@ -551,7 +551,23 @@ where
     T: WriteType<W>,
 {
     fn write(&self, writer: &mut W) -> Result<(), WriteError> {
-        match self.0.as_ref() {
+        ArrayRef(self.0.as_ref().map(|v| v.as_ref())).write(writer)
+    }
+}
+
+/// Same as [`Array`] but contains referenced data.
+///
+/// This only supports writing.
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct ArrayRef<'a, T>(pub Option<&'a [T]>);
+
+impl<'a, W, T> WriteType<W> for ArrayRef<'a, T>
+where
+    W: Write,
+    T: WriteType<W>,
+{
+    fn write(&self, writer: &mut W) -> Result<(), WriteError> {
+        match self.0 {
             None => Int32(-1).write(writer),
             Some(inner) => {
                 let len = i32::try_from(inner.len())?;
