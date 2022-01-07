@@ -122,7 +122,7 @@ impl<A: aggregator::Aggregator<Output = Vec<Record>>> BatchProducer<A> {
                     return Err(Error::TooLarge);
                 }
             }
-            // Get a copy of the result slot for the next produce operation
+            // Get a future that completes when the record is published
             inner.result_slot.receive()
         };
 
@@ -198,10 +198,12 @@ mod tests {
             Box::pin(async move {
                 tokio::time::sleep(self.delay).await;
 
-                match self.error {
-                    Some(e) => Err(ClientError::ServerError(e, "".to_string())),
-                    None => Ok(self.batch_sizes.lock().push(records.len())),
+                if let Some(e) = self.error {
+                    return Err(ClientError::ServerError(e, "".to_string()));
                 }
+
+                self.batch_sizes.lock().push(records.len());
+                Ok(())
             })
         }
     }
