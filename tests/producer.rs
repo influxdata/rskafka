@@ -1,6 +1,6 @@
 use futures::{future::FusedFuture, pin_mut, FutureExt};
 use minikafka::client::{
-    producer::{BatchProducerBuilder, RecordAggregator},
+    producer::{aggregator::RecordAggregator, BatchProducerBuilder},
     Client,
 };
 use std::time::Duration;

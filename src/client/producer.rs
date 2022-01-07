@@ -1,20 +1,20 @@
-use std::pin::Pin;
 use std::sync::Arc;
-use std::task::{Context, Poll};
 use std::time::Duration;
 
 use futures::{pin_mut, FutureExt};
-use pin_project::pin_project;
 use thiserror::Error;
-use tokio::sync::{oneshot, Mutex};
+use tokio::sync::Mutex;
 
 use crate::client::{error::Error as ClientError, partition::PartitionClient};
 use crate::record::Record;
 
+pub mod aggregator;
+mod broadcast;
+
 #[derive(Debug, Error)]
 pub enum Error {
     #[error("Aggregator error: {0}")]
-    Aggregator(#[from] AggregatorError),
+    Aggregator(#[from] aggregator::Error),
 
     #[error("Client error: {0}")]
     Client(#[from] Arc<ClientError>),
@@ -24,69 +24,6 @@ pub enum Error {
 }
 
 pub type Result<T, E = Error> = std::result::Result<T, E>;
-
-/// The error returned by [`Aggregator`] implementations
-pub type AggregatorError = Box<dyn std::error::Error + Send + Sync>;
-
-/// A type that receives one or more input and returns a single output
-pub trait Aggregator {
-    type Input;
-
-    type Output;
-
-    /// Try to append `record` implementations should return
-    ///
-    /// - `Ok(None)` on success
-    /// - `Ok(Some(record))` if there is insufficient capacity in the `Aggregator`
-    /// - `Err(_)` if an error is encountered
-    ///
-    /// [`Aggregator`] must only be modified if this method returns `Ok(None)`
-    ///
-    fn try_push(&mut self, record: Self::Input) -> Result<Option<Self::Input>, AggregatorError>;
-
-    /// Flush the contents of this aggregator to Kafka
-    fn flush(&mut self) -> Self::Output;
-}
-
-/// a [`Aggregator`] that batches up to a certain number of bytes of [`Record`]
-pub struct RecordAggregator {
-    max_batch_size: usize,
-    batch_size: usize,
-    records: Vec<Record>,
-}
-
-impl Aggregator for RecordAggregator {
-    type Input = Record;
-    type Output = Vec<Record>;
-
-    fn try_push(&mut self, record: Self::Input) -> Result<Option<Self::Input>, AggregatorError> {
-        let record_size: usize = record.approximate_size();
-
-        if self.batch_size + record_size > self.max_batch_size {
-            return Ok(Some(record));
-        }
-
-        self.batch_size += record_size;
-        self.records.push(record);
-
-        Ok(None)
-    }
-
-    fn flush(&mut self) -> Self::Output {
-        self.batch_size = 0;
-        std::mem::take(&mut self.records)
-    }
-}
-
-impl RecordAggregator {
-    pub fn new(max_batch_size: usize) -> Self {
-        Self {
-            max_batch_size,
-            batch_size: 0,
-            records: vec![],
-        }
-    }
-}
 
 /// Builder for `BatchProducer`
 pub struct BatchProducerBuilder {
@@ -139,12 +76,12 @@ pub struct BatchProducer<A> {
 
 #[derive(Debug)]
 struct ProducerInner<A> {
-    result_slot: ResultSlot,
+    result_slot: broadcast::BroadcastOnce,
 
     aggregator: A,
 }
 
-impl<A: Aggregator<Output = Vec<Record>>> BatchProducer<A> {
+impl<A: aggregator::Aggregator<Output = Vec<Record>>> BatchProducer<A> {
     /// Write `data` to this [`BatchProducer`]
     ///
     /// Returns when the data has been committed to Kafka or
@@ -169,7 +106,7 @@ impl<A: Aggregator<Output = Vec<Record>>> BatchProducer<A> {
                 }
             }
             // Get a copy of the result slot for the next produce operation
-            inner.result_slot.receiver.clone().fuse()
+            inner.result_slot.receive().fuse()
         };
 
         let linger = tokio::time::sleep(self.linger).fuse();
@@ -215,48 +152,9 @@ impl<A: Aggregator<Output = Vec<Record>>> BatchProducer<A> {
         // Reset result slot
         let slot = std::mem::take(&mut inner.result_slot);
 
-        // Not concerned if receivers hung up
-        let _ = match r {
-            Ok(_) => slot.sender.send(Ok(())),
-            Err(e) => slot.sender.send(Err(Arc::new(e))),
+        match r {
+            Ok(_) => slot.broadcast(Ok(())),
+            Err(e) => slot.broadcast(Err(Arc::new(e))),
         };
-    }
-}
-
-/// A future for the eventual production of a record
-#[pin_project]
-struct ProduceFut(#[pin] oneshot::Receiver<Result<(), Arc<ClientError>>>);
-
-impl std::future::Future for ProduceFut {
-    type Output = Result<(), Arc<ClientError>>;
-
-    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        Poll::Ready(
-            // Panic if the receiver returns an error as we don't know the
-            // outcome of the publish. Most likely the producer panicked
-            futures::ready!(self.project().0.poll(cx))
-                .expect("producer dropped without signalling"),
-        )
-    }
-}
-
-struct ResultSlot {
-    receiver: futures::future::Shared<ProduceFut>,
-    sender: oneshot::Sender<Result<(), Arc<ClientError>>>,
-}
-
-impl std::fmt::Debug for ResultSlot {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "ResultSlot")
-    }
-}
-
-impl Default for ResultSlot {
-    fn default() -> Self {
-        let (sender, receiver) = oneshot::channel();
-        Self {
-            receiver: ProduceFut(receiver).shared(),
-            sender,
-        }
     }
 }
