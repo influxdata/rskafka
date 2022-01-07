@@ -76,6 +76,22 @@ pub enum RequestError {
     TooMuchData { message_size: u64, read: u64 },
 }
 
+#[derive(Error, Debug)]
+pub enum SyncVersionsError {
+    #[error("Did not found a version for ApiVersion that works with that broker")]
+    NoWorkingVersion,
+
+    #[error(transparent)]
+    RequestError(#[from] RequestError),
+
+    #[error("Got flipped version from server for API key {api_key:?}: min={min:?} max={max:?}")]
+    FlippedVersionRange {
+        api_key: ApiKey,
+        min: ApiVersion,
+        max: ApiVersion,
+    },
+}
+
 impl<RW> Messenger<RW>
 where
     RW: AsyncRead + AsyncWrite + Send + 'static,
@@ -208,7 +224,7 @@ where
         Ok(body)
     }
 
-    pub async fn sync_versions(&self) {
+    pub async fn sync_versions(&self) -> Result<(), SyncVersionsError> {
         for upper_bound in (ApiVersionsRequest::API_VERSION_RANGE.0 .0 .0
             ..=ApiVersionsRequest::API_VERSION_RANGE.1 .0 .0)
             .rev()
@@ -227,25 +243,53 @@ where
                 tagged_fields: TaggedFields::default(),
             };
 
-            if let Ok(response) = self.request(body).await {
-                if response.error_code.is_some() {
+            match self.request(body).await {
+                Ok(response) => {
+                    if let Some(e) = response.error_code {
+                        println!(
+                            "Got error during version sync, cannot use version {} for ApiVersionRequest: {}",
+                            upper_bound,
+                            e,
+                        );
+                        continue;
+                    }
+
+                    // check range sanity
+                    for api_key in &response.api_keys {
+                        if api_key.min_version.0 > api_key.max_version.0 {
+                            return Err(SyncVersionsError::FlippedVersionRange {
+                                api_key: api_key.api_key,
+                                min: api_key.min_version,
+                                max: api_key.max_version,
+                            });
+                        }
+                    }
+
+                    let ranges = response
+                        .api_keys
+                        .into_iter()
+                        .map(|x| (x.api_key, (x.min_version, x.max_version)))
+                        .collect();
+                    self.set_version_ranges(ranges);
+                    return Ok(());
+                }
+                Err(RequestError::NoVersionMatch { .. }) => {
+                    unreachable!("Just set to version range to a non-empty range")
+                }
+                Err(RequestError::ReadError(e)) => {
+                    println!(
+                        "Cannot read ApiVersionResponse for version {}: {}",
+                        upper_bound, e,
+                    );
                     continue;
                 }
-
-                // TODO: check min and max are sane
-                let ranges = response
-                    .api_keys
-                    .into_iter()
-                    .map(|x| (x.api_key, (x.min_version, x.max_version)))
-                    .collect();
-                self.set_version_ranges(ranges);
-                return;
+                Err(e) => {
+                    return Err(SyncVersionsError::RequestError(e));
+                }
             }
-            // TODO: don't ignore all errors (e.g. IO errors)
         }
 
-        // TODO: don't panic
-        panic!("cannot sync")
+        Err(SyncVersionsError::NoWorkingVersion)
     }
 }
 
