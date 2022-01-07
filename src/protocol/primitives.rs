@@ -551,7 +551,7 @@ where
     T: WriteType<W>,
 {
     fn write(&self, writer: &mut W) -> Result<(), WriteError> {
-        ArrayRef(self.0.as_ref().map(|v| v.as_ref())).write(writer)
+        ArrayRef(self.0.as_deref()).write(writer)
     }
 }
 
