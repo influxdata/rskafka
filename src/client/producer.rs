@@ -13,23 +13,23 @@ use crate::record::Record;
 
 #[derive(Debug, Error)]
 pub enum Error {
-    #[error("Reducer error: {0}")]
-    Reducer(#[from] ReducerError),
+    #[error("Aggregator error: {0}")]
+    Aggregator(#[from] AggregatorError),
 
     #[error("Client error: {0}")]
     Client(#[from] Arc<ClientError>),
 
-    #[error("Input too large for reducer")]
+    #[error("Input too large for aggregator")]
     TooLarge,
 }
 
 pub type Result<T, E = Error> = std::result::Result<T, E>;
 
-/// The error returned by [`Reducer`] implementations
-pub type ReducerError = Box<dyn std::error::Error + Send + Sync>;
+/// The error returned by [`Aggregator`] implementations
+pub type AggregatorError = Box<dyn std::error::Error + Send + Sync>;
 
 /// A type that receives one or more input and returns a single output
-pub trait Reducer {
+pub trait Aggregator {
     type Input;
 
     type Output;
@@ -37,29 +37,29 @@ pub trait Reducer {
     /// Try to append `record` implementations should return
     ///
     /// - `Ok(None)` on success
-    /// - `Ok(Some(record))` if there is insufficient capacity in the `Reducer`
+    /// - `Ok(Some(record))` if there is insufficient capacity in the `Aggregator`
     /// - `Err(_)` if an error is encountered
     ///
-    /// [`Reducer`] must only be modified if this method returns `Ok(None)`
+    /// [`Aggregator`] must only be modified if this method returns `Ok(None)`
     ///
-    fn try_push(&mut self, record: Self::Input) -> Result<Option<Self::Input>, ReducerError>;
+    fn try_push(&mut self, record: Self::Input) -> Result<Option<Self::Input>, AggregatorError>;
 
     /// Flush the contents of this aggregator to Kafka
     fn flush(&mut self) -> Self::Output;
 }
 
-/// a [`Reducer`] that batches up to a certain number of bytes of [`Record`]
-pub struct RecordReducer {
+/// a [`Aggregator`] that batches up to a certain number of bytes of [`Record`]
+pub struct RecordAggregator {
     max_batch_size: usize,
     batch_size: usize,
     records: Vec<Record>,
 }
 
-impl Reducer for RecordReducer {
+impl Aggregator for RecordAggregator {
     type Input = Record;
     type Output = Vec<Record>;
 
-    fn try_push(&mut self, record: Self::Input) -> Result<Option<Self::Input>, ReducerError> {
+    fn try_push(&mut self, record: Self::Input) -> Result<Option<Self::Input>, AggregatorError> {
         let record_size: usize = record.approximate_size();
 
         if self.batch_size + record_size > self.max_batch_size {
@@ -78,7 +78,7 @@ impl Reducer for RecordReducer {
     }
 }
 
-impl RecordReducer {
+impl RecordAggregator {
     pub fn new(max_batch_size: usize) -> Self {
         Self {
             max_batch_size,
@@ -109,12 +109,12 @@ impl BatchProducerBuilder {
         Self { linger, ..self }
     }
 
-    pub fn build<A>(self, reducer: A) -> BatchProducer<A> {
+    pub fn build<A>(self, aggregator: A) -> BatchProducer<A> {
         BatchProducer {
             linger: self.linger,
             client: self.client,
             inner: Mutex::new(ProducerInner {
-                reducer,
+                aggregator,
                 result_slot: Default::default(),
             }),
         }
@@ -122,29 +122,29 @@ impl BatchProducerBuilder {
 }
 
 /// [`BatchProducer`] attempts to aggregate multiple produce requests together
-/// using the provided [`Reducer`]
+/// using the provided [`Aggregator`]
 ///
-/// It will buffer up records until either the linger time expires or [`Reducer`]
+/// It will buffer up records until either the linger time expires or [`Aggregator`]
 /// cannot accommodate another record.
 ///
-/// At this point it will flush the [`Reducer`]
+/// At this point it will flush the [`Aggregator`]
 #[derive(Debug)]
-pub struct BatchProducer<R> {
+pub struct BatchProducer<A> {
     linger: Duration,
 
     client: Arc<PartitionClient>,
 
-    inner: Mutex<ProducerInner<R>>,
+    inner: Mutex<ProducerInner<A>>,
 }
 
 #[derive(Debug)]
-struct ProducerInner<R> {
+struct ProducerInner<A> {
     result_slot: ResultSlot,
 
-    reducer: R,
+    aggregator: A,
 }
 
-impl<R: Reducer<Output = Vec<Record>>> BatchProducer<R> {
+impl<A: Aggregator<Output = Vec<Record>>> BatchProducer<A> {
     /// Write `data` to this [`BatchProducer`]
     ///
     /// Returns when the data has been committed to Kafka or
@@ -155,16 +155,16 @@ impl<R: Reducer<Output = Vec<Record>>> BatchProducer<R> {
     /// The returned future is not cancellation safe, if it is dropped the record
     /// may or may not be published
     ///
-    pub async fn produce(&self, data: R::Input) -> Result<()> {
+    pub async fn produce(&self, data: A::Input) -> Result<()> {
         let result_slot = {
-            // Try to add the record to the reducer
+            // Try to add the record to the aggregator
             let mut inner = self.inner.lock().await;
-            if let Some(data) = inner.reducer.try_push(data)? {
-                println!("Insufficient capacity in reducer - flushing");
+            if let Some(data) = inner.aggregator.try_push(data)? {
+                println!("Insufficient capacity in aggregator - flushing");
 
                 Self::flush(&mut inner, self.client.as_ref()).await;
-                if inner.reducer.try_push(data)?.is_some() {
-                    println!("Record too large for reducer");
+                if inner.aggregator.try_push(data)?.is_some() {
+                    println!("Record too large for aggregator");
                     return Err(Error::TooLarge);
                 }
             }
@@ -185,6 +185,10 @@ impl<R: Reducer<Output = Vec<Record>>> BatchProducer<R> {
         let mut inner = self.inner.lock().await;
 
         // Whilst holding lock - check hasn't been flushed already
+        //
+        // This covers two scenarios:
+        // - the linger expired "simultaneously" with the publish
+        // - the linger expired but another thread triggered the flush
         if let Some(r) = result_slot.now_or_never() {
             return Ok(r?);
         }
@@ -196,12 +200,12 @@ impl<R: Reducer<Output = Vec<Record>>> BatchProducer<R> {
         Ok(())
     }
 
-    /// Flushes out the data from the reducer, publishes the result to the result slot,
+    /// Flushes out the data from the aggregator, publishes the result to the result slot,
     /// and creates a fresh result slot for future writes to use
-    async fn flush(inner: &mut ProducerInner<R>, client: &PartitionClient) {
+    async fn flush(inner: &mut ProducerInner<A>, client: &PartitionClient) {
         println!("Flushing batch producer");
 
-        let output = inner.reducer.flush();
+        let output = inner.aggregator.flush();
         if output.is_empty() {
             return;
         }
@@ -228,8 +232,8 @@ impl std::future::Future for ProduceFut {
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         Poll::Ready(
-            // This most likely means that the producer panicked
-            // In such a case we don't know the outcome - so panic
+            // Panic if the receiver returns an error as we don't know the
+            // outcome of the publish. Most likely the producer panicked
             futures::ready!(self.project().0.poll(cx))
                 .expect("producer dropped without signalling"),
         )
