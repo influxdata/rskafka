@@ -406,13 +406,13 @@ mod tests {
         sender.send(record.clone()).await.unwrap();
         sender.send(record.clone()).await.unwrap();
 
-        // Should not wait until linger
+        // Should not wait for max_wait_ms
         tokio::time::timeout(Duration::from_micros(10), stream.next())
             .await
             .unwrap()
             .unwrap()
             .unwrap();
-        // Should not wait until linger
+        // Should not wait for max_wait_ms
         tokio::time::timeout(Duration::from_micros(10), stream.next())
             .await
             .unwrap()
