@@ -50,12 +50,15 @@ impl<T: Clone> std::future::Future for ReceiveFut<T> {
     type Output = T;
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        Poll::Ready(
-            // Panic if the receiver returns an error as we don't know the
-            // outcome of the publish. Most likely the producer panicked
-            futures::ready!(self.project().0.poll(cx))
-                .expect("producer dropped without signalling"),
-        )
+        match futures::ready!(self.project().0.poll(cx)) {
+            Ok(x) => Poll::Ready(x),
+            Err(_) => {
+                println!("producer dropped without signalling result");
+                // We don't know the outcome of the publish, most likely
+                // the producer panicked, and so return Pending
+                Poll::Pending
+            }
+        }
     }
 }
 
