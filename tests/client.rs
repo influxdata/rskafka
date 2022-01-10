@@ -24,7 +24,7 @@ async fn test_partition_leader() {
 
     client.create_topic(&topic_name, 2, 1).await.unwrap();
     let client = client.partition_client(&topic_name, 0).await.unwrap();
-    client.get_cached_broker().await.unwrap();
+    client.get_cached_leader().await.unwrap();
 }
 
 #[tokio::test]
