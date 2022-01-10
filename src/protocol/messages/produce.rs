@@ -32,7 +32,7 @@ where
         version: ApiVersion,
     ) -> Result<(), WriteVersionedError> {
         let v = version.0 .0;
-        assert!(v <= 3);
+        assert!(v <= 7);
 
         self.index.write(writer)?;
         self.records.write(writer)?;
@@ -59,7 +59,7 @@ where
         version: ApiVersion,
     ) -> Result<(), WriteVersionedError> {
         let v = version.0 .0;
-        assert!(v <= 3);
+        assert!(v <= 7);
 
         self.name.write(writer)?;
         write_versioned_array(writer, version, Some(&self.partition_data))?;
@@ -97,7 +97,7 @@ where
         version: ApiVersion,
     ) -> Result<(), WriteVersionedError> {
         let v = version.0 .0;
-        assert!(v <= 3);
+        assert!(v <= 7);
 
         if v >= 3 {
             self.transactional_id.write(writer)?;
@@ -122,7 +122,7 @@ impl RequestBody for ProduceRequest {
     ///
     /// [KIP-98]: https://cwiki.apache.org/confluence/display/KAFKA/KIP-98+-+Exactly+Once+Delivery+and+Transactional+Messaging
     const API_VERSION_RANGE: (ApiVersion, ApiVersion) =
-        (ApiVersion(Int16(3)), ApiVersion(Int16(3)));
+        (ApiVersion(Int16(3)), ApiVersion(Int16(7)));
 
     const FIRST_TAGGED_FIELD_VERSION: ApiVersion = ApiVersion(Int16(9));
 }
@@ -145,6 +145,11 @@ pub struct ProduceResponsePartitionResponse {
     ///
     /// Added in version 2.
     pub log_append_time_ms: Option<Int64>,
+
+    /// The log start offset.
+    ///
+    /// Added in version 5.
+    pub log_start_offset: Option<Int64>,
 }
 
 impl<R> ReadVersionedType<R> for ProduceResponsePartitionResponse
@@ -153,13 +158,14 @@ where
 {
     fn read_versioned(reader: &mut R, version: ApiVersion) -> Result<Self, ReadVersionedError> {
         let v = version.0 .0;
-        assert!(v <= 3);
+        assert!(v <= 7);
 
         Ok(Self {
             index: Int32::read(reader)?,
             error: Error::new(Int16::read(reader)?),
             base_offset: Int64::read(reader)?,
             log_append_time_ms: (v >= 2).then(|| Int64::read(reader)).transpose()?,
+            log_start_offset: (v >= 5).then(|| Int64::read(reader)).transpose()?,
         })
     }
 }
@@ -179,7 +185,7 @@ where
 {
     fn read_versioned(reader: &mut R, version: ApiVersion) -> Result<Self, ReadVersionedError> {
         let v = version.0 .0;
-        assert!(v <= 3);
+        assert!(v <= 7);
 
         Ok(Self {
             name: String_::read(reader)?,
@@ -205,7 +211,7 @@ where
 {
     fn read_versioned(reader: &mut R, version: ApiVersion) -> Result<Self, ReadVersionedError> {
         let v = version.0 .0;
-        assert!(v <= 3);
+        assert!(v <= 7);
 
         Ok(Self {
             responses: read_versioned_array(reader, version)?.unwrap_or_default(),
