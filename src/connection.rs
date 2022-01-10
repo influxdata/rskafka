@@ -44,20 +44,28 @@ pub type Result<T, E = Error> = std::result::Result<T, E>;
 pub struct BrokerConnector {
     /// Brokers used to boostrap this pool
     bootstrap_brokers: Vec<String>,
+
     /// Discovered brokers in the cluster, including bootstrap brokers
     topology: BrokerTopology,
+
     /// The current cached broker
     current_broker: Mutex<Option<BrokerConnection>>,
+
     /// The backoff configuration on error
     backoff_config: BackoffConfig,
+
     /// TLS configuration if any
     tls_config: Option<Arc<rustls::ClientConfig>>,
+
+    /// Maximum message size for framing protocol.
+    max_message_size: usize,
 }
 
 impl BrokerConnector {
     pub fn new(
         bootstrap_brokers: Vec<String>,
         tls_config: Option<Arc<rustls::ClientConfig>>,
+        max_message_size: usize,
     ) -> Self {
         Self {
             bootstrap_brokers,
@@ -65,6 +73,7 @@ impl BrokerConnector {
             current_broker: Mutex::new(None),
             backoff_config: Default::default(),
             tls_config,
+            max_message_size,
         }
     }
 
@@ -123,7 +132,10 @@ impl BrokerConnector {
                 error,
             })?;
 
-        let messenger = Arc::new(Messenger::new(BufStream::new(transport)));
+        let messenger = Arc::new(Messenger::new(
+            BufStream::new(transport),
+            self.max_message_size,
+        ));
         messenger.sync_versions().await?;
         Ok(messenger)
     }
