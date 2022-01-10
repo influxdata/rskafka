@@ -122,7 +122,7 @@ impl PartitionClient {
         };
 
         self.maybe_retry("produce", || async move {
-            let broker = self.get_cached_broker().await?;
+            let broker = self.get_cached_leader().await?;
             let response = broker.request(&request).await?;
 
             if response.responses.len() != 1 {
@@ -176,8 +176,7 @@ impl PartitionClient {
         let partition = self
             .maybe_retry("fetch_records", || async move {
                 let response = self
-                    .brokers
-                    .get_cached_broker()
+                    .get_cached_leader()
                     .await?
                     .request(FetchRequest {
                         // normal consumer
@@ -288,7 +287,7 @@ impl PartitionClient {
         let partition = self
             .maybe_retry("get_high_watermark", || async move {
                 let response = self
-                    .get_cached_broker()
+                    .get_cached_leader()
                     .await?
                     .request(ListOffsetsRequest {
                         // `-1` because we're a normal consumer
@@ -383,11 +382,11 @@ impl PartitionClient {
             };
 
             match error {
-                Error::Connection(_) => self.invalidate_cached_broker().await,
+                Error::Connection(_) => self.invalidate_cached_leader_broker().await,
                 Error::ServerError(ProtocolError::LeaderNotAvailable, _) => {}
                 Error::ServerError(ProtocolError::OffsetNotAvailable, _) => {}
                 Error::ServerError(ProtocolError::NotLeaderOrFollower, _) => {
-                    self.invalidate_cached_broker().await;
+                    self.invalidate_cached_leader_broker().await;
                 }
                 _ => {
                     println!(
@@ -410,14 +409,14 @@ impl PartitionClient {
     }
 
     /// Invalidate the cached broker connection
-    async fn invalidate_cached_broker(&self) {
+    async fn invalidate_cached_leader_broker(&self) {
         *self.current_broker.lock().await = None
     }
 
     /// Get the raw broker connection
     ///
     /// TODO: Make this private
-    pub async fn get_cached_broker(&self) -> Result<BrokerConnection> {
+    pub async fn get_cached_leader(&self) -> Result<BrokerConnection> {
         let mut current_broker = self.current_broker.lock().await;
         if let Some(broker) = &*current_broker {
             return Ok(Arc::clone(broker));

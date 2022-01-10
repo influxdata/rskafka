@@ -79,7 +79,7 @@ impl BrokerConnector {
     /// Requests data for all topics if `topics` is `None`
     pub async fn request_metadata(&self, topics: Option<Vec<String>>) -> Result<MetadataResponse> {
         // TODO: Add retry logic
-        let broker = self.get_cached_broker().await?;
+        let broker = self.get_arbitrary_cached_broker().await?;
 
         let response = broker
             .request(MetadataRequest {
@@ -101,7 +101,7 @@ impl BrokerConnector {
     ///
     /// The next call to `[BrokerPool::get_cached_broker]` will get a new connection
     #[allow(dead_code)]
-    pub async fn invalidate_cached_broker(&self) {
+    pub async fn invalid_cached_arbitrary_broker(&self) {
         self.current_broker.lock().await.take();
     }
 
@@ -128,7 +128,7 @@ impl BrokerConnector {
     }
 
     /// Gets a cached [`BrokerConnection`] to any broker
-    pub async fn get_cached_broker(&self) -> Result<BrokerConnection> {
+    pub async fn get_arbitrary_cached_broker(&self) -> Result<BrokerConnection> {
         let mut current_broker = self.current_broker.lock().await;
         if let Some(broker) = &*current_broker {
             return Ok(Arc::clone(broker));
