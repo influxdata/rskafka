@@ -198,7 +198,7 @@ where
                                 }
                             }
                             MessengerState::Poisson(_) => {
-                                // stream is poisend, no need to anything
+                                // stream is poisoned, no need to anything
                                 return;
                             }
                         };
