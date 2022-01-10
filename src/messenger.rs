@@ -480,7 +480,7 @@ mod tests {
         }
         .write_versioned(&mut msg, ApiVersion(Int16(1)))
         .unwrap();
-        msg.push(b'\0');
+        msg.push(b'\0'); // malformed message body which can happen if the server doesn't really support this version
         sim.push(msg);
 
         // construct good response
@@ -577,12 +577,15 @@ mod tests {
         }
         .write_versioned(&mut msg, ApiVersionsRequest::API_VERSION_RANGE.1)
         .unwrap();
-        msg.push(b'\0');
+        msg.push(b'\0'); // add junk to the end of the message to trigger `TooMuchData`
         sim.push(msg);
 
         // sync versions
         let err = messenger.sync_versions().await.unwrap_err();
-        assert_matches!(err, SyncVersionsError::RequestError(..));
+        assert_matches!(
+            err,
+            SyncVersionsError::RequestError(RequestError::TooMuchData { .. })
+        );
     }
 
     #[tokio::test]
@@ -637,6 +640,9 @@ mod tests {
             let messages_captured = Arc::clone(&messages);
             let join_handle = tokio::task::spawn(async move {
                 loop {
+                    // Must wait for the request message before reading the response, otherwise `Messenger` might read
+                    // our response that doesn't have a correlated request yet and throws it away. This is because
+                    // servers never send data without being asked to do so.
                     tx.read_message(1_000).await.unwrap();
 
                     let message = {
