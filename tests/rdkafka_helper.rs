@@ -1,7 +1,7 @@
 use std::time::Duration;
 
 use futures::{StreamExt, TryStreamExt};
-use minikafka::record::Record;
+use minikafka::record::{Record, RecordAndOffset};
 use rdkafka::{
     consumer::{Consumer, StreamConsumer},
     message::{Headers, OwnedHeaders},
@@ -12,7 +12,7 @@ use rdkafka::{
 use time::OffsetDateTime;
 
 /// Produce.
-pub async fn produce(connection: &str, records: Vec<(String, i32, Record)>) {
+pub async fn produce(connection: &str, records: Vec<(String, i32, Record)>) -> Vec<i64> {
     // create client
     let mut cfg = ClientConfig::new();
     cfg.set("bootstrap.servers", connection);
@@ -20,6 +20,7 @@ pub async fn produce(connection: &str, records: Vec<(String, i32, Record)>) {
     let client: FutureProducer<_> = cfg.create().unwrap();
 
     // create record
+    let mut offsets = vec![];
     for (topic_name, partition_index, record) in records {
         let mut headers = OwnedHeaders::new();
         for (k, v) in record.headers {
@@ -32,8 +33,11 @@ pub async fn produce(connection: &str, records: Vec<(String, i32, Record)>) {
             .payload(&record.value)
             .headers(headers)
             .timestamp((record.timestamp.unix_timestamp_nanos() / 1_000_000) as i64);
-        client.send(f_record, Timeout::Never).await.unwrap();
+        let (_partition, offset) = client.send(f_record, Timeout::Never).await.unwrap();
+        offsets.push(offset);
     }
+
+    offsets
 }
 
 /// Consume
@@ -42,7 +46,7 @@ pub async fn consume(
     topic_name: &str,
     partition_index: i32,
     n: usize,
-) -> Vec<Record> {
+) -> Vec<RecordAndOffset> {
     tokio::time::timeout(Duration::from_secs(10), async move {
         loop {
             // create client
@@ -60,24 +64,27 @@ pub async fn consume(
             let res = client
                 .stream()
                 .take(n)
-                .map_ok(|msg| Record {
-                    key: msg.key().map(|k| k.to_vec()).unwrap_or_default(),
-                    value: msg.payload().map(|v| v.to_vec()).unwrap_or_default(),
-                    headers: msg
-                        .headers()
-                        .map(|headers| {
-                            (0..headers.count())
-                                .map(|i| {
-                                    let (k, v) = headers.get(i).unwrap();
-                                    (k.to_owned(), v.to_vec())
-                                })
-                                .collect()
-                        })
-                        .unwrap_or_default(),
-                    timestamp: OffsetDateTime::from_unix_timestamp_nanos(
-                        msg.timestamp().to_millis().unwrap_or_default() as i128 * 1_000_000,
-                    )
-                    .unwrap(),
+                .map_ok(|msg| RecordAndOffset {
+                    record: Record {
+                        key: msg.key().map(|k| k.to_vec()).unwrap_or_default(),
+                        value: msg.payload().map(|v| v.to_vec()).unwrap_or_default(),
+                        headers: msg
+                            .headers()
+                            .map(|headers| {
+                                (0..headers.count())
+                                    .map(|i| {
+                                        let (k, v) = headers.get(i).unwrap();
+                                        (k.to_owned(), v.to_vec())
+                                    })
+                                    .collect()
+                            })
+                            .unwrap_or_default(),
+                        timestamp: OffsetDateTime::from_unix_timestamp_nanos(
+                            msg.timestamp().to_millis().unwrap_or_default() as i128 * 1_000_000,
+                        )
+                        .unwrap(),
+                    },
+                    offset: msg.offset(),
                 })
                 .try_collect()
                 .await;
