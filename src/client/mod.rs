@@ -54,7 +54,11 @@ impl Client {
         boostrap_brokers: Vec<String>,
         tls_config: Option<Arc<rustls::ClientConfig>>,
     ) -> Result<Self> {
-        let brokers = Arc::new(BrokerConnector::new(boostrap_brokers, tls_config));
+        let brokers = Arc::new(BrokerConnector::new(
+            boostrap_brokers,
+            tls_config,
+            1024 * 1024 * 1024,
+        ));
         brokers.refresh_metadata().await?;
 
         Ok(Self { brokers })
