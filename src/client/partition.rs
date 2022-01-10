@@ -4,6 +4,7 @@ use crate::record::RecordAndOffset;
 use crate::{
     client::error::{Error, Result},
     connection::{BrokerConnection, BrokerConnector},
+    messenger::RequestError,
     protocol::{
         error::Error as ProtocolError,
         messages::{
@@ -384,7 +385,8 @@ impl PartitionClient {
             };
 
             match error {
-                Error::Connection(_) => self.invalidate_cached_leader_broker().await,
+                Error::Request(RequestError::IO(_) | RequestError::Poisoned(_))
+                | Error::Connection(_) => self.invalidate_cached_leader_broker().await,
                 Error::ServerError(ProtocolError::LeaderNotAvailable, _) => {}
                 Error::ServerError(ProtocolError::OffsetNotAvailable, _) => {}
                 Error::ServerError(ProtocolError::NotLeaderOrFollower, _) => {
