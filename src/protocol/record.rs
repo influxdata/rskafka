@@ -263,6 +263,7 @@ where
 pub enum ControlBatchOrRecords {
     ControlBatch(ControlBatchRecord),
 
+    // tell proptest to only generate small vectors, otherwise tests take forever
     #[cfg_attr(
         test,
         proptest(

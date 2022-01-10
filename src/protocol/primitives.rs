@@ -596,6 +596,7 @@ where
 #[derive(Debug, PartialEq, Eq)]
 #[cfg_attr(test, derive(proptest_derive::Arbitrary))]
 pub struct Records(
+    // tell proptest to only generate small vectors, otherwise tests take forever
     #[cfg_attr(
         test,
         proptest(strategy = "prop::collection::vec(any::<RecordBatch>(), 0..2)")

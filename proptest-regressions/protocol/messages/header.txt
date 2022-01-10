@@ -1,0 +1,7 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc 48583c6a71bdb1b3d9513df1f8e70f3fd0c24e03124093ed6eb5251b09a3de2e # shrinks to orig = ResponseHeader { correlation_id: Int32(0), tagged_fields: None }

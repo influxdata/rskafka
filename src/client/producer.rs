@@ -243,11 +243,11 @@ mod tests {
             let assert_ok = |a: Result<Option<Result<_, _>>, _>| a.unwrap().unwrap().unwrap();
 
             // First two publishes should be ok
-            assert_ok(tokio::time::timeout(Duration::from_millis(1), futures.next()).await);
-            assert_ok(tokio::time::timeout(Duration::from_millis(1), futures.next()).await);
+            assert_ok(tokio::time::timeout(Duration::from_millis(10), futures.next()).await);
+            assert_ok(tokio::time::timeout(Duration::from_millis(10), futures.next()).await);
 
             // Third should linger
-            tokio::time::timeout(Duration::from_millis(1), futures.next())
+            tokio::time::timeout(Duration::from_millis(10), futures.next())
                 .await
                 .expect_err("timeout");
 

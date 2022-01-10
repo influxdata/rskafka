@@ -114,7 +114,46 @@ jobs:
     docker:
       - image: quay.io/influxdb/rust:ci
       - image: vectorized/redpanda:v21.9.2
-        command: redpanda start --overprovisioned --smp 1 --memory 1G --reserve-memory 0M
+        name: redpanda-0
+        command:
+          - redpanda
+          - start
+          - --smp 1
+          - --memory 1G
+          - --reserve-memory 0M
+          - --overprovisioned
+          - --node-id 0
+          - --check=false
+          - --kafka-addr redpanda-0:9092
+          - --rpc-addr redpanda-0:33145
+      - image: vectorized/redpanda:v21.9.2
+        name: redpanda-1
+        command:
+          - redpanda
+          - start
+          - --smp 1
+          - --memory 1G
+          - --reserve-memory 0M
+          - --overprovisioned
+          - --node-id 1
+          - --check=false
+          - --kafka-addr redpanda-1:9092
+          - --rpc-addr redpanda-1:33145
+          - --seeds redpanda-0:33145
+      - image: vectorized/redpanda:v21.9.2
+        name: redpanda-2
+        command:
+          - redpanda
+          - start
+          - --smp 1
+          - --memory 1G
+          - --reserve-memory 0M
+          - --overprovisioned
+          - --node-id 2
+          - --check=false
+          - --kafka-addr redpanda-2:9092
+          - --rpc-addr redpanda-2:33145
+          - --seeds redpanda-0:33145
     resource_class: xlarge  # use of a smaller executor tends crashes on link
     environment:
       # Disable incremental compilation to avoid overhead. We are not preserving these files anyway.
@@ -125,7 +164,7 @@ jobs:
       RUST_BACKTRACE: "1"
       # Run integration tests
       TEST_INTEGRATION: 1
-      KAFKA_CONNECT: "localhost:9092"
+      KAFKA_CONNECT: "redpanda-0:9092"
     steps:
       - checkout
       - rust_components
