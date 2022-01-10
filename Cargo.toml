@@ -7,16 +7,16 @@ edition = "2021"
 
 [dependencies]
 async-trait = "0.1"
-crc = "2"
 bytes = "1.1"
+crc = "2"
 futures = "0.3"
 parking_lot = "0.11"
 pin-project = "0.4"
 rand = "0.8"
+rustls = "0.20"
 thiserror = "1.0"
 time = "0.3"
 tokio = { version = "1.14", default-features = false, features = ["io-util", "net", "rt", "sync", "time"] }
-rustls = "0.20"
 tokio-rustls = "0.23"
 varint-rs = "2.2"
 

@@ -174,6 +174,7 @@ impl PartitionClient {
         &self,
         offset: i64,
         bytes: Range<i32>,
+        max_wait_ms: i32,
     ) -> Result<(Vec<RecordAndOffset>, i64)> {
         let partition = self
             .maybe_retry("fetch_records", || async move {
@@ -183,7 +184,7 @@ impl PartitionClient {
                     .request(FetchRequest {
                         // normal consumer
                         replica_id: Int32(-1),
-                        max_wait_ms: Int32(10_000),
+                        max_wait_ms: Int32(max_wait_ms),
                         min_bytes: Int32(bytes.start),
                         max_bytes: Some(Int32(bytes.end.saturating_sub(1))),
                         // `READ_COMMITTED`
