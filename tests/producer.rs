@@ -45,7 +45,7 @@ async fn test_batch_producer() {
             r = a => r.unwrap(),
             r = b => r.unwrap(),
             _ = c => panic!("c finished!"),
-            _ = tokio::time::sleep(Duration::from_millis(10)).fuse() => break
+            _ = tokio::time::sleep(Duration::from_millis(100)).fuse() => break
         };
     }
 
