@@ -4,6 +4,7 @@ use crate::protocol::{
     api_key::ApiKey,
     api_version::ApiVersion,
     error::Error as ApiError,
+    messages::write_versioned_array,
     primitives::{CompactString, Int16, Int32, TaggedFields},
     traits::{ReadType, WriteType},
 };
@@ -12,6 +13,9 @@ use super::{
     read_versioned_array, ReadVersionedError, ReadVersionedType, RequestBody, WriteVersionedError,
     WriteVersionedType,
 };
+
+#[cfg(test)]
+use proptest::prelude::*;
 
 pub struct ApiVersionsRequest {
     /// The name of the client.
@@ -54,7 +58,8 @@ impl RequestBody for ApiVersionsRequest {
     const FIRST_TAGGED_FIELD_VERSION: ApiVersion = ApiVersion(Int16(3));
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq)]
+#[cfg_attr(test, derive(proptest_derive::Arbitrary))]
 pub struct ApiVersionsResponseApiKey {
     /// The API index.
     pub api_key: ApiKey,
@@ -88,12 +93,53 @@ where
     }
 }
 
-#[derive(Debug)]
+// this is not technically required for production but helpful for testing
+impl<W> WriteVersionedType<W> for ApiVersionsResponseApiKey
+where
+    W: Write,
+{
+    fn write_versioned(
+        &self,
+        writer: &mut W,
+        version: ApiVersion,
+    ) -> Result<(), WriteVersionedError> {
+        let v = version.0 .0;
+        assert!(v <= 3);
+
+        let api_key: Int16 = self.api_key.into();
+        api_key.write(writer)?;
+
+        self.min_version.0.write(writer)?;
+        self.max_version.0.write(writer)?;
+
+        if v >= 3 {
+            match self.tagged_fields.as_ref() {
+                Some(tagged_fields) => {
+                    tagged_fields.write(writer)?;
+                }
+                None => {
+                    TaggedFields::default().write(writer)?;
+                }
+            }
+        }
+
+        Ok(())
+    }
+}
+
+#[derive(Debug, PartialEq, Eq)]
+#[cfg_attr(test, derive(proptest_derive::Arbitrary))]
 pub struct ApiVersionsResponse {
     /// The top-level error code.
+    #[cfg_attr(test, proptest(strategy = "any::<Int16>().prop_map(ApiError::new)"))]
     pub error_code: Option<ApiError>,
 
     /// The APIs supported by the broker.
+    // tell proptest to only generate small vectors, otherwise tests take forever
+    #[cfg_attr(
+        test,
+        proptest(strategy = "prop::collection::vec(any::<ApiVersionsResponseApiKey>(), 0..2)")
+    )]
     pub api_keys: Vec<ApiVersionsResponseApiKey>,
 
     /// The duration in milliseconds for which the request was throttled due to a quota violation, or zero if the request did not violate any quota.
@@ -117,7 +163,7 @@ where
 
         let error_code = ApiError::new(Int16::read(reader)?);
         let api_keys = read_versioned_array(reader, version)?.unwrap_or_default();
-        let throttle_time_ms = (v > 0).then(|| Int32::read(reader)).transpose()?;
+        let throttle_time_ms = (v >= 1).then(|| Int32::read(reader)).transpose()?;
         let tagged_fields = (v >= 3).then(|| TaggedFields::read(reader)).transpose()?;
 
         Ok(Self {
@@ -127,4 +173,56 @@ where
             tagged_fields,
         })
     }
+}
+
+// this is not technically required for production but helpful for testing
+impl<W> WriteVersionedType<W> for ApiVersionsResponse
+where
+    W: Write,
+{
+    fn write_versioned(
+        &self,
+        writer: &mut W,
+        version: ApiVersion,
+    ) -> Result<(), WriteVersionedError> {
+        let v = version.0 .0;
+        assert!(v <= 3);
+
+        let error_code: Int16 = self.error_code.into();
+        error_code.write(writer)?;
+
+        write_versioned_array(writer, version, Some(&self.api_keys))?;
+
+        if v >= 1 {
+            // defaults to "no throttle"
+            self.throttle_time_ms.unwrap_or(Int32(0)).write(writer)?;
+        }
+
+        if v >= 3 {
+            match self.tagged_fields.as_ref() {
+                Some(tagged_fields) => {
+                    tagged_fields.write(writer)?;
+                }
+                None => {
+                    TaggedFields::default().write(writer)?;
+                }
+            }
+        }
+
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::protocol::messages::test_utils::test_roundtrip_versioned;
+
+    use super::*;
+
+    test_roundtrip_versioned!(
+        ApiVersionsResponse,
+        ApiVersionsRequest::API_VERSION_RANGE.0,
+        ApiVersionsRequest::API_VERSION_RANGE.1,
+        test_roundtrip_api_versions_response
+    );
 }

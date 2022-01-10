@@ -59,7 +59,8 @@ where
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq)]
+#[cfg_attr(test, derive(proptest_derive::Arbitrary))]
 pub struct ResponseHeader {
     /// The correlation ID of this response.
     pub correlation_id: Int32,
@@ -83,4 +84,48 @@ where
             tagged_fields: (v >= 1).then(|| TaggedFields::read(reader)).transpose()?,
         })
     }
+}
+
+// this is not technically required for production but helpful for testing
+impl<W> WriteVersionedType<W> for ResponseHeader
+where
+    W: Write,
+{
+    fn write_versioned(
+        &self,
+        writer: &mut W,
+        version: ApiVersion,
+    ) -> Result<(), WriteVersionedError> {
+        let v = version.0 .0;
+        assert!(v <= 1);
+
+        self.correlation_id.write(writer)?;
+
+        if v >= 1 {
+            match self.tagged_fields.as_ref() {
+                Some(tagged_fields) => {
+                    tagged_fields.write(writer)?;
+                }
+                None => {
+                    TaggedFields::default().write(writer)?;
+                }
+            }
+        }
+
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::protocol::messages::test_utils::test_roundtrip_versioned;
+
+    use super::*;
+
+    test_roundtrip_versioned!(
+        ResponseHeader,
+        ApiVersion(Int16(0)),
+        ApiVersion(Int16(1)),
+        test_roundtrip_response_header
+    );
 }

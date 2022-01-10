@@ -28,6 +28,8 @@ mod metadata;
 pub use metadata::*;
 mod produce;
 pub use produce::*;
+#[cfg(test)]
+mod test_utils;
 
 #[derive(Error, Debug)]
 pub enum ReadVersionedError {
