@@ -133,6 +133,11 @@ where
                             data: cursor,
                         })
                         .ok();
+                } else {
+                    println!(
+                        "Got response for unknown request: {}",
+                        header.correlation_id.0
+                    )
                 }
             }
         });
@@ -315,7 +320,17 @@ fn match_versions(
 
 #[cfg(test)]
 mod tests {
+    use std::ops::Deref;
+
+    use assert_matches::assert_matches;
+    use tokio::io::DuplexStream;
+
     use super::*;
+
+    use crate::protocol::{
+        error::Error as ApiError,
+        messages::{ApiVersionsResponse, ApiVersionsResponseApiKey},
+    };
 
     #[test]
     fn test_match_versions() {
@@ -350,5 +365,304 @@ mod tests {
             ),
             None,
         );
+    }
+
+    #[tokio::test]
+    async fn test_sync_versions_ok() {
+        let (sim, rx) = MessageSimulator::new();
+        let messenger = Messenger::new(rx);
+
+        // construct response
+        let mut msg = vec![];
+        ResponseHeader {
+            correlation_id: Int32(0),
+            tagged_fields: Default::default(),
+        }
+        .write_versioned(&mut msg, ApiVersion(Int16(1)))
+        .unwrap();
+        ApiVersionsResponse {
+            error_code: None,
+            api_keys: vec![ApiVersionsResponseApiKey {
+                api_key: ApiKey::Produce,
+                min_version: ApiVersion(Int16(1)),
+                max_version: ApiVersion(Int16(5)),
+                tagged_fields: Default::default(),
+            }],
+            throttle_time_ms: None,
+            tagged_fields: None,
+        }
+        .write_versioned(&mut msg, ApiVersionsRequest::API_VERSION_RANGE.1)
+        .unwrap();
+        sim.push(msg);
+
+        // sync versions
+        messenger.sync_versions().await.unwrap();
+        let expected = HashMap::from([(
+            (ApiKey::Produce),
+            (ApiVersion(Int16(1)), ApiVersion(Int16(5))),
+        )]);
+        assert_eq!(messenger.version_ranges.read().unwrap().deref(), &expected);
+    }
+
+    #[tokio::test]
+    async fn test_sync_versions_ignores_error_code() {
+        let (sim, rx) = MessageSimulator::new();
+        let messenger = Messenger::new(rx);
+
+        // construct error response
+        let mut msg = vec![];
+        ResponseHeader {
+            correlation_id: Int32(0),
+            tagged_fields: Default::default(),
+        }
+        .write_versioned(&mut msg, ApiVersion(Int16(1)))
+        .unwrap();
+        ApiVersionsResponse {
+            error_code: Some(ApiError::CorruptMessage),
+            api_keys: vec![ApiVersionsResponseApiKey {
+                api_key: ApiKey::Produce,
+                min_version: ApiVersion(Int16(2)),
+                max_version: ApiVersion(Int16(3)),
+                tagged_fields: Default::default(),
+            }],
+            throttle_time_ms: None,
+            tagged_fields: None,
+        }
+        .write_versioned(&mut msg, ApiVersionsRequest::API_VERSION_RANGE.1)
+        .unwrap();
+        sim.push(msg);
+
+        // construct good response
+        let mut msg = vec![];
+        ResponseHeader {
+            correlation_id: Int32(1),
+            tagged_fields: Default::default(),
+        }
+        .write_versioned(&mut msg, ApiVersion(Int16(0)))
+        .unwrap();
+        ApiVersionsResponse {
+            error_code: None,
+            api_keys: vec![ApiVersionsResponseApiKey {
+                api_key: ApiKey::Produce,
+                min_version: ApiVersion(Int16(1)),
+                max_version: ApiVersion(Int16(5)),
+                tagged_fields: Default::default(),
+            }],
+            throttle_time_ms: None,
+            tagged_fields: None,
+        }
+        .write_versioned(
+            &mut msg,
+            ApiVersion(Int16(ApiVersionsRequest::API_VERSION_RANGE.1 .0 .0 - 1)),
+        )
+        .unwrap();
+        sim.push(msg);
+
+        // sync versions
+        messenger.sync_versions().await.unwrap();
+        let expected = HashMap::from([(
+            (ApiKey::Produce),
+            (ApiVersion(Int16(1)), ApiVersion(Int16(5))),
+        )]);
+        assert_eq!(messenger.version_ranges.read().unwrap().deref(), &expected);
+    }
+
+    #[tokio::test]
+    async fn test_sync_versions_ignores_read_code() {
+        let (sim, rx) = MessageSimulator::new();
+        let messenger = Messenger::new(rx);
+
+        // construct error response
+        let mut msg = vec![];
+        ResponseHeader {
+            correlation_id: Int32(0),
+            tagged_fields: Default::default(),
+        }
+        .write_versioned(&mut msg, ApiVersion(Int16(1)))
+        .unwrap();
+        msg.push(b'\0');
+        sim.push(msg);
+
+        // construct good response
+        let mut msg = vec![];
+        ResponseHeader {
+            correlation_id: Int32(1),
+            tagged_fields: Default::default(),
+        }
+        .write_versioned(&mut msg, ApiVersion(Int16(0)))
+        .unwrap();
+        ApiVersionsResponse {
+            error_code: None,
+            api_keys: vec![ApiVersionsResponseApiKey {
+                api_key: ApiKey::Produce,
+                min_version: ApiVersion(Int16(1)),
+                max_version: ApiVersion(Int16(5)),
+                tagged_fields: Default::default(),
+            }],
+            throttle_time_ms: None,
+            tagged_fields: None,
+        }
+        .write_versioned(
+            &mut msg,
+            ApiVersion(Int16(ApiVersionsRequest::API_VERSION_RANGE.1 .0 .0 - 1)),
+        )
+        .unwrap();
+        sim.push(msg);
+
+        // sync versions
+        messenger.sync_versions().await.unwrap();
+        let expected = HashMap::from([(
+            (ApiKey::Produce),
+            (ApiVersion(Int16(1)), ApiVersion(Int16(5))),
+        )]);
+        assert_eq!(messenger.version_ranges.read().unwrap().deref(), &expected);
+    }
+
+    #[tokio::test]
+    async fn test_sync_versions_err_flipped_range() {
+        let (sim, rx) = MessageSimulator::new();
+        let messenger = Messenger::new(rx);
+
+        // construct response
+        let mut msg = vec![];
+        ResponseHeader {
+            correlation_id: Int32(0),
+            tagged_fields: Default::default(),
+        }
+        .write_versioned(&mut msg, ApiVersion(Int16(1)))
+        .unwrap();
+        ApiVersionsResponse {
+            error_code: None,
+            api_keys: vec![ApiVersionsResponseApiKey {
+                api_key: ApiKey::Produce,
+                min_version: ApiVersion(Int16(2)),
+                max_version: ApiVersion(Int16(1)),
+                tagged_fields: Default::default(),
+            }],
+            throttle_time_ms: None,
+            tagged_fields: None,
+        }
+        .write_versioned(&mut msg, ApiVersionsRequest::API_VERSION_RANGE.1)
+        .unwrap();
+        sim.push(msg);
+
+        // sync versions
+        let err = messenger.sync_versions().await.unwrap_err();
+        assert_matches!(err, SyncVersionsError::FlippedVersionRange { .. });
+    }
+
+    #[tokio::test]
+    async fn test_sync_versions_err_garbage() {
+        let (sim, rx) = MessageSimulator::new();
+        let messenger = Messenger::new(rx);
+
+        // construct response
+        let mut msg = vec![];
+        ResponseHeader {
+            correlation_id: Int32(0),
+            tagged_fields: Default::default(),
+        }
+        .write_versioned(&mut msg, ApiVersion(Int16(1)))
+        .unwrap();
+        ApiVersionsResponse {
+            error_code: None,
+            api_keys: vec![ApiVersionsResponseApiKey {
+                api_key: ApiKey::Produce,
+                min_version: ApiVersion(Int16(1)),
+                max_version: ApiVersion(Int16(2)),
+                tagged_fields: Default::default(),
+            }],
+            throttle_time_ms: None,
+            tagged_fields: None,
+        }
+        .write_versioned(&mut msg, ApiVersionsRequest::API_VERSION_RANGE.1)
+        .unwrap();
+        msg.push(b'\0');
+        sim.push(msg);
+
+        // sync versions
+        let err = messenger.sync_versions().await.unwrap_err();
+        assert_matches!(err, SyncVersionsError::RequestError(..));
+    }
+
+    #[tokio::test]
+    async fn test_sync_versions_err_no_working_version() {
+        let (sim, rx) = MessageSimulator::new();
+        let messenger = Messenger::new(rx);
+
+        // construct error response
+        for (i, v) in ((ApiVersionsRequest::API_VERSION_RANGE.0 .0 .0)
+            ..=(ApiVersionsRequest::API_VERSION_RANGE.1 .0 .0))
+            .rev()
+            .enumerate()
+        {
+            let mut msg = vec![];
+            ResponseHeader {
+                correlation_id: Int32(i as i32),
+                tagged_fields: Default::default(),
+            }
+            .write_versioned(&mut msg, ApiVersion(Int16(0)))
+            .unwrap();
+            ApiVersionsResponse {
+                error_code: Some(ApiError::CorruptMessage),
+                api_keys: vec![ApiVersionsResponseApiKey {
+                    api_key: ApiKey::Produce,
+                    min_version: ApiVersion(Int16(1)),
+                    max_version: ApiVersion(Int16(5)),
+                    tagged_fields: Default::default(),
+                }],
+                throttle_time_ms: None,
+                tagged_fields: None,
+            }
+            .write_versioned(&mut msg, ApiVersion(Int16(v)))
+            .unwrap();
+            sim.push(msg);
+        }
+
+        // sync versions
+        let err = messenger.sync_versions().await.unwrap_err();
+        assert_matches!(err, SyncVersionsError::NoWorkingVersion);
+    }
+
+    struct MessageSimulator {
+        messages: Arc<RwLock<Vec<Vec<u8>>>>,
+        join_handle: JoinHandle<()>,
+    }
+
+    impl MessageSimulator {
+        fn new() -> (Self, DuplexStream) {
+            let (mut tx, rx) = tokio::io::duplex(1_000);
+            let messages: Arc<RwLock<Vec<Vec<u8>>>> = Arc::new(RwLock::new(vec![]));
+
+            let messages_captured = Arc::clone(&messages);
+            let join_handle = tokio::task::spawn(async move {
+                loop {
+                    tx.read_message(1_000).await.unwrap();
+
+                    let message = {
+                        let mut messages = messages_captured.write().unwrap();
+                        messages.remove(0)
+                    };
+                    tx.write_message(&message).await.unwrap();
+                }
+            });
+
+            let this = Self {
+                messages,
+                join_handle,
+            };
+            (this, rx)
+        }
+
+        fn push(&self, msg: Vec<u8>) {
+            self.messages.write().unwrap().push(msg);
+        }
+    }
+
+    impl Drop for MessageSimulator {
+        fn drop(&mut self) {
+            // this will drop the future and therefore tx which will close th streams
+            self.join_handle.abort();
+        }
     }
 }
