@@ -63,7 +63,7 @@ impl MessengerState {
                     // it's OK if the other side is gone
                     active_request
                         .channel
-                        .send(Err(RequestError::Poissened(Arc::clone(&err))))
+                        .send(Err(RequestError::Poisened(Arc::clone(&err))))
                         .ok();
                 }
 
@@ -136,7 +136,7 @@ pub enum RequestError {
     ReadMessageError(#[from] crate::protocol::frame::ReadError),
 
     #[error(transparent)]
-    Poissened(Arc<RequestError>),
+    Poisened(Arc<RequestError>),
 }
 
 #[derive(Error, Debug)]
@@ -309,7 +309,7 @@ where
                 );
             }
             MessengerState::Poisson(e) => {
-                return Err(RequestError::Poissened(Arc::clone(e)));
+                return Err(RequestError::Poisened(Arc::clone(e)));
             }
         }
 
@@ -337,7 +337,7 @@ where
             Err(e) => {
                 // need to poisson the stream because message framing might be out-of-sync
                 let mut state = self.state.lock().await;
-                Err(RequestError::Poissened(state.poisson(e).await))
+                Err(RequestError::Poisened(state.poisson(e).await))
             }
         }
     }
@@ -774,7 +774,7 @@ mod tests {
             })
             .await
             .unwrap_err();
-        assert_matches!(err, RequestError::Poissened(_));
+        assert_matches!(err, RequestError::Poisened(_));
     }
 
     #[tokio::test]
@@ -796,7 +796,7 @@ mod tests {
             })
             .await
             .unwrap_err();
-        assert_matches!(err, RequestError::Poissened(_));
+        assert_matches!(err, RequestError::Poisened(_));
 
         // follow-up message is broken as well
         let err = messenger
@@ -807,7 +807,7 @@ mod tests {
             })
             .await
             .unwrap_err();
-        assert_matches!(err, RequestError::Poissened(_));
+        assert_matches!(err, RequestError::Poisened(_));
     }
 
     #[tokio::test]
