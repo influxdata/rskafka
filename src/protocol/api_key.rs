@@ -220,6 +220,12 @@ mod tests {
 
         #[test]
         fn test_roundrip_api_key(key: ApiKey) {
+            let key = match key {
+                // Ensure key is actually unknown
+                ApiKey::Unknown(x) => ApiKey::from(x),
+                _ => key,
+            };
+
             let code = Int16::from(key);
             let key2 = ApiKey::from(code);
             assert_eq!(key, key2);
