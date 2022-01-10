@@ -13,6 +13,7 @@ use crate::{
 
 pub mod error;
 pub mod partition;
+pub mod producer;
 
 use error::{Error, Result};
 
@@ -91,7 +92,7 @@ impl Client {
         num_partitions: i32,
         replication_factor: i16,
     ) -> Result<()> {
-        let broker = self.brokers.get_cached_broker().await?;
+        let broker = self.brokers.get_arbitrary_cached_broker().await?;
         let response = broker
             .request(CreateTopicsRequest {
                 topics: vec![CreateTopicRequest {

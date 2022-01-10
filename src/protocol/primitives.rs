@@ -6,6 +6,9 @@
 
 use std::io::{Cursor, Read, Write};
 
+#[cfg(test)]
+use proptest::prelude::*;
+
 use varint_rs::{VarintReader, VarintWriter};
 
 use super::{
@@ -548,7 +551,23 @@ where
     T: WriteType<W>,
 {
     fn write(&self, writer: &mut W) -> Result<(), WriteError> {
-        match self.0.as_ref() {
+        ArrayRef(self.0.as_deref()).write(writer)
+    }
+}
+
+/// Same as [`Array`] but contains referenced data.
+///
+/// This only supports writing.
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct ArrayRef<'a, T>(pub Option<&'a [T]>);
+
+impl<'a, W, T> WriteType<W> for ArrayRef<'a, T>
+where
+    W: Write,
+    T: WriteType<W>,
+{
+    fn write(&self, writer: &mut W) -> Result<(), WriteError> {
+        match self.0 {
             None => Int32(-1).write(writer),
             Some(inner) => {
                 let len = i32::try_from(inner.len())?;
@@ -576,7 +595,13 @@ where
 /// [KIP-98]: https://cwiki.apache.org/confluence/display/KAFKA/KIP-98+-+Exactly+Once+Delivery+and+Transactional+Messaging
 #[derive(Debug, PartialEq, Eq)]
 #[cfg_attr(test, derive(proptest_derive::Arbitrary))]
-pub struct Records(pub Vec<RecordBatch>);
+pub struct Records(
+    #[cfg_attr(
+        test,
+        proptest(strategy = "prop::collection::vec(any::<RecordBatch>(), 0..2)")
+    )]
+    pub Vec<RecordBatch>,
+);
 
 impl<R> ReadType<R> for Records
 where
@@ -615,12 +640,11 @@ where
 mod tests {
     use std::io::Cursor;
 
-    use crate::protocol::{record::RecordBatchCompression, test_utils::test_roundtrip};
+    use crate::protocol::test_utils::test_roundtrip;
 
     use super::*;
 
     use assert_matches::assert_matches;
-    use proptest::strategy::ValueTree;
 
     test_roundtrip!(Boolean, test_bool_roundtrip);
 
@@ -726,39 +750,5 @@ mod tests {
 
     test_roundtrip!(Array<Int32>, test_array_roundtrip);
 
-    // This will take forever
-    // ```rust
-    // test_roundtrip!(Records, test_records_roundtrip);
-    // ``
-    // So let's use a manual test:
-    #[test]
-    fn test_records_roundtrip_manual() {
-        let strategy = RecordBatch::arbitrary();
-        let mut runner = proptest::test_runner::TestRunner::default();
-
-        let orig = Records(vec![
-            strategy.new_tree(&mut runner).unwrap().current(),
-            strategy.new_tree(&mut runner).unwrap().current(),
-        ]);
-        let orig = Records(
-            orig.0
-                .into_iter()
-                .map(|batch| RecordBatch {
-                    compression: RecordBatchCompression::NoCompression,
-                    ..batch
-                })
-                .collect(),
-        );
-
-        let mut buf = Cursor::new(Vec::<u8>::new());
-        orig.write(&mut buf).unwrap();
-
-        let l = buf.position();
-        buf.set_position(0);
-
-        let restored = Records::read(&mut buf).unwrap();
-        assert_eq!(orig, restored);
-
-        assert_eq!(buf.position(), l);
-    }
+    test_roundtrip!(Records, test_records_roundtrip);
 }

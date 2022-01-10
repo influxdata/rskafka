@@ -25,24 +25,40 @@ impl Default for BackoffConfig {
 ///
 /// Consecutive calls to [`Backoff::next`] will return the next backoff interval
 ///
-#[derive(Debug)]
-pub struct Backoff<R> {
+pub struct Backoff {
     init_backoff: f64,
     next_backoff_secs: f64,
     max_backoff_secs: f64,
     base: f64,
-    rng: R,
+    rng: Option<Box<dyn RngCore + Sync + Send>>,
 }
 
-impl Backoff<ThreadRng> {
-    /// Create a new [`Backoff`] from the provided [`BackoffConfig`]
-    pub fn new(config: &BackoffConfig) -> Self {
-        Self::new_with_rng(config, thread_rng())
+impl std::fmt::Debug for Backoff {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Backoff")
+            .field("init_backoff", &self.init_backoff)
+            .field("next_backoff_secs", &self.next_backoff_secs)
+            .field("max_backoff_secs", &self.max_backoff_secs)
+            .field("base", &self.base)
+            .finish()
     }
 }
 
-impl<R: Rng> Backoff<R> {
-    pub fn new_with_rng(config: &BackoffConfig, rng: R) -> Self {
+impl Backoff {
+    /// Create a new [`Backoff`] from the provided [`BackoffConfig`]
+    pub fn new(config: &BackoffConfig) -> Self {
+        Self::new_with_rng(config, None)
+    }
+}
+
+impl Backoff {
+    /// Creates a new `Backoff` with the optional `rng`
+    ///
+    /// Used [`rand::thread_rng()`] if no rng provided
+    pub fn new_with_rng(
+        config: &BackoffConfig,
+        rng: Option<Box<dyn RngCore + Sync + Send>>,
+    ) -> Self {
         let init_backoff = config.init_backoff.as_secs_f64();
         Self {
             init_backoff,
@@ -55,10 +71,14 @@ impl<R: Rng> Backoff<R> {
 
     /// Returns the next backoff duration to wait for
     pub fn next(&mut self) -> Duration {
-        let next_backoff = self.max_backoff_secs.min(
-            self.rng
-                .gen_range(self.init_backoff..(self.next_backoff_secs * self.base)),
-        );
+        let range = self.init_backoff..(self.next_backoff_secs * self.base);
+
+        let rand_backoff = match self.rng.as_mut() {
+            Some(rng) => rng.gen_range(range),
+            None => thread_rng().gen_range(range),
+        };
+
+        let next_backoff = self.max_backoff_secs.min(rand_backoff);
         Duration::from_secs_f64(std::mem::replace(&mut self.next_backoff_secs, next_backoff))
     }
 }
@@ -83,16 +103,16 @@ mod tests {
         let assert_fuzzy_eq = |a: f64, b: f64| assert!((b - a).abs() < 0.0001, "{} != {}", a, b);
 
         // Create a static rng that takes the minimum of the range
-        let rng = StepRng::new(0, 0);
-        let mut backoff = Backoff::new_with_rng(&config, rng);
+        let rng = Box::new(StepRng::new(0, 0));
+        let mut backoff = Backoff::new_with_rng(&config, Some(rng));
 
         for _ in 0..20 {
             assert_eq!(backoff.next().as_secs_f64(), init_backoff_secs);
         }
 
         // Create a static rng that takes the maximum of the range
-        let rng = StepRng::new(u64::MAX, 0);
-        let mut backoff = Backoff::new_with_rng(&config, rng);
+        let rng = Box::new(StepRng::new(u64::MAX, 0));
+        let mut backoff = Backoff::new_with_rng(&config, Some(rng));
 
         for i in 0..20 {
             let value = (base.powi(i) * init_backoff_secs).min(max_backoff_secs);
@@ -100,8 +120,8 @@ mod tests {
         }
 
         // Create a static rng that takes the mid point of the range
-        let rng = StepRng::new(u64::MAX / 2, 0);
-        let mut backoff = Backoff::new_with_rng(&config, rng);
+        let rng = Box::new(StepRng::new(u64::MAX / 2, 0));
+        let mut backoff = Backoff::new_with_rng(&config, Some(rng));
 
         let mut value = init_backoff_secs;
         for _ in 0..20 {

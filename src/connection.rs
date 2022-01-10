@@ -1,3 +1,4 @@
+use rand::prelude::*;
 use std::sync::Arc;
 
 use thiserror::Error;
@@ -20,13 +21,16 @@ pub type BrokerConnection = Arc<Messenger<BufStream<transport::Transport>>>;
 #[derive(Debug, Error)]
 pub enum Error {
     #[error("error getting cluster metadata: {0}")]
-    MetadataError(RequestError),
+    Metadata(RequestError),
 
     #[error("error connecting to broker \"{broker}\": {error}")]
-    TransportError {
+    Transport {
         broker: String,
         error: transport::Error,
     },
+
+    #[error(transparent)]
+    SyncVersions(#[from] crate::messenger::SyncVersionsError),
 }
 
 pub type Result<T, E = Error> = std::result::Result<T, E>;
@@ -76,7 +80,7 @@ impl BrokerConnector {
     /// Requests data for all topics if `topics` is `None`
     pub async fn request_metadata(&self, topics: Option<Vec<String>>) -> Result<MetadataResponse> {
         // TODO: Add retry logic
-        let broker = self.get_cached_broker().await?;
+        let broker = self.get_arbitrary_cached_broker().await?;
 
         let response = broker
             .request(MetadataRequest {
@@ -88,7 +92,7 @@ impl BrokerConnector {
                 allow_auto_topic_creation: None,
             })
             .await
-            .map_err(Error::MetadataError)?;
+            .map_err(Error::Metadata)?;
 
         self.topology.update(&response.brokers);
         Ok(response)
@@ -98,7 +102,7 @@ impl BrokerConnector {
     ///
     /// The next call to `[BrokerPool::get_cached_broker]` will get a new connection
     #[allow(dead_code)]
-    pub async fn invalidate_cached_broker(&self) {
+    pub async fn invalid_cached_arbitrary_broker(&self) {
         self.current_broker.lock().await.take();
     }
 
@@ -114,28 +118,31 @@ impl BrokerConnector {
         println!("Establishing new connection to: {}", url);
         let transport = Transport::connect(url, self.tls_config.clone())
             .await
-            .map_err(|error| Error::TransportError {
+            .map_err(|error| Error::Transport {
                 broker: url.to_string(),
                 error,
             })?;
 
         let messenger = Arc::new(Messenger::new(BufStream::new(transport)));
-        messenger.sync_versions().await;
+        messenger.sync_versions().await?;
         Ok(messenger)
     }
 
     /// Gets a cached [`BrokerConnection`] to any broker
-    pub async fn get_cached_broker(&self) -> Result<BrokerConnection> {
+    pub async fn get_arbitrary_cached_broker(&self) -> Result<BrokerConnection> {
         let mut current_broker = self.current_broker.lock().await;
         if let Some(broker) = &*current_broker {
             return Ok(Arc::clone(broker));
         }
 
-        let brokers = if self.topology.is_empty() {
+        let mut brokers = if self.topology.is_empty() {
             self.bootstrap_brokers.clone()
         } else {
             self.topology.get_broker_urls()
         };
+
+        // Randomise search order to encourage different clients to choose different brokers
+        brokers.shuffle(&mut thread_rng());
 
         let mut backoff = Backoff::new(&self.backoff_config);
 
