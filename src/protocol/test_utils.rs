@@ -4,7 +4,7 @@ macro_rules! test_roundtrip {
         use proptest::prelude::*;
 
         proptest! {
-            #![proptest_config(ProptestConfig{cases: 100, fork: false, ..Default::default()})]
+            #![proptest_config(ProptestConfig{fork: false, ..Default::default()})]
             #[test]
             fn $name(orig: $t) {
                 #[allow(unused_imports)]

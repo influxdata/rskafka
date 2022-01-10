@@ -20,13 +20,16 @@ pub type BrokerConnection = Arc<Messenger<BufStream<transport::Transport>>>;
 #[derive(Debug, Error)]
 pub enum Error {
     #[error("error getting cluster metadata: {0}")]
-    MetadataError(RequestError),
+    Metadata(RequestError),
 
     #[error("error connecting to broker \"{broker}\": {error}")]
-    TransportError {
+    Transport {
         broker: String,
         error: transport::Error,
     },
+
+    #[error(transparent)]
+    SyncVersions(#[from] crate::messenger::SyncVersionsError),
 }
 
 pub type Result<T, E = Error> = std::result::Result<T, E>;
@@ -88,7 +91,7 @@ impl BrokerConnector {
                 allow_auto_topic_creation: None,
             })
             .await
-            .map_err(Error::MetadataError)?;
+            .map_err(Error::Metadata)?;
 
         self.topology.update(&response.brokers);
         Ok(response)
@@ -114,13 +117,13 @@ impl BrokerConnector {
         println!("Establishing new connection to: {}", url);
         let transport = Transport::connect(url, self.tls_config.clone())
             .await
-            .map_err(|error| Error::TransportError {
+            .map_err(|error| Error::Transport {
                 broker: url.to_string(),
                 error,
             })?;
 
         let messenger = Arc::new(Messenger::new(BufStream::new(transport)));
-        messenger.sync_versions().await;
+        messenger.sync_versions().await?;
         Ok(messenger)
     }
 
