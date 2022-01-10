@@ -9,6 +9,7 @@ edition = "2021"
 async-trait = "0.1"
 crc = "2"
 bytes = "1.1"
+futures = "0.3"
 parking_lot = "0.11"
 pin-project = "0.4"
 rand = "0.8"
@@ -27,5 +28,5 @@ proptest = "1"
 proptest-derive = "0.3"
 rustls-pemfile = "0.2"
 rdkafka = "0.28"
-tokio = {version = "1.14", features = ["macros"]}
+tokio = { version = "1.14", features = ["macros"] }
 uuid = { version = "0.8", features = ["v4"] }
