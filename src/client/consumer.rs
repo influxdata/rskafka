@@ -35,6 +35,8 @@ impl StreamConsumerBuilder {
         Self {
             client,
             start_offset,
+            // Use same defaults as rdkafka:
+            // - <https://github.com/edenhill/librdkafka/blob/master/CONFIGURATION.md>
             max_wait_ms: 500,
             min_batch_size: 1,
             max_batch_size: 52428800,
@@ -154,6 +156,7 @@ impl Stream for StreamConsumer {
                         watermark
                     );
 
+                    // Sort records by offset in case they aren't in order
                     v.sort_by_key(|x| x.offset);
                     *this.last_high_watermark = watermark;
                     if let Some(x) = v.last() {
@@ -393,7 +396,7 @@ mod tests {
 
         sender.send(record.clone()).await.unwrap();
 
-        // Should expire linger
+        // Should wait for max_wait_ms
         tokio::time::timeout(Duration::from_millis(10), stream.next())
             .await
             .unwrap()
