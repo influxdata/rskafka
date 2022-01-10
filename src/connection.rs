@@ -1,5 +1,5 @@
-use std::sync::Arc;
 use rand::prelude::*;
+use std::sync::Arc;
 
 use thiserror::Error;
 use tokio::io::BufStream;
