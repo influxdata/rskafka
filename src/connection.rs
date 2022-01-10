@@ -1,3 +1,4 @@
+use rand::prelude::*;
 use std::sync::Arc;
 
 use thiserror::Error;
@@ -134,11 +135,14 @@ impl BrokerConnector {
             return Ok(Arc::clone(broker));
         }
 
-        let brokers = if self.topology.is_empty() {
+        let mut brokers = if self.topology.is_empty() {
             self.bootstrap_brokers.clone()
         } else {
             self.topology.get_broker_urls()
         };
+
+        // Randomise search order to encourage different clients to choose different brokers
+        brokers.shuffle(&mut thread_rng());
 
         let mut backoff = Backoff::new(&self.backoff_config);
 
