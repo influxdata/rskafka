@@ -31,17 +31,20 @@ use crate::protocol::{
 };
 use crate::protocol::{messages::ApiVersionsRequest, traits::ReadType};
 
+#[derive(Debug)]
 struct Response {
     #[allow(dead_code)]
     header: ResponseHeader,
     data: Cursor<Vec<u8>>,
 }
 
+#[derive(Debug)]
 struct ActiveRequest {
     channel: Sender<Result<Response, RequestError>>,
     use_tagged_fields: bool,
 }
 
+#[derive(Debug)]
 enum MessengerState {
     /// Currently active requests by correlation ID.
     ///
@@ -55,7 +58,7 @@ enum MessengerState {
 impl MessengerState {
     async fn poisson(&mut self, err: RequestError) -> Arc<RequestError> {
         match self {
-            MessengerState::RequestMap(map) => {
+            Self::RequestMap(map) => {
                 let err = Arc::new(err);
 
                 // inform all active requests
@@ -67,10 +70,10 @@ impl MessengerState {
                         .ok();
                 }
 
-                *self = MessengerState::Poisson(Arc::clone(&err));
+                *self = Self::Poisson(Arc::clone(&err));
                 err
             }
-            MessengerState::Poisson(e) => {
+            Self::Poisson(e) => {
                 // already poisoned, used existing error
                 Arc::clone(e)
             }
@@ -82,6 +85,7 @@ impl MessengerState {
 ///
 /// Note: Requests to the same [`Messenger`] will be pipelined by Kafka
 ///
+#[derive(Debug)]
 pub struct Messenger<RW> {
     /// The half of the stream that we use to send data TO the broker.
     ///
@@ -254,7 +258,7 @@ where
 
     pub async fn request<R>(&self, msg: R) -> Result<R::ResponseBody, RequestError>
     where
-        R: RequestBody + WriteVersionedType<Vec<u8>>,
+        R: RequestBody + Send + WriteVersionedType<Vec<u8>>,
         R::ResponseBody: ReadVersionedType<Cursor<Vec<u8>>>,
     {
         let body_api_version = self

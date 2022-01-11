@@ -24,7 +24,7 @@ impl Display for Broker {
 
 impl<'a> From<&'a MetadataResponseBroker> for Broker {
     fn from(b: &'a MetadataResponseBroker) -> Self {
-        Broker {
+        Self {
             host: b.host.0.clone(),
             port: b.port.0,
         }

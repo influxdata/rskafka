@@ -13,6 +13,7 @@ use crate::{
     record::RecordAndOffset,
 };
 
+#[derive(Debug)]
 pub struct StreamConsumerBuilder {
     client: Arc<dyn FetchClient>,
 
@@ -168,6 +169,20 @@ impl Stream for StreamConsumer {
                 Err(e) => return Poll::Ready(Some(Err(e))),
             }
         }
+    }
+}
+
+impl std::fmt::Debug for StreamConsumer {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("StreamConsumer")
+            .field("client", &self.client)
+            .field("min_batch_size", &self.min_batch_size)
+            .field("max_batch_size", &self.max_batch_size)
+            .field("max_wait_ms", &self.max_wait_ms)
+            .field("next_offset", &self.next_offset)
+            .field("last_high_watermark", &self.last_high_watermark)
+            .field("buffer", &self.buffer)
+            .finish()
     }
 }
 
