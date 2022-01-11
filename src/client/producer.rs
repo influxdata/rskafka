@@ -3,7 +3,7 @@
 //! # Usage
 //! ```no_run
 //! # async fn test() {
-//! use minikafka::{
+//! use rskafka::{
 //!     client::{
 //!         Client,
 //!         producer::{

@@ -1,4 +1,4 @@
-# MiniKafka
+# RSKafka
 
 This crate aims to be a minimal Kafka implementation for simple workloads that wish to use Kafka as a distributed
 write-ahead log.
@@ -24,7 +24,7 @@ It will be a good fit for workloads that:
 
 ```rust,no_run
 # async fn test() {
-use minikafka::{
+use rskafka::{
     client::Client,
     record::Record,
 };

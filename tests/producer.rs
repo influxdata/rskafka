@@ -1,5 +1,5 @@
 use futures::{future::FusedFuture, pin_mut, FutureExt};
-use minikafka::client::{
+use rskafka::client::{
     producer::{aggregator::RecordAggregator, BatchProducerBuilder},
     Client,
 };

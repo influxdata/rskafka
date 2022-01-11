@@ -1,7 +1,6 @@
 use std::time::Duration;
 
 use futures::{StreamExt, TryStreamExt};
-use minikafka::record::{Record, RecordAndOffset};
 use rdkafka::{
     consumer::{Consumer, StreamConsumer},
     message::{Headers, OwnedHeaders},
@@ -9,6 +8,7 @@ use rdkafka::{
     util::Timeout,
     ClientConfig, Message, TopicPartitionList,
 };
+use rskafka::record::{Record, RecordAndOffset};
 use time::OffsetDateTime;
 
 /// Produce.

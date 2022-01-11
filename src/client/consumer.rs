@@ -4,7 +4,7 @@
 //! ```no_run
 //! # async fn test() {
 //! use futures::StreamExt;
-//! use minikafka::client::{
+//! use rskafka::client::{
 //!     Client,
 //!     consumer::StreamConsumerBuilder,
 //! };
