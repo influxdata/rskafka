@@ -17,8 +17,22 @@ It will be a good fit for workloads that:
 
 * Perform offset tracking independently of Kafka
 * Read/Write reasonably sized payloads per-partition
-* Have a low number of high-throughput partitions <sup>1.</sup>
+* Have a low number of high-throughput partitions [^1]
 
-<sup>1.</sup> Kafka's design makes it hard for any client to support the converse, as ultimately each partition is an
+
+## License
+
+Licensed under either of these:
+
+ * Apache License, Version 2.0 ([LICENSE-APACHE](LICENSE-APACHE) or https://www.apache.org/licenses/LICENSE-2.0)
+ * MIT License ([LICENSE-MIT](LICENSE-MIT) or https://opensource.org/licenses/MIT)
+
+### Contributing
+
+Unless you explicitly state otherwise, any contribution you intentionally submit for inclusion in the work, as defined
+in the Apache-2.0 license, shall be dual-licensed as above, without any additional terms or conditions.
+
+
+[^1]: Kafka's design makes it hard for any client to support the converse, as ultimately each partition is an
 independent write stream within the broker. However, this crate makes no attempt to mitigate per-partition overheads
 e.g. by batching writes to multiple partitions in a single ProduceRequest
