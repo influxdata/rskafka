@@ -33,6 +33,7 @@ pub enum ProduceError {
     NoResult { index: usize },
 }
 
+#[derive(Debug)]
 pub struct Client {
     brokers: Arc<BrokerConnector>,
 }
@@ -68,7 +69,7 @@ impl Client {
     /// Returns a client for performing operations on a specific partition
     pub async fn partition_client(
         &self,
-        topic: impl Into<String>,
+        topic: impl Into<String> + Send,
         partition: i32,
     ) -> Result<PartitionClient> {
         Ok(PartitionClient::new(
@@ -93,7 +94,7 @@ impl Client {
     /// Create a topic
     pub async fn create_topic(
         &self,
-        name: impl Into<String>,
+        name: impl Into<String> + Send,
         num_partitions: i32,
         replication_factor: i16,
     ) -> Result<()> {

@@ -373,8 +373,8 @@ impl PartitionClient {
     /// and handles certain classes of error
     async fn maybe_retry<R, F, T>(&self, request_name: &str, f: R) -> Result<T>
     where
-        R: Fn() -> F,
-        F: std::future::Future<Output = Result<T>>,
+        R: (Fn() -> F) + Send + Sync,
+        F: std::future::Future<Output = Result<T>> + Send,
     {
         let mut backoff = Backoff::new(&self.backoff_config);
 

@@ -182,3 +182,20 @@ impl BrokerConnector {
         }
     }
 }
+
+impl std::fmt::Debug for BrokerConnector {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let tls_config: &'static str = match self.tls_config {
+            Some(_) => "Some",
+            None => "None",
+        };
+        f.debug_struct("BrokerConnector")
+            .field("bootstrap_brokers", &self.bootstrap_brokers)
+            .field("topology", &self.topology)
+            .field("current_broker", &self.current_broker)
+            .field("backoff_config", &self.backoff_config)
+            .field("tls_config", &tls_config)
+            .field("max_message_size", &self.max_message_size)
+            .finish()
+    }
+}
