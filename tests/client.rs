@@ -292,9 +292,6 @@ async fn produce_minikafka(
     _partition_index: i32,
     records: Vec<Record>,
 ) -> Vec<i64> {
-    // TODO: remove this hack
-    tokio::time::sleep(std::time::Duration::from_secs(1)).await;
-
     partition_client.produce(records).await.unwrap()
 }
 
