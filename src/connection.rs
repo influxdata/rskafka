@@ -88,20 +88,38 @@ impl BrokerConnector {
     ///
     /// Requests data for all topics if `topics` is `None`
     pub async fn request_metadata(&self, topics: Option<Vec<String>>) -> Result<MetadataResponse> {
-        // TODO: Add retry logic
-        let broker = self.get_arbitrary_cached_broker().await?;
+        let mut backoff = Backoff::new(&self.backoff_config);
+        let request = MetadataRequest {
+            topics: topics.map(|t| {
+                t.into_iter()
+                    .map(|x| MetadataRequestTopic { name: String_(x) })
+                    .collect()
+            }),
+            allow_auto_topic_creation: None,
+        };
 
-        let response = broker
-            .request(MetadataRequest {
-                topics: topics.map(|t| {
-                    t.into_iter()
-                        .map(|x| MetadataRequestTopic { name: String_(x) })
-                        .collect()
-                }),
-                allow_auto_topic_creation: None,
-            })
-            .await
-            .map_err(Error::Metadata)?;
+        let response = loop {
+            let broker = self.get_arbitrary_cached_broker().await?;
+            let error = match broker.request(&request).await {
+                Ok(response) => break response,
+                Err(e @ RequestError::Poisoned(_) | e @ RequestError::IO(_)) => {
+                    self.invalidate_cached_arbitrary_broker().await;
+                    e
+                }
+                Err(error) => {
+                    println!("metadata request encountered fatal error: {}", error);
+                    return Err(Error::Metadata(error));
+                }
+            };
+
+            let backoff = backoff.next();
+            println!(
+                "metadata request encountered non-fatal error \"{}\" - backing off for {} seconds",
+                error,
+                backoff.as_secs()
+            );
+            tokio::time::sleep(backoff).await;
+        };
 
         self.topology.update(&response.brokers);
         Ok(response)
@@ -111,7 +129,7 @@ impl BrokerConnector {
     ///
     /// The next call to `[BrokerPool::get_cached_broker]` will get a new connection
     #[allow(dead_code)]
-    pub async fn invalid_cached_arbitrary_broker(&self) {
+    pub async fn invalidate_cached_arbitrary_broker(&self) {
         self.current_broker.lock().await.take();
     }
 
