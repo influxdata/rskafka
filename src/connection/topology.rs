@@ -3,6 +3,7 @@ use parking_lot::RwLock;
 use std::collections::hash_map::Entry;
 use std::collections::HashMap;
 use std::fmt::{Display, Formatter};
+use tracing::info;
 
 #[derive(Debug, Default)]
 pub struct BrokerTopology {
@@ -62,16 +63,22 @@ impl BrokerTopology {
                     let current = o.get_mut();
                     if current.host != broker.host.0 || current.port != broker.port.0 {
                         let new = Broker::from(broker);
-                        println!(
-                            "Broker {} update from {} to {}",
-                            broker.node_id.0, current, new
+                        info!(
+                            broker=broker.node_id.0,
+                            current=%current,
+                            new=%new,
+                            "Broker update",
                         );
                         *current = new;
                     }
                 }
                 Entry::Vacant(v) => {
                     let new = Broker::from(broker);
-                    println!("New broker {}: {}", broker.node_id.0, new);
+                    info!(
+                        broker=broker.node_id.0,
+                        new=%new,
+                        "New broker",
+                    );
                     v.insert(new);
                 }
             }

@@ -7,10 +7,12 @@ use std::time::Duration;
 
 mod test_helpers;
 use std::sync::Arc;
-use test_helpers::{random_topic_name, record};
+use test_helpers::{maybe_start_logging, random_topic_name, record};
 
 #[tokio::test]
 async fn test_batch_producer() {
+    maybe_start_logging();
+
     let connection = maybe_skip_kafka_integration!();
     let client = Client::new_plain(vec![connection]).await.unwrap();
 

@@ -5,6 +5,7 @@ use futures::future::BoxFuture;
 use futures::{pin_mut, FutureExt, TryFutureExt};
 use thiserror::Error;
 use tokio::sync::Mutex;
+use tracing::{debug, error, trace};
 
 use crate::client::{error::Error as ClientError, partition::PartitionClient};
 use crate::record::Record;
@@ -121,11 +122,11 @@ where
             // Try to add the record to the aggregator
             let mut inner = self.inner.lock().await;
             if let Some(data) = inner.aggregator.try_push(data)? {
-                println!("Insufficient capacity in aggregator - flushing");
+                debug!("Insufficient capacity in aggregator - flushing");
 
                 Self::flush(&mut inner, self.client.as_ref()).await;
                 if inner.aggregator.try_push(data)?.is_some() {
-                    println!("Record too large for aggregator");
+                    error!("Record too large for aggregator");
                     return Err(Error::TooLarge);
                 }
             }
@@ -154,7 +155,7 @@ where
             return Ok(r.clone()?);
         }
 
-        println!("Linger expired - flushing");
+        debug!("Linger expired - flushing");
 
         // Flush data
         Self::flush(&mut inner, self.client.as_ref()).await;
@@ -165,7 +166,7 @@ where
     /// Flushes out the data from the aggregator, publishes the result to the result slot,
     /// and creates a fresh result slot for future writes to use
     async fn flush(inner: &mut ProducerInner<A>, client: &dyn ProducerClient) {
-        println!("Flushing batch producer");
+        trace!("Flushing batch producer");
 
         let output = inner.aggregator.flush();
         if output.is_empty() {

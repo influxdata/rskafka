@@ -7,6 +7,7 @@ use std::task::{Context, Poll};
 use futures::future::{BoxFuture, Fuse, FusedFuture, FutureExt};
 use futures::Stream;
 use pin_project::pin_project;
+use tracing::trace;
 
 use crate::{
     client::{error::Result, partition::PartitionClient},
@@ -140,7 +141,7 @@ impl Stream for StreamConsumer {
                 let max_wait_ms = *this.max_wait_ms;
                 let client = Arc::clone(this.client);
 
-                println!("Fetching records at offset: {}", offset);
+                trace!(offset, "Fetching records at offset");
 
                 *this.fetch_fut = FutureExt::fuse(Box::pin(async move {
                     client.fetch_records(offset, bytes, max_wait_ms).await
@@ -151,10 +152,10 @@ impl Stream for StreamConsumer {
 
             match data {
                 Ok((mut v, watermark)) => {
-                    println!(
-                        "Received {} records and a high watermark of {}",
-                        v.len(),
-                        watermark
+                    trace!(
+                        high_watermark = watermark,
+                        n_records = v.len(),
+                        "Received records and a high watermark",
                     );
 
                     // Sort records by offset in case they aren't in order
