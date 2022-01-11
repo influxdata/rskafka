@@ -20,12 +20,70 @@ It will be a good fit for workloads that:
 * Have a low number of high-throughput partitions [^1]
 
 
+## Usage
+
+```rust,no_run
+# async fn test() {
+use minikafka::{
+    client::Client,
+    record::Record,
+};
+use time::OffsetDateTime;
+use std::collections::BTreeMap;
+
+// setup client
+let connection = "localhost:9093".to_owned();
+let client = Client::new_plain(vec![connection]).await.unwrap();
+
+// create a topic
+let topic = "my_topic";
+client.create_topic(
+    topic,
+    2,  // partitions
+    1,  // replication factor
+).await.unwrap();
+
+// get a partition-bound client
+let partition_client = client
+    .partition_client(
+        topic.to_owned(),
+        0,  // partition
+     )
+    .await
+    .unwrap();
+
+// produce some data
+let record = Record {
+    key: b"".to_vec(),
+    value: b"hello kafka".to_vec(),
+    headers: BTreeMap::from([
+        ("foo".to_owned(), b"bar".to_vec()),
+    ]),
+    timestamp: OffsetDateTime::now_utc(),
+};
+partition_client.produce(vec![record]).await.unwrap();
+
+// consume data
+let (records, high_watermark) = partition_client
+    .fetch_records(
+        0,  // offset
+        0..1_000_000,  // min..max bytes
+        1_000,  // max wait time
+    )
+   .await
+   .unwrap();
+# }
+```
+
+For more advanced production and consumption, see [`crate::client::producer`] and [`crate::client::consumer`].
+
+
 ## License
 
 Licensed under either of these:
 
- * Apache License, Version 2.0 ([LICENSE-APACHE](LICENSE-APACHE) or https://www.apache.org/licenses/LICENSE-2.0)
- * MIT License ([LICENSE-MIT](LICENSE-MIT) or https://opensource.org/licenses/MIT)
+ * Apache License, Version 2.0 ([LICENSE-APACHE](LICENSE-APACHE) or <https://www.apache.org/licenses/LICENSE-2.0>)
+ * MIT License ([LICENSE-MIT](LICENSE-MIT) or <https://opensource.org/licenses/MIT>)
 
 ### Contributing
 
