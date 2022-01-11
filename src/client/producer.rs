@@ -26,7 +26,8 @@ pub enum Error {
 
 pub type Result<T, E = Error> = std::result::Result<T, E>;
 
-/// Builder for `BatchProducer`
+/// Builder for [`BatchProducer`].
+#[derive(Debug)]
 pub struct BatchProducerBuilder {
     client: Arc<dyn ProducerClient>,
 
@@ -65,7 +66,7 @@ impl BatchProducerBuilder {
 }
 
 // A trait wrapper to allow mocking
-trait ProducerClient: std::fmt::Debug {
+trait ProducerClient: std::fmt::Debug + Send + Sync {
     fn produce(&self, records: Vec<Record>) -> BoxFuture<'_, Result<(), ClientError>>;
 }
 
@@ -76,12 +77,14 @@ impl ProducerClient for PartitionClient {
 }
 
 /// [`BatchProducer`] attempts to aggregate multiple produce requests together
-/// using the provided [`Aggregator`]
+/// using the provided [`Aggregator`].
 ///
 /// It will buffer up records until either the linger time expires or [`Aggregator`]
 /// cannot accommodate another record.
 ///
 /// At this point it will flush the [`Aggregator`]
+///
+/// [`Aggregator`]: aggregator::Aggregator
 #[derive(Debug)]
 pub struct BatchProducer<A> {
     linger: Duration,
@@ -98,7 +101,11 @@ struct ProducerInner<A> {
     aggregator: A,
 }
 
-impl<A: aggregator::Aggregator<Output = Vec<Record>>> BatchProducer<A> {
+impl<A> BatchProducer<A>
+where
+    A: aggregator::Aggregator<Output = Vec<Record>> + Send,
+    <A as aggregator::Aggregator>::Input: Send,
+{
     /// Write `data` to this [`BatchProducer`]
     ///
     /// Returns when the data has been committed to Kafka or

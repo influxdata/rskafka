@@ -41,6 +41,8 @@ jobs:
       # Disable full debug symbol generation to speed up CI build
       # "1" means line tables only, which is useful for panic tracebacks.
       RUSTFLAGS: "-C debuginfo=1"
+      # https://github.com/rust-lang/cargo/issues/10280
+      CARGO_NET_GIT_FETCH_WITH_CLI: "true"
     steps:
       - checkout
       - rust_components
@@ -58,6 +60,8 @@ jobs:
       # Disable full debug symbol generation to speed up CI build
       # "1" means line tables only, which is useful for panic tracebacks.
       RUSTFLAGS: "-C debuginfo=1"
+      # https://github.com/rust-lang/cargo/issues/10280
+      CARGO_NET_GIT_FETCH_WITH_CLI: "true"
     steps:
       - checkout
       - rust_components
@@ -75,6 +79,8 @@ jobs:
       # Disable full debug symbol generation to speed up CI build
       # "1" means line tables only, which is useful for panic tracebacks.
       RUSTFLAGS: "-C debuginfo=1"
+      # https://github.com/rust-lang/cargo/issues/10280
+      CARGO_NET_GIT_FETCH_WITH_CLI: "true"
     steps:
       - checkout
       - rust_components
@@ -82,9 +88,15 @@ jobs:
       - run:
           name: Install Cargo Audit
           command: cargo install --force cargo-audit
+      # https://github.com/rust-lang/cargo/issues/10280 but `cargo audit` doesn't support `CARGO_NET_GIT_FETCH_WITH_CLI`
+      - run:
+          name: Workaround SSH issues
+          command: |
+            cd /usr/local/cargo
+            git clone https://github.com/RustSec/advisory-db.git
       - run:
           name: Cargo Audit
-          command: cargo audit
+          command: cargo audit --no-fetch
       - cache_save
   doc:
     docker:
@@ -95,6 +107,8 @@ jobs:
       # Disable full debug symbol generation to speed up CI build
       # "1" means line tables only, which is useful for panic tracebacks.
       RUSTFLAGS: "-C debuginfo=1"
+      # https://github.com/rust-lang/cargo/issues/10280
+      CARGO_NET_GIT_FETCH_WITH_CLI: "true"
     steps:
       - checkout
       - rust_components
@@ -161,6 +175,8 @@ jobs:
       # Disable full debug symbol generation to speed up CI build
       # "1" means line tables only, which is useful for panic tracebacks.
       RUSTFLAGS: "-C debuginfo=1"
+      # https://github.com/rust-lang/cargo/issues/10280
+      CARGO_NET_GIT_FETCH_WITH_CLI: "true"
       RUST_BACKTRACE: "1"
       # Run integration tests
       TEST_INTEGRATION: 1
@@ -188,6 +204,8 @@ jobs:
       # Disable full debug symbol generation to speed up CI build
       # "1" means line tables only, which is useful for panic tracebacks.
       RUSTFLAGS: "-C debuginfo=1"
+      # https://github.com/rust-lang/cargo/issues/10280
+      CARGO_NET_GIT_FETCH_WITH_CLI: "true"
     steps:
       - checkout
       - rust_components

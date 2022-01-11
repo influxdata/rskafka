@@ -24,6 +24,7 @@ pub trait Aggregator {
 }
 
 /// a [`Aggregator`] that batches up to a certain number of bytes of [`Record`]
+#[derive(Debug)]
 pub struct RecordAggregator {
     max_batch_size: usize,
     batch_size: usize,
