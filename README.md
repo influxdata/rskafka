@@ -67,7 +67,7 @@ partition_client.produce(vec![record]).await.unwrap();
 let (records, high_watermark) = partition_client
     .fetch_records(
         0,  // offset
-        0..1_000_000,  // min..max bytes
+        1..1_000_000,  // min..max bytes
         1_000,  // max wait time
     )
    .await
