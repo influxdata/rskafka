@@ -178,6 +178,7 @@ jobs:
       # https://github.com/rust-lang/cargo/issues/10280
       CARGO_NET_GIT_FETCH_WITH_CLI: "true"
       RUST_BACKTRACE: "1"
+      RUST_LOG: "trace"
       # Run integration tests
       TEST_INTEGRATION: 1
       KAFKA_CONNECT: "redpanda-0:9092"

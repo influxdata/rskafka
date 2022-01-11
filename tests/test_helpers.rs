@@ -1,4 +1,5 @@
 use minikafka::record::Record;
+use parking_lot::Once;
 use std::collections::BTreeMap;
 use time::OffsetDateTime;
 /// Get the testing Kafka connection string or return current scope.
@@ -68,4 +69,29 @@ pub fn record() -> Record {
 pub fn now() -> OffsetDateTime {
     let x = OffsetDateTime::now_utc().unix_timestamp_nanos();
     OffsetDateTime::from_unix_timestamp_nanos((x / 1_000_000) * 1_000_000).unwrap()
+}
+
+static LOG_SETUP: Once = Once::new();
+
+/// Enables debug logging if the `RUST_LOG` environment variable is
+/// set. Does nothing if `RUST_LOG` is not set.
+pub fn maybe_start_logging() {
+    if std::env::var("RUST_LOG").is_ok() {
+        start_logging()
+    }
+}
+
+/// Start logging.
+pub fn start_logging() {
+    use tracing_subscriber::{filter::EnvFilter, FmtSubscriber};
+
+    LOG_SETUP.call_once(|| {
+        let subscriber = FmtSubscriber::builder()
+            .with_env_filter(EnvFilter::from_default_env())
+            .with_writer(std::io::stderr)
+            .finish();
+
+        tracing::subscriber::set_global_default(subscriber)
+            .expect("setting default subscriber failed");
+    });
 }

@@ -3,6 +3,7 @@ use pin_project::pin_project;
 use std::pin::Pin;
 use std::task::{Context, Poll};
 use tokio::sync::oneshot;
+use tracing::warn;
 
 /// A broadcast channel that can send a single value
 ///
@@ -53,7 +54,7 @@ impl<T: Clone> std::future::Future for ReceiveFut<T> {
         match futures::ready!(self.project().0.poll(cx)) {
             Ok(x) => Poll::Ready(x),
             Err(_) => {
-                println!("producer dropped without signalling result");
+                warn!("producer dropped without signalling result");
                 // We don't know the outcome of the publish, most likely
                 // the producer panicked, and so return Pending
                 Poll::Pending

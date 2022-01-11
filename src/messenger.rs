@@ -17,6 +17,7 @@ use tokio::{
     },
     task::JoinHandle,
 };
+use tracing::{info, warn};
 
 use crate::protocol::primitives::CompactString;
 use crate::protocol::{
@@ -184,7 +185,7 @@ where
                             {
                                 Ok(header) => header,
                                 Err(e) => {
-                                    println!("Cannot read message header, ignoring message: {}", e);
+                                    warn!(%e, "Cannot read message header, ignoring message");
                                     continue;
                                 }
                             };
@@ -194,9 +195,9 @@ where
                                 if let Some(active_request) = map.remove(&header.correlation_id.0) {
                                     active_request
                                 } else {
-                                    println!(
-                                        "Got response for unknown request: {}",
-                                        header.correlation_id.0
+                                    warn!(
+                                        correlation_id = header.correlation_id.0,
+                                        "Got response for unknown request",
                                     );
                                     continue;
                                 }
@@ -375,10 +376,10 @@ where
             match self.request(body).await {
                 Ok(response) => {
                     if let Some(e) = response.error_code {
-                        println!(
-                            "Got error during version sync, cannot use version {} for ApiVersionRequest: {}",
-                            upper_bound,
-                            e,
+                        info!(
+                            %e,
+                            version=upper_bound,
+                            "Got error during version sync, cannot use version for ApiVersionRequest",
                         );
                         continue;
                     }
@@ -406,16 +407,18 @@ where
                     unreachable!("Just set to version range to a non-empty range")
                 }
                 Err(RequestError::ReadVersionedError(e)) => {
-                    println!(
-                        "Cannot read ApiVersionResponse for version {}: {}",
-                        upper_bound, e,
+                    info!(
+                        %e,
+                        version=upper_bound,
+                        "Cannot read ApiVersionResponse for version",
                     );
                     continue;
                 }
                 Err(RequestError::ReadError(e)) => {
-                    println!(
-                        "Cannot read ApiVersionResponse for version {}: {}",
-                        upper_bound, e,
+                    info!(
+                        %e,
+                        version=upper_bound,
+                        "Cannot read ApiVersionResponse for version",
                     );
                     continue;
                 }

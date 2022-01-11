@@ -20,6 +20,7 @@ use std::ops::Range;
 use std::sync::Arc;
 use time::OffsetDateTime;
 use tokio::sync::Mutex;
+use tracing::{info, warn};
 
 /// Many operations must be performed on the leader for a partition
 ///
@@ -394,20 +395,21 @@ impl PartitionClient {
                     self.invalidate_cached_leader_broker().await;
                 }
                 _ => {
-                    println!(
-                        "{} request encountered fatal error: {}",
-                        request_name, error
+                    warn!(
+                        e=%error,
+                        request_name,
+                        "request encountered fatal error",
                     );
                     return Err(error);
                 }
             }
 
             let backoff = backoff.next();
-            println!(
-                "{} request encountered non-fatal error \"{}\" - backing off for {} seconds",
+            info!(
+                e=%error,
                 request_name,
-                error,
-                backoff.as_secs()
+                backoff_secs=backoff.as_secs(),
+                "request encountered non-fatal error - backing off",
             );
             tokio::time::sleep(backoff).await;
         }
@@ -427,9 +429,10 @@ impl PartitionClient {
             return Ok(Arc::clone(broker));
         }
 
-        println!(
-            "Creating new broker connection for partition {} in topic \"{}\"",
-            self.partition, self.topic
+        info!(
+            topic=%self.topic,
+            partition=%self.partition,
+            "Creating new partition-specific broker connection",
         );
 
         let leader = self.get_leader().await?;
@@ -496,9 +499,11 @@ impl PartitionClient {
             ));
         }
 
-        println!(
-            "Partition {} in topic \"{}\" has leader {}",
-            self.partition, self.topic, partition.leader_id.0
+        info!(
+            topic=%self.topic,
+            partition=%self.partition,
+            leader=partition.leader_id.0,
+            "Detected leader",
         );
         Ok(partition.leader_id.0)
     }

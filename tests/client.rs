@@ -10,14 +10,20 @@ mod rdkafka_helper;
 mod test_helpers;
 use test_helpers::{now, random_topic_name, record};
 
+use crate::test_helpers::maybe_start_logging;
+
 #[tokio::test]
 async fn test_plain() {
+    maybe_start_logging();
+
     let connection = maybe_skip_kafka_integration!();
     Client::new_plain(vec![connection]).await.unwrap();
 }
 
 #[tokio::test]
 async fn test_partition_leader() {
+    maybe_start_logging();
+
     let connection = maybe_skip_kafka_integration!();
     let client = Client::new_plain(vec![connection]).await.unwrap();
     let topic_name = random_topic_name();
@@ -29,6 +35,8 @@ async fn test_partition_leader() {
 
 #[tokio::test]
 async fn test_topic_crud() {
+    maybe_start_logging();
+
     let connection = maybe_skip_kafka_integration!();
     let client = Client::new_plain(vec![connection]).await.unwrap();
     let topics = client.list_topics().await.unwrap();
@@ -67,6 +75,8 @@ async fn test_topic_crud() {
 #[ignore]
 #[tokio::test]
 async fn test_tls() {
+    maybe_start_logging();
+
     let mut root_store = rustls::RootCertStore::empty();
 
     let file = std::fs::File::open("/tmp/cluster-ca.crt").unwrap();
@@ -106,6 +116,8 @@ async fn test_tls() {
 
 #[tokio::test]
 async fn test_produce_empty() {
+    maybe_start_logging();
+
     let connection = maybe_skip_kafka_integration!();
     let topic_name = random_topic_name();
     let n_partitions = 2;
@@ -142,6 +154,8 @@ async fn test_produce_minikafka_consume_minikafka() {
 
 #[tokio::test]
 async fn test_get_high_watermark() {
+    maybe_start_logging();
+
     let connection = maybe_skip_kafka_integration!();
     let topic_name = random_topic_name();
     let n_partitions = 1;
@@ -191,6 +205,8 @@ where
     F2: Fn(Arc<PartitionClient>, String, String, i32, usize) -> G2,
     G2: std::future::Future<Output = Vec<RecordAndOffset>>,
 {
+    maybe_start_logging();
+
     let connection = maybe_skip_kafka_integration!();
     let topic_name = random_topic_name();
     let n_partitions = 2;
