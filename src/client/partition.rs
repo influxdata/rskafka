@@ -20,7 +20,7 @@ use std::ops::Range;
 use std::sync::Arc;
 use time::OffsetDateTime;
 use tokio::sync::Mutex;
-use tracing::{info, warn};
+use tracing::{error, info};
 
 /// Many operations must be performed on the leader for a partition
 ///
@@ -395,7 +395,7 @@ impl PartitionClient {
                     self.invalidate_cached_leader_broker().await;
                 }
                 _ => {
-                    warn!(
+                    error!(
                         e=%error,
                         request_name,
                         "request encountered fatal error",

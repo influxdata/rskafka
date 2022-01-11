@@ -5,7 +5,7 @@ use futures::future::BoxFuture;
 use futures::{pin_mut, FutureExt, TryFutureExt};
 use thiserror::Error;
 use tokio::sync::Mutex;
-use tracing::{debug, trace, warn};
+use tracing::{debug, error, trace};
 
 use crate::client::{error::Error as ClientError, partition::PartitionClient};
 use crate::record::Record;
@@ -126,7 +126,7 @@ where
 
                 Self::flush(&mut inner, self.client.as_ref()).await;
                 if inner.aggregator.try_push(data)?.is_some() {
-                    warn!("Record too large for aggregator");
+                    error!("Record too large for aggregator");
                     return Err(Error::TooLarge);
                 }
             }
