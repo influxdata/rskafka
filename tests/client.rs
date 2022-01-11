@@ -1,4 +1,4 @@
-use minikafka::{
+use rskafka::{
     client::{error::Error as ClientError, partition::PartitionClient, Client},
     record::{Record, RecordAndOffset},
     ProtocolError,
@@ -138,18 +138,18 @@ async fn test_produce_rdkafka_consume_rdkafka() {
 }
 
 #[tokio::test]
-async fn test_produce_minikafka_consume_rdkafka() {
-    assert_produce_consume(produce_minikafka, consume_rdkafka).await;
+async fn test_produce_rskafka_consume_rdkafka() {
+    assert_produce_consume(produce_rskafka, consume_rdkafka).await;
 }
 
 #[tokio::test]
-async fn test_produce_rdkafka_consume_minikafka() {
-    assert_produce_consume(produce_rdkafka, consume_minikafka).await;
+async fn test_produce_rdkafka_consume_rskafka() {
+    assert_produce_consume(produce_rdkafka, consume_rskafka).await;
 }
 
 #[tokio::test]
-async fn test_produce_minikafka_consume_minikafka() {
-    assert_produce_consume(produce_minikafka, consume_minikafka).await;
+async fn test_produce_rskafka_consume_rskafka() {
+    assert_produce_consume(produce_rskafka, consume_rskafka).await;
 }
 
 #[tokio::test]
@@ -285,16 +285,13 @@ async fn produce_rdkafka(
     .await
 }
 
-async fn produce_minikafka(
+async fn produce_rskafka(
     partition_client: Arc<PartitionClient>,
     _connection: String,
     _topic_name: String,
     _partition_index: i32,
     records: Vec<Record>,
 ) -> Vec<i64> {
-    // TODO: remove this hack
-    tokio::time::sleep(std::time::Duration::from_secs(1)).await;
-
     partition_client.produce(records).await.unwrap()
 }
 
@@ -308,7 +305,7 @@ async fn consume_rdkafka(
     rdkafka_helper::consume(&connection, &topic_name, partition_index, n).await
 }
 
-async fn consume_minikafka(
+async fn consume_rskafka(
     partition_client: Arc<PartitionClient>,
     _connection: String,
     _topic_name: String,

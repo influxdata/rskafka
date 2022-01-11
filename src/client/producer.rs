@@ -1,3 +1,51 @@
+//! Building blocks for a more advanced producer chain.
+//!
+//! # Usage
+//! ```no_run
+//! # async fn test() {
+//! use rskafka::{
+//!     client::{
+//!         Client,
+//!         producer::{
+//!             aggregator::RecordAggregator,
+//!             BatchProducerBuilder,
+//!         },
+//!     },
+//!     record::Record,
+//! };
+//! use time::OffsetDateTime;
+//! use std::{
+//!     collections::BTreeMap,
+//!     sync::Arc,
+//!     time::Duration,
+//! };
+//!
+//! // get partition client
+//! let connection = "localhost:9093".to_owned();
+//! let client = Client::new_plain(vec![connection]).await.unwrap();
+//! let partition_client = Arc::new(
+//!     client.partition_client("my_topic", 0).await.unwrap()
+//! );
+//!
+//! // construct batch producer
+//! let producer = BatchProducerBuilder::new(partition_client)
+//!     .with_linger(Duration::from_secs(2))
+//!     .build(RecordAggregator::new(
+//!         1024,  // maximum bytes
+//!     ));
+//!
+//! // produce data
+//! let record = Record {
+//!     key: b"".to_vec(),
+//!     value: b"hello kafka".to_vec(),
+//!     headers: BTreeMap::from([
+//!         ("foo".to_owned(), b"bar".to_vec()),
+//!     ]),
+//!     timestamp: OffsetDateTime::now_utc(),
+//! };
+//! producer.produce(record.clone()).await.unwrap();
+//! # }
+//! ```
 use std::sync::Arc;
 use std::time::Duration;
 

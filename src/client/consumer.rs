@@ -1,3 +1,38 @@
+//! Building blocks for more advanced consumer chains.
+//!
+//! # Usage
+//! ```no_run
+//! # async fn test() {
+//! use futures::StreamExt;
+//! use rskafka::client::{
+//!     Client,
+//!     consumer::StreamConsumerBuilder,
+//! };
+//! use std::sync::Arc;
+//!
+//! // get partition client
+//! let connection = "localhost:9093".to_owned();
+//! let client = Client::new_plain(vec![connection]).await.unwrap();
+//! let partition_client = Arc::new(
+//!     client.partition_client("my_topic", 0).await.unwrap()
+//! );
+//!
+//! // construct stream consumer
+//! let mut stream = StreamConsumerBuilder::new(
+//!         partition_client,
+//!         0,  // start offset
+//!     )
+//!     .with_max_wait_ms(100)
+//!     .build();
+//!
+//! // consume data
+//! let (record, high_water_mark) = stream
+//!     .next()
+//!     .await
+//!     .expect("some records")
+//!     .expect("no error");
+//! # }
+//! ```
 use std::collections::VecDeque;
 use std::ops::Range;
 use std::pin::Pin;

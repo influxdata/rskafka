@@ -1,6 +1,8 @@
+#![doc = include_str!("../README.md")]
 #![deny(
     rustdoc::broken_intra_doc_links,
     rustdoc::bare_urls,
+    rustdoc::invalid_codeblock_attributes,
     rust_2018_idioms,
     unsafe_code
 )]
@@ -12,6 +14,7 @@
     clippy::use_self,
     clippy::clone_on_ref_ptr
 )]
+
 mod backoff;
 pub mod client;
 mod connection;

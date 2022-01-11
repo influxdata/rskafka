@@ -4,7 +4,7 @@ use std::time::Duration;
 use futures::{Stream, StreamExt};
 use tokio::time::timeout;
 
-use minikafka::client::{
+use rskafka::client::{
     consumer::{StreamConsumer, StreamConsumerBuilder},
     Client,
 };

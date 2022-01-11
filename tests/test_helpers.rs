@@ -1,5 +1,5 @@
-use minikafka::record::Record;
 use parking_lot::Once;
+use rskafka::record::Record;
 use std::collections::BTreeMap;
 use time::OffsetDateTime;
 /// Get the testing Kafka connection string or return current scope.
