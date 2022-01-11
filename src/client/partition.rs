@@ -1,4 +1,5 @@
 use crate::backoff::{Backoff, BackoffConfig};
+use crate::messenger::RequestError;
 use crate::protocol::messages::{FetchRequest, FetchRequestPartition, FetchRequestTopic};
 use crate::record::RecordAndOffset;
 use crate::{
@@ -385,7 +386,8 @@ impl PartitionClient {
             };
 
             match error {
-                Error::Connection(_) => self.invalidate_cached_leader_broker().await,
+                Error::Request(RequestError::Poisoned(_) | RequestError::IO(_))
+                | Error::Connection(_) => self.invalidate_cached_leader_broker().await,
                 Error::ServerError(ProtocolError::LeaderNotAvailable, _) => {}
                 Error::ServerError(ProtocolError::OffsetNotAvailable, _) => {}
                 Error::ServerError(ProtocolError::NotLeaderOrFollower, _) => {
