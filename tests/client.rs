@@ -3,7 +3,7 @@ use rskafka::{
     record::{Record, RecordAndOffset},
     ProtocolError,
 };
-use std::{str::FromStr, sync::Arc};
+use std::{str::FromStr, sync::Arc, time::Duration};
 
 mod rdkafka_helper;
 
@@ -30,7 +30,19 @@ async fn test_partition_leader() {
 
     client.create_topic(&topic_name, 2, 1).await.unwrap();
     let client = client.partition_client(&topic_name, 0).await.unwrap();
-    client.get_cached_leader().await.unwrap();
+    tokio::time::timeout(Duration::from_secs(10), async move {
+        loop {
+            match client.get_cached_leader().await {
+                Ok(_) => break,
+                Err(e) => {
+                    println!("Cannot get cached leader: {}", e);
+                    tokio::time::sleep(Duration::from_millis(100)).await;
+                }
+            }
+        }
+    })
+    .await
+    .unwrap();
 }
 
 #[tokio::test]

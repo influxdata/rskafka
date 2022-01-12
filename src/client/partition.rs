@@ -523,6 +523,13 @@ impl PartitionClient {
             ));
         }
 
+        if partition.leader_id.0 == -1 {
+            return Err(Error::InvalidBrokerState(format!(
+                "Leader unknown for partition {} and topic \"{}\"",
+                self.partition, self.topic
+            )));
+        }
+
         info!(
             topic=%self.topic,
             partition=%self.partition,
