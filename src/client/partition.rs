@@ -391,6 +391,7 @@ impl PartitionClient {
                 | Error::Connection(_) => self.invalidate_cached_leader_broker().await,
                 Error::ServerError(ProtocolError::LeaderNotAvailable, _) => {}
                 Error::ServerError(ProtocolError::OffsetNotAvailable, _) => {}
+                Error::ServerError(ProtocolError::UnknownTopicOrPartition, _) => {}
                 Error::ServerError(ProtocolError::NotLeaderOrFollower, _) => {
                     self.invalidate_cached_leader_broker().await;
                 }
