@@ -16,7 +16,7 @@ use crate::{
     },
     record::Record,
 };
-use std::ops::Range;
+use std::ops::{Deref, Range};
 use std::sync::Arc;
 use time::OffsetDateTime;
 use tokio::sync::Mutex;
@@ -417,6 +417,11 @@ impl PartitionClient {
 
     /// Invalidate the cached broker connection
     async fn invalidate_cached_leader_broker(&self) {
+        info!(
+            topic = self.topic.deref(),
+            partition = self.partition,
+            "Invaliding cached leader",
+        );
         *self.current_broker.lock().await = None
     }
 

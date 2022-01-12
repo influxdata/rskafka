@@ -10,6 +10,12 @@ pub struct ApiVersionRange {
     max: ApiVersion,
 }
 
+impl std::fmt::Display for ApiVersion {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0 .0)
+    }
+}
+
 impl ApiVersionRange {
     pub const fn new(min: ApiVersion, max: ApiVersion) -> Self {
         assert!(min.0 .0 <= max.0 .0);
@@ -28,6 +34,6 @@ impl ApiVersionRange {
 
 impl std::fmt::Display for ApiVersionRange {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}:{}", self.min.0 .0, self.max.0 .0)
+        write!(f, "{}:{}", self.min, self.max)
     }
 }

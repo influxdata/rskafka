@@ -17,7 +17,7 @@ use tokio::{
     },
     task::JoinHandle,
 };
-use tracing::{debug, info, warn};
+use tracing::{debug, warn};
 
 use crate::protocol::{
     api_key::ApiKey,
@@ -376,7 +376,7 @@ where
             match self.request(body).await {
                 Ok(response) => {
                     if let Some(e) = response.error_code {
-                        info!(
+                        debug!(
                             %e,
                             version=upper_bound,
                             "Got error during version sync, cannot use version for ApiVersionRequest",
@@ -416,7 +416,7 @@ where
                     unreachable!("Just set to version range to a non-empty range")
                 }
                 Err(RequestError::ReadVersionedError(e)) => {
-                    info!(
+                    debug!(
                         %e,
                         version=upper_bound,
                         "Cannot read ApiVersionResponse for version",
@@ -424,7 +424,7 @@ where
                     continue;
                 }
                 Err(RequestError::ReadError(e)) => {
-                    info!(
+                    debug!(
                         %e,
                         version=upper_bound,
                         "Cannot read ApiVersionResponse for version",
