@@ -375,8 +375,8 @@ where
             )]));
 
             let body = ApiVersionsRequest {
-                client_software_name: CompactString(String::from("")),
-                client_software_version: CompactString(String::from("")),
+                client_software_name: CompactString(String::from(env!("CARGO_PKG_NAME"))),
+                client_software_version: CompactString(String::from(env!("CARGO_PKG_VERSION"))),
                 tagged_fields: TaggedFields::default(),
             };
 
