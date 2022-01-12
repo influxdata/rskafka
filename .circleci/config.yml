@@ -123,7 +123,7 @@ jobs:
       - store_artifacts:
           path: rustdoc.tar.gz
 
-  test:
+  test-redpanda:
     # setup multiple docker images (see https://circleci.com/docs/2.0/configuration-reference/#docker)
     docker:
       - image: quay.io/influxdb/rust:ci
@@ -193,6 +193,69 @@ jobs:
       - store_artifacts:
           path: proptest-regressions
 
+  test-kafka:
+    # setup multiple docker images (see https://circleci.com/docs/2.0/configuration-reference/#docker)
+    docker:
+      - image: quay.io/influxdb/rust:ci
+      - image: docker.io/bitnami/zookeeper:3.7
+        name: zookeeper
+        environment:
+          - ALLOW_ANONYMOUS_LOGIN=yes
+      - image: docker.io/bitnami/kafka:3
+        name: kafka-0
+        environment:
+          - KAFKA_CFG_ZOOKEEPER_CONNECT=zookeeper:2181
+          - KAFKA_CFG_BROKER_ID=0
+          - ALLOW_PLAINTEXT_LISTENER=yes
+          - KAFKA_CFG_LISTENER_SECURITY_PROTOCOL_MAP=CLIENT:PLAINTEXT,EXTERNAL:PLAINTEXT
+          - KAFKA_CFG_LISTENERS=CLIENT://:9092,EXTERNAL://:9093
+          - KAFKA_CFG_ADVERTISED_LISTENERS=CLIENT://kafka-0:9092,EXTERNAL://kafka-0:9093
+          - KAFKA_INTER_BROKER_LISTENER_NAME=CLIENT
+      - image: docker.io/bitnami/kafka:3
+        name: kafka-1
+        environment:
+          - KAFKA_CFG_ZOOKEEPER_CONNECT=zookeeper:2181
+          - KAFKA_CFG_BROKER_ID=1
+          - ALLOW_PLAINTEXT_LISTENER=yes
+          - KAFKA_CFG_LISTENER_SECURITY_PROTOCOL_MAP=CLIENT:PLAINTEXT,EXTERNAL:PLAINTEXT
+          - KAFKA_CFG_LISTENERS=CLIENT://:9092,EXTERNAL://:9093
+          - KAFKA_CFG_ADVERTISED_LISTENERS=CLIENT://kafka-1:9092,EXTERNAL://kafka-1:9093
+          - KAFKA_INTER_BROKER_LISTENER_NAME=CLIENT
+      - image: docker.io/bitnami/kafka:3
+        name: kafka-2
+        environment:
+          - KAFKA_CFG_ZOOKEEPER_CONNECT=zookeeper:2181
+          - KAFKA_CFG_BROKER_ID=2
+          - ALLOW_PLAINTEXT_LISTENER=yes
+          - KAFKA_CFG_LISTENER_SECURITY_PROTOCOL_MAP=CLIENT:PLAINTEXT,EXTERNAL:PLAINTEXT
+          - KAFKA_CFG_LISTENERS=CLIENT://:9092,EXTERNAL://:9093
+          - KAFKA_CFG_ADVERTISED_LISTENERS=CLIENT://kafka-2:9092,EXTERNAL://kafka-2:9093
+          - KAFKA_INTER_BROKER_LISTENER_NAME=CLIENT
+    resource_class: xlarge  # use of a smaller executor tends crashes on link
+    environment:
+      # Disable incremental compilation to avoid overhead. We are not preserving these files anyway.
+      CARGO_INCREMENTAL: "0"
+      # Disable full debug symbol generation to speed up CI build
+      # "1" means line tables only, which is useful for panic tracebacks.
+      RUSTFLAGS: "-C debuginfo=1"
+      # https://github.com/rust-lang/cargo/issues/10280
+      CARGO_NET_GIT_FETCH_WITH_CLI: "true"
+      RUST_BACKTRACE: "1"
+      RUST_LOG: "trace"
+      # Run integration tests
+      TEST_INTEGRATION: 1
+      KAFKA_CONNECT: "kafka-0:9093"
+    steps:
+      - checkout
+      - rust_components
+      - cache_restore
+      - run:
+          name: Cargo test
+          command: cargo test
+      - cache_save
+      - store_artifacts:
+          path: proptest-regressions
+
   # Build a dev binary.
   #
   # Compiles a binary with the default ("dev") cargo profile from the iox source
@@ -230,6 +293,7 @@ workflows:
       - fmt
       - lint
       - cargo_audit
-      - test
+      - test-redpanda
+      - test-kafka
       - build
       - doc
