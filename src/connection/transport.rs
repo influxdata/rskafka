@@ -1,4 +1,4 @@
-use pin_project::pin_project;
+use pin_project_lite::pin_project;
 use std::pin::Pin;
 use std::sync::Arc;
 use std::task::{Context, Poll};
@@ -19,11 +19,19 @@ pub enum Error {
 
 pub type Result<T, E = Error> = std::result::Result<T, E>;
 
-#[derive(Debug)]
-#[pin_project]
-pub enum Transport {
-    Plain(#[pin] TcpStream),
-    Tls(#[pin] Box<TlsStream<TcpStream>>),
+pin_project! {
+    #[project = TransportProj]
+    #[derive(Debug)]
+    pub enum Transport {
+        Plain{
+            #[pin]
+            inner: TcpStream,
+        },
+        Tls{
+            #[pin]
+            inner: Box<TlsStream<TcpStream>>,
+        },
+    }
 }
 
 impl AsyncRead for Transport {
@@ -33,8 +41,8 @@ impl AsyncRead for Transport {
         buf: &mut ReadBuf<'_>,
     ) -> Poll<std::io::Result<()>> {
         match self.project() {
-            __TransportProjection::Plain(p) => p.poll_read(cx, buf),
-            __TransportProjection::Tls(p) => p.poll_read(cx, buf),
+            TransportProj::Plain { inner } => inner.poll_read(cx, buf),
+            TransportProj::Tls { inner } => inner.poll_read(cx, buf),
         }
     }
 }
@@ -46,22 +54,22 @@ impl AsyncWrite for Transport {
         buf: &[u8],
     ) -> Poll<std::io::Result<usize>> {
         match self.project() {
-            __TransportProjection::Plain(p) => p.poll_write(cx, buf),
-            __TransportProjection::Tls(p) => p.poll_write(cx, buf),
+            TransportProj::Plain { inner } => inner.poll_write(cx, buf),
+            TransportProj::Tls { inner } => inner.poll_write(cx, buf),
         }
     }
 
     fn poll_flush(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<std::io::Result<()>> {
         match self.project() {
-            __TransportProjection::Plain(p) => p.poll_flush(cx),
-            __TransportProjection::Tls(p) => p.poll_flush(cx),
+            TransportProj::Plain { inner } => inner.poll_flush(cx),
+            TransportProj::Tls { inner } => inner.poll_flush(cx),
         }
     }
 
     fn poll_shutdown(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<std::io::Result<()>> {
         match self.project() {
-            __TransportProjection::Plain(p) => p.poll_shutdown(cx),
-            __TransportProjection::Tls(p) => p.poll_shutdown(cx),
+            TransportProj::Plain { inner } => inner.poll_shutdown(cx),
+            TransportProj::Tls { inner } => inner.poll_shutdown(cx),
         }
     }
 }
@@ -80,9 +88,11 @@ impl Transport {
 
                 let connector = TlsConnector::from(config);
                 let tls_stream = connector.connect(server_name, tcp_stream).await?;
-                Ok(Self::Tls(Box::new(tls_stream)))
+                Ok(Self::Tls {
+                    inner: Box::new(tls_stream),
+                })
             }
-            None => Ok(Self::Plain(tcp_stream)),
+            None => Ok(Self::Plain { inner: tcp_stream }),
         }
     }
 }
