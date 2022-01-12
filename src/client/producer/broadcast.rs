@@ -1,5 +1,5 @@
 use futures::future::{Future, FutureExt};
-use pin_project::pin_project;
+use pin_project_lite::pin_project;
 use std::pin::Pin;
 use std::task::{Context, Poll};
 use tokio::sync::oneshot;
@@ -24,7 +24,7 @@ impl<T: Clone> Default for BroadcastOnce<T> {
     fn default() -> Self {
         let (sender, receiver) = oneshot::channel();
         Self {
-            receiver: ReceiveFut(receiver).shared(),
+            receiver: ReceiveFut { inner: receiver }.shared(),
             sender,
         }
     }
@@ -43,15 +43,19 @@ impl<T: Clone> BroadcastOnce<T> {
     }
 }
 
-/// A future that completes when [`BroadcastOnce::broadcast`] is called
-#[pin_project]
-struct ReceiveFut<T>(#[pin] oneshot::Receiver<T>);
+pin_project! {
+    /// A future that completes when [`BroadcastOnce::broadcast`] is called
+    struct ReceiveFut<T>{
+        #[pin]
+        inner: oneshot::Receiver<T>,
+    }
+}
 
 impl<T: Clone> std::future::Future for ReceiveFut<T> {
     type Output = T;
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        match futures::ready!(self.project().0.poll(cx)) {
+        match futures::ready!(self.project().inner.poll(cx)) {
             Ok(x) => Poll::Ready(x),
             Err(_) => {
                 warn!("producer dropped without signalling result");

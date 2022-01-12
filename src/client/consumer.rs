@@ -41,7 +41,7 @@ use std::task::{Context, Poll};
 
 use futures::future::{BoxFuture, Fuse, FusedFuture, FutureExt};
 use futures::Stream;
-use pin_project::pin_project;
+use pin_project_lite::pin_project;
 use tracing::trace;
 
 use crate::{
@@ -141,23 +141,24 @@ impl FetchClient for PartitionClient {
     }
 }
 
-#[pin_project]
-pub struct StreamConsumer {
-    client: Arc<dyn FetchClient>,
+pin_project! {
+    pub struct StreamConsumer {
+        client: Arc<dyn FetchClient>,
 
-    min_batch_size: i32,
+        min_batch_size: i32,
 
-    max_batch_size: i32,
+        max_batch_size: i32,
 
-    max_wait_ms: i32,
+        max_wait_ms: i32,
 
-    next_offset: i64,
+        next_offset: i64,
 
-    last_high_watermark: i64,
+        last_high_watermark: i64,
 
-    buffer: VecDeque<RecordAndOffset>,
+        buffer: VecDeque<RecordAndOffset>,
 
-    fetch_fut: Fuse<BoxFuture<'static, FetchResult>>,
+        fetch_fut: Fuse<BoxFuture<'static, FetchResult>>,
+    }
 }
 
 impl Stream for StreamConsumer {
