@@ -394,9 +394,6 @@ impl PartitionClient {
                 Error::ServerError(ProtocolError::NotLeaderOrFollower, _) => {
                     self.invalidate_cached_leader_broker().await;
                 }
-                Error::InvalidBrokerState(_) => {
-                    self.invalidate_cached_leader_broker().await;
-                }
                 _ => {
                     error!(
                         e=%error,
@@ -460,10 +457,13 @@ impl PartitionClient {
         if leader != leader_self {
             // this might happen if the leader changed after we got the hint from a arbitrary broker and this specific
             // metadata call.
-            return Err(Error::InvalidBrokerState(format!(
-                "Broker {} which we determined as leader thinks there is another leader {}",
-                leader, leader_self
-            )));
+            return Err(Error::ServerError(
+                ProtocolError::NotLeaderOrFollower,
+                format!(
+                    "Broker {} which we determined as leader thinks there is another leader {}",
+                    leader, leader_self
+                ),
+            ));
         }
 
         *current_broker = Some(Arc::clone(&broker));
@@ -524,10 +524,13 @@ impl PartitionClient {
         }
 
         if partition.leader_id.0 == -1 {
-            return Err(Error::InvalidBrokerState(format!(
-                "Leader unknown for partition {} and topic \"{}\"",
-                self.partition, self.topic
-            )));
+            return Err(Error::ServerError(
+                ProtocolError::LeaderNotAvailable,
+                format!(
+                    "Leader unknown for partition {} and topic \"{}\"",
+                    self.partition, self.topic
+                ),
+            ));
         }
 
         info!(

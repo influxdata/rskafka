@@ -13,9 +13,6 @@ pub enum Error {
     #[error("Invalid response: {0}")]
     InvalidResponse(String),
 
-    #[error("Invalid broker state: {0}")]
-    InvalidBrokerState(String),
-
     #[error("Server error {0:?} with message \"{1}\"")]
     ServerError(ProtocolError, String),
 }
