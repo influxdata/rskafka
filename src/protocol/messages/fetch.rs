@@ -158,7 +158,9 @@ impl RequestBody for FetchRequest {
     const API_VERSION_RANGE: ApiVersionRange =
         ApiVersionRange::new(ApiVersion(Int16(4)), ApiVersion(Int16(4)));
 
-    const FIRST_TAGGED_FIELD_VERSION: ApiVersion = ApiVersion(Int16(12));
+    const FIRST_TAGGED_FIELD_IN_REQUEST_VERSION: ApiVersion = ApiVersion(Int16(12));
+    const FIRST_TAGGED_FIELD_IN_RESPONSE_VERSION: ApiVersion =
+        Self::FIRST_TAGGED_FIELD_IN_REQUEST_VERSION;
 }
 
 #[derive(Debug)]

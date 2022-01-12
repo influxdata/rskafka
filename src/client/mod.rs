@@ -110,10 +110,12 @@ impl Client {
                     replication_factor: Int16(replication_factor),
                     assignments: vec![],
                     configs: vec![],
+                    tagged_fields: None,
                 }],
                 // TODO: Expose as configuration parameter
                 timeout_ms: Int32(500),
                 validate_only: None,
+                tagged_fields: None,
             })
             .await?;
 

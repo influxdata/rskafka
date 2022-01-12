@@ -42,7 +42,7 @@ struct Response {
 #[derive(Debug)]
 struct ActiveRequest {
     channel: Sender<Result<Response, RequestError>>,
-    use_tagged_fields: bool,
+    use_tagged_fields_in_response: bool,
 }
 
 #[derive(Debug)]
@@ -214,7 +214,7 @@ where
                         };
 
                         // optionally read tagged fields from the header as well
-                        if active_request.use_tagged_fields {
+                        if active_request.use_tagged_fields_in_response {
                             header.tagged_fields = match TaggedFields::read(&mut cursor) {
                                 Ok(fields) => Some(fields),
                                 Err(e) => {
@@ -282,7 +282,10 @@ where
         // rdkafka ("flexver"), see:
         // - https://github.com/edenhill/librdkafka/blob/2b76b65212e5efda213961d5f84e565038036270/src/rdkafka_request.c#L973
         // - https://github.com/edenhill/librdkafka/blob/2b76b65212e5efda213961d5f84e565038036270/src/rdkafka_buf.c#L167-L174
-        let use_tagged_fields = body_api_version >= R::FIRST_TAGGED_FIELD_VERSION;
+        let use_tagged_fields_in_request =
+            body_api_version >= R::FIRST_TAGGED_FIELD_IN_REQUEST_VERSION;
+        let use_tagged_fields_in_response =
+            body_api_version >= R::FIRST_TAGGED_FIELD_IN_RESPONSE_VERSION;
 
         // Correlation ID so that we can de-multiplex the responses.
         let correlation_id = self.correlation_id.fetch_add(1, Ordering::SeqCst);
@@ -294,7 +297,7 @@ where
             client_id: NullableString(None),
             tagged_fields: TaggedFields::default(),
         };
-        let header_version = if use_tagged_fields {
+        let header_version = if use_tagged_fields_in_request {
             ApiVersion(Int16(2))
         } else {
             ApiVersion(Int16(1))
@@ -314,7 +317,7 @@ where
                     correlation_id,
                     ActiveRequest {
                         channel: tx,
-                        use_tagged_fields,
+                        use_tagged_fields_in_response,
                     },
                 );
             }
@@ -531,9 +534,9 @@ mod tests {
         let mut msg = vec![];
         ResponseHeader {
             correlation_id: Int32(0),
-            tagged_fields: Default::default(),
+            tagged_fields: Default::default(), // NOT serialized for ApiVersion!
         }
-        .write_versioned(&mut msg, ApiVersion(Int16(1)))
+        .write_versioned(&mut msg, ApiVersion(Int16(0)))
         .unwrap();
         ApiVersionsResponse {
             error_code: None,
@@ -568,9 +571,9 @@ mod tests {
         let mut msg = vec![];
         ResponseHeader {
             correlation_id: Int32(0),
-            tagged_fields: Default::default(),
+            tagged_fields: Default::default(), // NOT serialized for ApiVersion!
         }
-        .write_versioned(&mut msg, ApiVersion(Int16(1)))
+        .write_versioned(&mut msg, ApiVersion(Int16(0)))
         .unwrap();
         ApiVersionsResponse {
             error_code: Some(ApiError::CorruptMessage),
@@ -631,9 +634,9 @@ mod tests {
         let mut msg = vec![];
         ResponseHeader {
             correlation_id: Int32(0),
-            tagged_fields: Default::default(),
+            tagged_fields: Default::default(), // NOT serialized for ApiVersion!
         }
-        .write_versioned(&mut msg, ApiVersion(Int16(1)))
+        .write_versioned(&mut msg, ApiVersion(Int16(0)))
         .unwrap();
         msg.push(b'\0'); // malformed message body which can happen if the server doesn't really support this version
         sim.push(msg);
@@ -682,9 +685,9 @@ mod tests {
         let mut msg = vec![];
         ResponseHeader {
             correlation_id: Int32(0),
-            tagged_fields: Default::default(),
+            tagged_fields: Default::default(), // NOT serialized for ApiVersion!
         }
-        .write_versioned(&mut msg, ApiVersion(Int16(1)))
+        .write_versioned(&mut msg, ApiVersion(Int16(0)))
         .unwrap();
         ApiVersionsResponse {
             error_code: None,
@@ -715,9 +718,9 @@ mod tests {
         let mut msg = vec![];
         ResponseHeader {
             correlation_id: Int32(0),
-            tagged_fields: Default::default(),
+            tagged_fields: Default::default(), // NOT serialized for ApiVersion!
         }
-        .write_versioned(&mut msg, ApiVersion(Int16(1)))
+        .write_versioned(&mut msg, ApiVersion(Int16(0)))
         .unwrap();
         ApiVersionsResponse {
             error_code: None,
@@ -853,9 +856,9 @@ mod tests {
         let mut msg = vec![];
         ResponseHeader {
             correlation_id: Int32(0),
-            tagged_fields: Default::default(),
+            tagged_fields: Default::default(), // NOT serialized for ApiVersion!
         }
-        .write_versioned(&mut msg, ApiVersion(Int16(1)))
+        .write_versioned(&mut msg, ApiVersion(Int16(0)))
         .unwrap();
         let resp = ApiVersionsResponse {
             error_code: Some(ApiError::CorruptMessage),
