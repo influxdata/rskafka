@@ -77,6 +77,39 @@ let (records, high_watermark) = partition_client
 
 For more advanced production and consumption, see [`crate::client::producer`] and [`crate::client::consumer`].
 
+## Testing
+
+### Redpanda
+
+To run integration tests against Redpanda, run:
+
+```console
+$ docker-compose -f docker-compose-redpanda.yml up
+```
+
+in one session, and then run:
+
+```console
+$ TEST_INTEGRATION=1 KAFKA_CONNECT=0.0.0.0:9092 cargo test
+```
+
+in another session.
+
+### Kafka
+
+To run integration tests against Kafka, run:
+
+```console
+$ docker-compose -f docker-compose-kafka.yml up
+```
+
+in one session, and then run:
+
+```console
+$ TEST_INTEGRATION=1 KAFKA_CONNECT=localhost:9093 cargo test
+```
+
+in another session.
 
 ## License
 
