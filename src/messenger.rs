@@ -17,9 +17,8 @@ use tokio::{
     },
     task::JoinHandle,
 };
-use tracing::{info, warn};
+use tracing::{debug, info, warn};
 
-use crate::protocol::primitives::CompactString;
 use crate::protocol::{
     api_key::ApiKey,
     api_version::ApiVersion,
@@ -30,6 +29,7 @@ use crate::protocol::{
     },
     primitives::{Int16, Int32, NullableString, TaggedFields},
 };
+use crate::protocol::{api_version::ApiVersionRange, primitives::CompactString};
 use crate::protocol::{messages::ApiVersionsRequest, traits::ReadType};
 
 #[derive(Debug)]
@@ -101,7 +101,7 @@ pub struct Messenger<RW> {
     /// Version ranges that we think are supported by the broker.
     ///
     /// This needs to be bootstrapped by [`sync_versions`](Self::sync_versions).
-    version_ranges: RwLock<HashMap<ApiKey, (ApiVersion, ApiVersion)>>,
+    version_ranges: RwLock<HashMap<ApiKey, ApiVersionRange>>,
 
     /// Current stream state.
     ///
@@ -253,7 +253,7 @@ where
         }
     }
 
-    fn set_version_ranges(&self, ranges: HashMap<ApiKey, (ApiVersion, ApiVersion)>) {
+    fn set_version_ranges(&self, ranges: HashMap<ApiKey, ApiVersionRange>) {
         *self.version_ranges.write().expect("lock poisoned") = ranges;
     }
 
@@ -355,14 +355,14 @@ where
     }
 
     pub async fn sync_versions(&self) -> Result<(), SyncVersionsError> {
-        for upper_bound in (ApiVersionsRequest::API_VERSION_RANGE.0 .0 .0
-            ..=ApiVersionsRequest::API_VERSION_RANGE.1 .0 .0)
+        for upper_bound in (ApiVersionsRequest::API_VERSION_RANGE.min().0 .0
+            ..=ApiVersionsRequest::API_VERSION_RANGE.max().0 .0)
             .rev()
         {
             self.set_version_ranges(HashMap::from([(
                 ApiKey::ApiVersions,
-                (
-                    ApiVersionsRequest::API_VERSION_RANGE.0,
+                ApiVersionRange::new(
+                    ApiVersionsRequest::API_VERSION_RANGE.min(),
                     ApiVersion(Int16(upper_bound)),
                 ),
             )]));
@@ -398,8 +398,17 @@ where
                     let ranges = response
                         .api_keys
                         .into_iter()
-                        .map(|x| (x.api_key, (x.min_version, x.max_version)))
+                        .map(|x| {
+                            (
+                                x.api_key,
+                                ApiVersionRange::new(x.min_version, x.max_version),
+                            )
+                        })
                         .collect();
+                    debug!(
+                        versions=%sorted_ranges_repr(&ranges),
+                        "Detected supported broker versions",
+                    );
                     self.set_version_ranges(ranges);
                     return Ok(());
                 }
@@ -438,15 +447,19 @@ impl<RW> Drop for Messenger<RW> {
     }
 }
 
-fn match_versions(
-    range_a: (ApiVersion, ApiVersion),
-    range_b: (ApiVersion, ApiVersion),
-) -> Option<ApiVersion> {
-    assert!(range_a.0 <= range_a.1);
-    assert!(range_b.0 <= range_b.1);
+fn sorted_ranges_repr(ranges: &HashMap<ApiKey, ApiVersionRange>) -> String {
+    let mut ranges: Vec<_> = ranges.iter().map(|(key, range)| (*key, *range)).collect();
+    ranges.sort_by_key(|(key, _range)| *key);
+    let ranges: Vec<_> = ranges
+        .into_iter()
+        .map(|(key, range)| format!("{:?}: {}", key, range))
+        .collect();
+    ranges.join(", ")
+}
 
-    if range_a.0 <= range_b.1 && range_b.0 <= range_a.1 {
-        Some(range_a.1.min(range_b.1))
+fn match_versions(range_a: ApiVersionRange, range_b: ApiVersionRange) -> Option<ApiVersion> {
+    if range_a.min() <= range_b.max() && range_b.min() <= range_a.max() {
+        Some(range_a.max().min(range_b.max()))
     } else {
         None
     }
@@ -471,32 +484,32 @@ mod tests {
     fn test_match_versions() {
         assert_eq!(
             match_versions(
-                (ApiVersion(Int16(10)), ApiVersion(Int16(20))),
-                (ApiVersion(Int16(10)), ApiVersion(Int16(20))),
+                ApiVersionRange::new(ApiVersion(Int16(10)), ApiVersion(Int16(20))),
+                ApiVersionRange::new(ApiVersion(Int16(10)), ApiVersion(Int16(20))),
             ),
             Some(ApiVersion(Int16(20))),
         );
 
         assert_eq!(
             match_versions(
-                (ApiVersion(Int16(10)), ApiVersion(Int16(15))),
-                (ApiVersion(Int16(13)), ApiVersion(Int16(20))),
+                ApiVersionRange::new(ApiVersion(Int16(10)), ApiVersion(Int16(15))),
+                ApiVersionRange::new(ApiVersion(Int16(13)), ApiVersion(Int16(20))),
             ),
             Some(ApiVersion(Int16(15))),
         );
 
         assert_eq!(
             match_versions(
-                (ApiVersion(Int16(10)), ApiVersion(Int16(15))),
-                (ApiVersion(Int16(15)), ApiVersion(Int16(20))),
+                ApiVersionRange::new(ApiVersion(Int16(10)), ApiVersion(Int16(15))),
+                ApiVersionRange::new(ApiVersion(Int16(15)), ApiVersion(Int16(20))),
             ),
             Some(ApiVersion(Int16(15))),
         );
 
         assert_eq!(
             match_versions(
-                (ApiVersion(Int16(10)), ApiVersion(Int16(14))),
-                (ApiVersion(Int16(15)), ApiVersion(Int16(20))),
+                ApiVersionRange::new(ApiVersion(Int16(10)), ApiVersion(Int16(14))),
+                ApiVersionRange::new(ApiVersion(Int16(15)), ApiVersion(Int16(20))),
             ),
             None,
         );
@@ -526,7 +539,7 @@ mod tests {
             throttle_time_ms: None,
             tagged_fields: None,
         }
-        .write_versioned(&mut msg, ApiVersionsRequest::API_VERSION_RANGE.1)
+        .write_versioned(&mut msg, ApiVersionsRequest::API_VERSION_RANGE.max())
         .unwrap();
         sim.push(msg);
 
@@ -534,7 +547,7 @@ mod tests {
         messenger.sync_versions().await.unwrap();
         let expected = HashMap::from([(
             (ApiKey::Produce),
-            (ApiVersion(Int16(1)), ApiVersion(Int16(5))),
+            ApiVersionRange::new(ApiVersion(Int16(1)), ApiVersion(Int16(5))),
         )]);
         assert_eq!(messenger.version_ranges.read().unwrap().deref(), &expected);
     }
@@ -563,7 +576,7 @@ mod tests {
             throttle_time_ms: None,
             tagged_fields: None,
         }
-        .write_versioned(&mut msg, ApiVersionsRequest::API_VERSION_RANGE.1)
+        .write_versioned(&mut msg, ApiVersionsRequest::API_VERSION_RANGE.max())
         .unwrap();
         sim.push(msg);
 
@@ -588,7 +601,7 @@ mod tests {
         }
         .write_versioned(
             &mut msg,
-            ApiVersion(Int16(ApiVersionsRequest::API_VERSION_RANGE.1 .0 .0 - 1)),
+            ApiVersion(Int16(ApiVersionsRequest::API_VERSION_RANGE.max().0 .0 - 1)),
         )
         .unwrap();
         sim.push(msg);
@@ -597,7 +610,7 @@ mod tests {
         messenger.sync_versions().await.unwrap();
         let expected = HashMap::from([(
             (ApiKey::Produce),
-            (ApiVersion(Int16(1)), ApiVersion(Int16(5))),
+            ApiVersionRange::new(ApiVersion(Int16(1)), ApiVersion(Int16(5))),
         )]);
         assert_eq!(messenger.version_ranges.read().unwrap().deref(), &expected);
     }
@@ -639,7 +652,7 @@ mod tests {
         }
         .write_versioned(
             &mut msg,
-            ApiVersion(Int16(ApiVersionsRequest::API_VERSION_RANGE.1 .0 .0 - 1)),
+            ApiVersion(Int16(ApiVersionsRequest::API_VERSION_RANGE.max().0 .0 - 1)),
         )
         .unwrap();
         sim.push(msg);
@@ -648,7 +661,7 @@ mod tests {
         messenger.sync_versions().await.unwrap();
         let expected = HashMap::from([(
             (ApiKey::Produce),
-            (ApiVersion(Int16(1)), ApiVersion(Int16(5))),
+            ApiVersionRange::new(ApiVersion(Int16(1)), ApiVersion(Int16(5))),
         )]);
         assert_eq!(messenger.version_ranges.read().unwrap().deref(), &expected);
     }
@@ -677,7 +690,7 @@ mod tests {
             throttle_time_ms: None,
             tagged_fields: None,
         }
-        .write_versioned(&mut msg, ApiVersionsRequest::API_VERSION_RANGE.1)
+        .write_versioned(&mut msg, ApiVersionsRequest::API_VERSION_RANGE.max())
         .unwrap();
         sim.push(msg);
 
@@ -710,7 +723,7 @@ mod tests {
             throttle_time_ms: None,
             tagged_fields: None,
         }
-        .write_versioned(&mut msg, ApiVersionsRequest::API_VERSION_RANGE.1)
+        .write_versioned(&mut msg, ApiVersionsRequest::API_VERSION_RANGE.max())
         .unwrap();
         msg.push(b'\0'); // add junk to the end of the message to trigger `TooMuchData`
         sim.push(msg);
@@ -729,8 +742,8 @@ mod tests {
         let messenger = Messenger::new(rx, 1_000);
 
         // construct error response
-        for (i, v) in ((ApiVersionsRequest::API_VERSION_RANGE.0 .0 .0)
-            ..=(ApiVersionsRequest::API_VERSION_RANGE.1 .0 .0))
+        for (i, v) in ((ApiVersionsRequest::API_VERSION_RANGE.min().0 .0)
+            ..=(ApiVersionsRequest::API_VERSION_RANGE.max().0 .0))
             .rev()
             .enumerate()
         {
@@ -843,7 +856,7 @@ mod tests {
             throttle_time_ms: Some(Int32(1)),
             tagged_fields: Some(TaggedFields::default()),
         };
-        resp.write_versioned(&mut msg, ApiVersionsRequest::API_VERSION_RANGE.1)
+        resp.write_versioned(&mut msg, ApiVersionsRequest::API_VERSION_RANGE.max())
             .unwrap();
         sim.push(msg);
 

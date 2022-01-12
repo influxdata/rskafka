@@ -1,10 +1,11 @@
 use rand::prelude::*;
 use std::sync::Arc;
-use tracing::{debug, warn};
+use tracing::{debug, info, warn};
 
 use thiserror::Error;
 use tokio::io::BufStream;
 use tokio::sync::Mutex;
+use tracing::error;
 
 use crate::backoff::{Backoff, BackoffConfig};
 use crate::connection::topology::BrokerTopology;
@@ -80,15 +81,23 @@ impl BrokerConnector {
 
     /// Fetch and cache broker metadata
     pub async fn refresh_metadata(&self) -> Result<()> {
-        // Not interested in topic metadata
-        self.request_metadata(Some(vec![])).await?;
+        self.request_metadata(
+            self.get_arbitrary_cached_broker().await?,
+            // Not interested in topic metadata
+            Some(vec![]),
+        )
+        .await?;
         Ok(())
     }
 
     /// Requests metadata for the provided topics, updating the cached broker information
     ///
     /// Requests data for all topics if `topics` is `None`
-    pub async fn request_metadata(&self, topics: Option<Vec<String>>) -> Result<MetadataResponse> {
+    pub async fn request_metadata(
+        &self,
+        broker: BrokerConnection,
+        topics: Option<Vec<String>>,
+    ) -> Result<MetadataResponse> {
         let mut backoff = Backoff::new(&self.backoff_config);
         let request = MetadataRequest {
             topics: topics.map(|t| {
@@ -100,7 +109,6 @@ impl BrokerConnector {
         };
 
         let response = loop {
-            let broker = self.get_arbitrary_cached_broker().await?;
             let error = match broker.request(&request).await {
                 Ok(response) => break response,
                 Err(e @ RequestError::Poisoned(_) | e @ RequestError::IO(_)) => {
@@ -108,16 +116,19 @@ impl BrokerConnector {
                     e
                 }
                 Err(error) => {
-                    println!("metadata request encountered fatal error: {}", error);
+                    error!(
+                        e=%error,
+                        "metadata request encountered fatal error",
+                    );
                     return Err(Error::Metadata(error));
                 }
             };
 
             let backoff = backoff.next();
-            println!(
-                "metadata request encountered non-fatal error \"{}\" - backing off for {} seconds",
-                error,
-                backoff.as_secs()
+            info!(
+                e=%error,
+                backoff_secs = backoff.as_secs(),
+                "metadata request encountered non-fatal error - backing off",
             );
             tokio::time::sleep(backoff).await;
         };

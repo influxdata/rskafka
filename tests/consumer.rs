@@ -40,10 +40,10 @@ async fn test_stream_consumer() {
         };
 
     // Fetch first record
-    assert_ok(timeout(Duration::from_millis(1), stream.next()).await);
+    assert_ok(timeout(Duration::from_millis(100), stream.next()).await);
 
     // No further records
-    timeout(Duration::from_millis(1), stream.next())
+    timeout(Duration::from_millis(100), stream.next())
         .await
         .expect_err("timeout");
 
@@ -53,13 +53,13 @@ async fn test_stream_consumer() {
         .unwrap();
 
     // Get second record
-    assert_ok(timeout(Duration::from_millis(1), stream.next()).await);
+    assert_ok(timeout(Duration::from_millis(100), stream.next()).await);
 
     // Get third record
-    assert_ok(timeout(Duration::from_millis(1), stream.next()).await);
+    assert_ok(timeout(Duration::from_millis(100), stream.next()).await);
 
     // No further records
-    timeout(Duration::from_millis(1), stream.next())
+    timeout(Duration::from_millis(100), stream.next())
         .await
         .expect_err("timeout");
 }

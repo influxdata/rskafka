@@ -9,7 +9,7 @@ use thiserror::Error;
 
 use super::{
     api_key::ApiKey,
-    api_version::ApiVersion,
+    api_version::{ApiVersion, ApiVersionRange},
     primitives::Int32,
     traits::{ReadError, ReadType, WriteError, WriteType},
 };
@@ -87,7 +87,7 @@ pub trait RequestBody {
     /// Supported version range.
     ///
     /// From this range and the range that the broker reports, we will pick the highest version that both support.
-    const API_VERSION_RANGE: (ApiVersion, ApiVersion);
+    const API_VERSION_RANGE: ApiVersionRange;
 
     /// The first version of the messages (not of the header) that uses tagged fields, if any.
     ///
@@ -102,7 +102,7 @@ pub trait RequestBody {
 impl<'a, T: RequestBody> RequestBody for &T {
     type ResponseBody = T::ResponseBody;
     const API_KEY: ApiKey = T::API_KEY;
-    const API_VERSION_RANGE: (ApiVersion, ApiVersion) = T::API_VERSION_RANGE;
+    const API_VERSION_RANGE: ApiVersionRange = T::API_VERSION_RANGE;
     const FIRST_TAGGED_FIELD_VERSION: ApiVersion = T::FIRST_TAGGED_FIELD_VERSION;
 }
 

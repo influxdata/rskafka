@@ -7,7 +7,7 @@ use std::io::{Read, Write};
 
 use crate::protocol::{
     api_key::ApiKey,
-    api_version::ApiVersion,
+    api_version::{ApiVersion, ApiVersionRange},
     error::Error as ApiError,
     messages::{read_versioned_array, write_versioned_array},
     primitives::{Array, Int16, Int32, Int64, Int8, String_},
@@ -153,8 +153,8 @@ impl RequestBody for ListOffsetsRequest {
     const API_KEY: ApiKey = ApiKey::ListOffsets;
 
     /// At the time of writing this is the same subset supported by rdkafka
-    const API_VERSION_RANGE: (ApiVersion, ApiVersion) =
-        (ApiVersion(Int16(0)), ApiVersion(Int16(3)));
+    const API_VERSION_RANGE: ApiVersionRange =
+        ApiVersionRange::new(ApiVersion(Int16(0)), ApiVersion(Int16(3)));
 
     const FIRST_TAGGED_FIELD_VERSION: ApiVersion = ApiVersion(Int16(6));
 }
