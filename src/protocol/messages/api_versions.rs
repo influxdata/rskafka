@@ -2,7 +2,7 @@ use std::io::{Read, Write};
 
 use crate::protocol::{
     api_key::ApiKey,
-    api_version::ApiVersion,
+    api_version::{ApiVersion, ApiVersionRange},
     error::Error as ApiError,
     messages::write_versioned_array,
     primitives::{CompactString, Int16, Int32, TaggedFields},
@@ -53,8 +53,8 @@ where
 impl RequestBody for ApiVersionsRequest {
     type ResponseBody = ApiVersionsResponse;
     const API_KEY: ApiKey = ApiKey::ApiVersions;
-    const API_VERSION_RANGE: (ApiVersion, ApiVersion) =
-        (ApiVersion(Int16(0)), ApiVersion(Int16(3)));
+    const API_VERSION_RANGE: ApiVersionRange =
+        ApiVersionRange::new(ApiVersion(Int16(0)), ApiVersion(Int16(3)));
     const FIRST_TAGGED_FIELD_VERSION: ApiVersion = ApiVersion(Int16(3));
 }
 
@@ -221,8 +221,8 @@ mod tests {
 
     test_roundtrip_versioned!(
         ApiVersionsResponse,
-        ApiVersionsRequest::API_VERSION_RANGE.0,
-        ApiVersionsRequest::API_VERSION_RANGE.1,
+        ApiVersionsRequest::API_VERSION_RANGE.min(),
+        ApiVersionsRequest::API_VERSION_RANGE.max(),
         test_roundtrip_api_versions_response
     );
 }

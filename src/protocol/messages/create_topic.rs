@@ -3,6 +3,7 @@ use std::io::{Read, Write};
 use super::{
     ReadVersionedError, ReadVersionedType, RequestBody, WriteVersionedError, WriteVersionedType,
 };
+use crate::protocol::api_version::ApiVersionRange;
 use crate::protocol::error::Error;
 use crate::protocol::messages::{read_versioned_array, write_versioned_array};
 use crate::protocol::{
@@ -32,8 +33,8 @@ impl RequestBody for CreateTopicsRequest {
     const API_KEY: ApiKey = ApiKey::CreateTopics;
 
     /// At the time of writing this is the same subset supported by rdkafka
-    const API_VERSION_RANGE: (ApiVersion, ApiVersion) =
-        (ApiVersion(Int16(0)), ApiVersion(Int16(4)));
+    const API_VERSION_RANGE: ApiVersionRange =
+        ApiVersionRange::new(ApiVersion(Int16(0)), ApiVersion(Int16(4)));
 
     const FIRST_TAGGED_FIELD_VERSION: ApiVersion = ApiVersion(Int16(5));
 }

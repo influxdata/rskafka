@@ -2,7 +2,7 @@ use std::io::{Read, Write};
 
 use crate::protocol::{
     api_key::ApiKey,
-    api_version::ApiVersion,
+    api_version::{ApiVersion, ApiVersionRange},
     error::Error as ApiError,
     messages::{read_versioned_array, write_versioned_array},
     primitives::{Int16, Int32, Int64, Int8, Records, String_},
@@ -155,8 +155,8 @@ impl RequestBody for FetchRequest {
     /// was introduced ([KIP-98]).
     ///
     /// [KIP-98]: https://cwiki.apache.org/confluence/display/KAFKA/KIP-98+-+Exactly+Once+Delivery+and+Transactional+Messaging
-    const API_VERSION_RANGE: (ApiVersion, ApiVersion) =
-        (ApiVersion(Int16(4)), ApiVersion(Int16(4)));
+    const API_VERSION_RANGE: ApiVersionRange =
+        ApiVersionRange::new(ApiVersion(Int16(4)), ApiVersion(Int16(4)));
 
     const FIRST_TAGGED_FIELD_VERSION: ApiVersion = ApiVersion(Int16(12));
 }
