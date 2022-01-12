@@ -451,8 +451,8 @@ impl PartitionClient {
         // Check if the chosen leader also thinks it is the leader.
         //
         // For Kafka (+ Zookeeper) this seems to be required if we don't want to blindly retry
-        // `UnknownTopicOrPartition` that happen after we connect to a leader (as adviced by another broker) which
-        // itself doesn't seem to know about its assigned partition yet. The metadata query below seems to result in an
+        // `UnknownTopicOrPartition` that happen after we connect to a leader (as advised by another broker) which
+        // doesn't know about its assigned partition yet. The metadata query below seems to result in an
         // LeaderNotAvailable in this case and is retried by the layer above.
         //
         // This does not seem to be required for redpanda.
