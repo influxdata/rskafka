@@ -441,6 +441,14 @@ where
                     );
                     continue;
                 }
+                Err(e @ RequestError::TooMuchData { .. }) => {
+                    debug!(
+                        %e,
+                        version=upper_bound,
+                        "Cannot read ApiVersionResponse for version",
+                    );
+                    continue;
+                }
                 Err(e) => {
                     return Err(SyncVersionsError::RequestError(e));
                 }
@@ -710,7 +718,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_sync_versions_err_garbage() {
+    async fn test_sync_versions_ignores_garbage() {
         let (sim, rx) = MessageSimulator::new();
         let messenger = Messenger::new(rx, 1_000);
 
@@ -738,12 +746,39 @@ mod tests {
         msg.push(b'\0'); // add junk to the end of the message to trigger `TooMuchData`
         sim.push(msg);
 
+        // construct good response
+        let mut msg = vec![];
+        ResponseHeader {
+            correlation_id: Int32(1),
+            tagged_fields: Default::default(),
+        }
+        .write_versioned(&mut msg, ApiVersion(Int16(0)))
+        .unwrap();
+        ApiVersionsResponse {
+            error_code: None,
+            api_keys: vec![ApiVersionsResponseApiKey {
+                api_key: ApiKey::Produce,
+                min_version: ApiVersion(Int16(1)),
+                max_version: ApiVersion(Int16(5)),
+                tagged_fields: Default::default(),
+            }],
+            throttle_time_ms: None,
+            tagged_fields: None,
+        }
+        .write_versioned(
+            &mut msg,
+            ApiVersion(Int16(ApiVersionsRequest::API_VERSION_RANGE.max().0 .0 - 1)),
+        )
+        .unwrap();
+        sim.push(msg);
+
         // sync versions
-        let err = messenger.sync_versions().await.unwrap_err();
-        assert_matches!(
-            err,
-            SyncVersionsError::RequestError(RequestError::TooMuchData { .. })
-        );
+        messenger.sync_versions().await.unwrap();
+        let expected = HashMap::from([(
+            (ApiKey::Produce),
+            ApiVersionRange::new(ApiVersion(Int16(1)), ApiVersion(Int16(5))),
+        )]);
+        assert_eq!(messenger.version_ranges.read().unwrap().deref(), &expected);
     }
 
     #[tokio::test]
