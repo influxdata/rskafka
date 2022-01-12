@@ -133,9 +133,14 @@ pub enum RequestError {
     IO(#[from] std::io::Error),
 
     #[error(
-        "Data left at the end of the message. Got {message_size} bytes but only read {read} bytes"
+        "Data left at the end of the message. Got {message_size} bytes but only read {read} bytes. api_key={api_key:?} api_version={api_version}"
     )]
-    TooMuchData { message_size: u64, read: u64 },
+    TooMuchData {
+        message_size: u64,
+        read: u64,
+        api_key: ApiKey,
+        api_version: ApiVersion,
+    },
 
     #[error(transparent)]
     ReadMessageError(#[from] crate::protocol::frame::ReadError),
@@ -330,6 +335,8 @@ where
             return Err(RequestError::TooMuchData {
                 message_size: message_bytes,
                 read: read_bytes,
+                api_key: R::API_KEY,
+                api_version: body_api_version,
             });
         }
 
