@@ -53,11 +53,11 @@ enum MessengerState {
     RequestMap(HashMap<i32, ActiveRequest>),
 
     /// One or our streams died and we are unable to process any more requests.
-    Poisson(Arc<RequestError>),
+    Poison(Arc<RequestError>),
 }
 
 impl MessengerState {
-    async fn poisson(&mut self, err: RequestError) -> Arc<RequestError> {
+    async fn poison(&mut self, err: RequestError) -> Arc<RequestError> {
         match self {
             Self::RequestMap(map) => {
                 let err = Arc::new(err);
@@ -71,10 +71,10 @@ impl MessengerState {
                         .ok();
                 }
 
-                *self = Self::Poisson(Arc::clone(&err));
+                *self = Self::Poison(Arc::clone(&err));
                 err
             }
-            Self::Poisson(e) => {
+            Self::Poison(e) => {
                 // already poisoned, used existing error
                 Arc::clone(e)
             }
@@ -175,7 +175,7 @@ where
             loop {
                 match stream_read.read_message(max_message_size).await {
                     Ok(msg) => {
-                        // message was read, so all subsequent errors should not poisson the whole stream
+                        // message was read, so all subsequent errors should not poison the whole stream
                         let mut cursor = Cursor::new(msg);
 
                         // read header as version 0 (w/o tagged fields) first since this is a strict prefix or the more advanced
@@ -202,7 +202,7 @@ where
                                     continue;
                                 }
                             }
-                            MessengerState::Poisson(_) => {
+                            MessengerState::Poison(_) => {
                                 // stream is poisoned, no need to anything
                                 return;
                             }
@@ -236,7 +236,7 @@ where
                         state_captured
                             .lock()
                             .await
-                            .poisson(RequestError::ReadMessageError(e))
+                            .poison(RequestError::ReadMessageError(e))
                             .await;
                         return;
                     }
@@ -313,7 +313,7 @@ where
                     },
                 );
             }
-            MessengerState::Poisson(e) => {
+            MessengerState::Poison(e) => {
                 return Err(RequestError::Poisoned(Arc::clone(e)));
             }
         }
@@ -340,9 +340,9 @@ where
         match self.send_message_inner(msg).await {
             Ok(()) => Ok(()),
             Err(e) => {
-                // need to poisson the stream because message framing might be out-of-sync
+                // need to poison the stream because message framing might be out-of-sync
                 let mut state = self.state.lock().await;
-                Err(RequestError::Poisoned(state.poisson(e).await))
+                Err(RequestError::Poisoned(state.poison(e).await))
             }
         }
     }
@@ -776,7 +776,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_poisson_hangup() {
+    async fn test_poison_hangup() {
         let (sim, rx) = MessageSimulator::new();
         let messenger = Messenger::new(rx, 1_000);
         messenger.set_version_ranges(HashMap::from([(
@@ -798,7 +798,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_poisson_negative_message_size() {
+    async fn test_poison_negative_message_size() {
         let (sim, rx) = MessageSimulator::new();
         let messenger = Messenger::new(rx, 1_000);
         messenger.set_version_ranges(HashMap::from([(
@@ -831,7 +831,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_broken_msg_header_does_not_poisson() {
+    async fn test_broken_msg_header_does_not_poison() {
         let (sim, rx) = MessageSimulator::new();
         let messenger = Messenger::new(rx, 1_000);
         messenger.set_version_ranges(HashMap::from([(
