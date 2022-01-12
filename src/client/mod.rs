@@ -81,7 +81,10 @@ impl Client {
 
     /// Returns a list of topics in the cluster
     pub async fn list_topics(&self) -> Result<Vec<String>> {
-        let response = self.brokers.request_metadata(None).await?;
+        let response = self
+            .brokers
+            .request_metadata(self.brokers.get_arbitrary_cached_broker().await?, None)
+            .await?;
 
         Ok(response
             .topics
