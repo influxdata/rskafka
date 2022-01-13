@@ -57,7 +57,7 @@ async fn test_topic_crud() {
 
     let mut max_id = 0;
     for topic in topics {
-        if let Some(maybe_int) = topic.strip_prefix(prefix) {
+        if let Some(maybe_int) = topic.name.strip_prefix(prefix) {
             if let Ok(i) = usize::from_str(maybe_int) {
                 max_id = max_id.max(i);
             }
@@ -65,16 +65,19 @@ async fn test_topic_crud() {
     }
 
     let new_topic = format!("{}{}", prefix, max_id + 1);
-    client.create_topic(&new_topic, 1, 1).await.unwrap();
+    client.create_topic(&new_topic, 2, 1).await.unwrap();
 
     let topics = client.list_topics().await.unwrap();
 
+    let topic = topics.iter().find(|t| t.name == new_topic);
     assert!(
-        topics.contains(&new_topic),
+        topic.is_some(),
         "topic {} not found in {:?}",
         new_topic,
         topics
     );
+    let topic = topic.unwrap();
+    assert_eq!(topic.partitions.len(), 2);
 
     let err = client.create_topic(&new_topic, 1, 1).await.unwrap_err();
     match err {
