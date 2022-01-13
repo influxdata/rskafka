@@ -225,7 +225,7 @@ where
 
         Ok(Self {
             partition_index: Int32::read(reader)?,
-            error_code: ApiError::new(Int16::read(reader)?),
+            error_code: ApiError::new(Int16::read(reader)?.0),
             high_watermark: Int64::read(reader)?,
             last_stable_offset: (v >= 4).then(|| Int64::read(reader)).transpose()?,
             aborted_transactions: (v >= 4)
