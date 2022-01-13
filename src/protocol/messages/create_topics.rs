@@ -139,7 +139,7 @@ where
         assert!(v <= 5);
 
         if v >= 5 {
-            CompactString(self.name.0.clone()).write(writer)?
+            CompactStringRef(&self.name.0).write(writer)?
         } else {
             self.name.write(writer)?;
         }
@@ -245,13 +245,13 @@ where
         assert!(v <= 5);
 
         if v >= 5 {
-            CompactString(self.name.0.clone()).write(writer)?;
+            CompactStringRef(&self.name.0).write(writer)?;
         } else {
             self.name.write(writer)?;
         }
 
         if v >= 5 {
-            CompactNullableString(self.value.0.clone()).write(writer)?;
+            CompactNullableStringRef(self.value.0.as_deref()).write(writer)?;
         } else {
             self.value.write(writer)?;
         }

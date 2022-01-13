@@ -384,6 +384,21 @@ where
     W: Write,
 {
     fn write(&self, writer: &mut W) -> Result<(), WriteError> {
+        CompactStringRef(&self.0).write(writer)
+    }
+}
+
+/// Same as [`CompactString`] but contains referenced data.
+///
+/// This only supports writing.
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct CompactStringRef<'a>(pub &'a str);
+
+impl<'a, W> WriteType<W> for CompactStringRef<'a>
+where
+    W: Write,
+{
+    fn write(&self, writer: &mut W) -> Result<(), WriteError> {
         UnsignedVarint(self.0.len() as u64 + 1).write(writer)?;
         writer.write_all(self.0.as_bytes())?;
         Ok(())
@@ -414,6 +429,21 @@ where
 }
 
 impl<W> WriteType<W> for CompactNullableString
+where
+    W: Write,
+{
+    fn write(&self, writer: &mut W) -> Result<(), WriteError> {
+        CompactNullableStringRef(self.0.as_deref()).write(writer)
+    }
+}
+
+/// Same as [`CompactNullableString`] but contains referenced data.
+///
+/// This only supports writing.
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct CompactNullableStringRef<'a>(pub Option<&'a str>);
+
+impl<'a, W> WriteType<W> for CompactNullableStringRef<'a>
 where
     W: Write,
 {
