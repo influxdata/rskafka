@@ -22,3 +22,6 @@ mod messenger;
 mod protocol;
 pub mod record;
 pub mod topic;
+
+// re-exports
+pub use time;
