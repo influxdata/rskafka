@@ -17,7 +17,7 @@ use tokio::{
     },
     task::JoinHandle,
 };
-use tracing::{debug, info, warn};
+use tracing::{debug, warn};
 
 use crate::protocol::{
     api_key::ApiKey,
@@ -42,7 +42,7 @@ struct Response {
 #[derive(Debug)]
 struct ActiveRequest {
     channel: Sender<Result<Response, RequestError>>,
-    use_tagged_fields: bool,
+    use_tagged_fields_in_response: bool,
 }
 
 #[derive(Debug)]
@@ -133,9 +133,14 @@ pub enum RequestError {
     IO(#[from] std::io::Error),
 
     #[error(
-        "Data left at the end of the message. Got {message_size} bytes but only read {read} bytes"
+        "Data left at the end of the message. Got {message_size} bytes but only read {read} bytes. api_key={api_key:?} api_version={api_version}"
     )]
-    TooMuchData { message_size: u64, read: u64 },
+    TooMuchData {
+        message_size: u64,
+        read: u64,
+        api_key: ApiKey,
+        api_version: ApiVersion,
+    },
 
     #[error(transparent)]
     ReadMessageError(#[from] crate::protocol::frame::ReadError),
@@ -209,7 +214,7 @@ where
                         };
 
                         // optionally read tagged fields from the header as well
-                        if active_request.use_tagged_fields {
+                        if active_request.use_tagged_fields_in_response {
                             header.tagged_fields = match TaggedFields::read(&mut cursor) {
                                 Ok(fields) => Some(fields),
                                 Err(e) => {
@@ -277,7 +282,10 @@ where
         // rdkafka ("flexver"), see:
         // - https://github.com/edenhill/librdkafka/blob/2b76b65212e5efda213961d5f84e565038036270/src/rdkafka_request.c#L973
         // - https://github.com/edenhill/librdkafka/blob/2b76b65212e5efda213961d5f84e565038036270/src/rdkafka_buf.c#L167-L174
-        let use_tagged_fields = body_api_version >= R::FIRST_TAGGED_FIELD_VERSION;
+        let use_tagged_fields_in_request =
+            body_api_version >= R::FIRST_TAGGED_FIELD_IN_REQUEST_VERSION;
+        let use_tagged_fields_in_response =
+            body_api_version >= R::FIRST_TAGGED_FIELD_IN_RESPONSE_VERSION;
 
         // Correlation ID so that we can de-multiplex the responses.
         let correlation_id = self.correlation_id.fetch_add(1, Ordering::SeqCst);
@@ -289,7 +297,7 @@ where
             client_id: NullableString(None),
             tagged_fields: TaggedFields::default(),
         };
-        let header_version = if use_tagged_fields {
+        let header_version = if use_tagged_fields_in_request {
             ApiVersion(Int16(2))
         } else {
             ApiVersion(Int16(1))
@@ -309,7 +317,7 @@ where
                     correlation_id,
                     ActiveRequest {
                         channel: tx,
-                        use_tagged_fields,
+                        use_tagged_fields_in_response,
                     },
                 );
             }
@@ -330,6 +338,8 @@ where
             return Err(RequestError::TooMuchData {
                 message_size: message_bytes,
                 read: read_bytes,
+                api_key: R::API_KEY,
+                api_version: body_api_version,
             });
         }
 
@@ -368,15 +378,15 @@ where
             )]));
 
             let body = ApiVersionsRequest {
-                client_software_name: CompactString(String::from("")),
-                client_software_version: CompactString(String::from("")),
+                client_software_name: CompactString(String::from(env!("CARGO_PKG_NAME"))),
+                client_software_version: CompactString(String::from(env!("CARGO_PKG_VERSION"))),
                 tagged_fields: TaggedFields::default(),
             };
 
             match self.request(body).await {
                 Ok(response) => {
                     if let Some(e) = response.error_code {
-                        info!(
+                        debug!(
                             %e,
                             version=upper_bound,
                             "Got error during version sync, cannot use version for ApiVersionRequest",
@@ -416,7 +426,7 @@ where
                     unreachable!("Just set to version range to a non-empty range")
                 }
                 Err(RequestError::ReadVersionedError(e)) => {
-                    info!(
+                    debug!(
                         %e,
                         version=upper_bound,
                         "Cannot read ApiVersionResponse for version",
@@ -424,7 +434,15 @@ where
                     continue;
                 }
                 Err(RequestError::ReadError(e)) => {
-                    info!(
+                    debug!(
+                        %e,
+                        version=upper_bound,
+                        "Cannot read ApiVersionResponse for version",
+                    );
+                    continue;
+                }
+                Err(e @ RequestError::TooMuchData { .. }) => {
+                    debug!(
                         %e,
                         version=upper_bound,
                         "Cannot read ApiVersionResponse for version",
@@ -524,9 +542,9 @@ mod tests {
         let mut msg = vec![];
         ResponseHeader {
             correlation_id: Int32(0),
-            tagged_fields: Default::default(),
+            tagged_fields: Default::default(), // NOT serialized for ApiVersion!
         }
-        .write_versioned(&mut msg, ApiVersion(Int16(1)))
+        .write_versioned(&mut msg, ApiVersion(Int16(0)))
         .unwrap();
         ApiVersionsResponse {
             error_code: None,
@@ -561,9 +579,9 @@ mod tests {
         let mut msg = vec![];
         ResponseHeader {
             correlation_id: Int32(0),
-            tagged_fields: Default::default(),
+            tagged_fields: Default::default(), // NOT serialized for ApiVersion!
         }
-        .write_versioned(&mut msg, ApiVersion(Int16(1)))
+        .write_versioned(&mut msg, ApiVersion(Int16(0)))
         .unwrap();
         ApiVersionsResponse {
             error_code: Some(ApiError::CorruptMessage),
@@ -624,9 +642,9 @@ mod tests {
         let mut msg = vec![];
         ResponseHeader {
             correlation_id: Int32(0),
-            tagged_fields: Default::default(),
+            tagged_fields: Default::default(), // NOT serialized for ApiVersion!
         }
-        .write_versioned(&mut msg, ApiVersion(Int16(1)))
+        .write_versioned(&mut msg, ApiVersion(Int16(0)))
         .unwrap();
         msg.push(b'\0'); // malformed message body which can happen if the server doesn't really support this version
         sim.push(msg);
@@ -675,9 +693,9 @@ mod tests {
         let mut msg = vec![];
         ResponseHeader {
             correlation_id: Int32(0),
-            tagged_fields: Default::default(),
+            tagged_fields: Default::default(), // NOT serialized for ApiVersion!
         }
-        .write_versioned(&mut msg, ApiVersion(Int16(1)))
+        .write_versioned(&mut msg, ApiVersion(Int16(0)))
         .unwrap();
         ApiVersionsResponse {
             error_code: None,
@@ -700,7 +718,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_sync_versions_err_garbage() {
+    async fn test_sync_versions_ignores_garbage() {
         let (sim, rx) = MessageSimulator::new();
         let messenger = Messenger::new(rx, 1_000);
 
@@ -708,9 +726,9 @@ mod tests {
         let mut msg = vec![];
         ResponseHeader {
             correlation_id: Int32(0),
-            tagged_fields: Default::default(),
+            tagged_fields: Default::default(), // NOT serialized for ApiVersion!
         }
-        .write_versioned(&mut msg, ApiVersion(Int16(1)))
+        .write_versioned(&mut msg, ApiVersion(Int16(0)))
         .unwrap();
         ApiVersionsResponse {
             error_code: None,
@@ -728,12 +746,39 @@ mod tests {
         msg.push(b'\0'); // add junk to the end of the message to trigger `TooMuchData`
         sim.push(msg);
 
+        // construct good response
+        let mut msg = vec![];
+        ResponseHeader {
+            correlation_id: Int32(1),
+            tagged_fields: Default::default(),
+        }
+        .write_versioned(&mut msg, ApiVersion(Int16(0)))
+        .unwrap();
+        ApiVersionsResponse {
+            error_code: None,
+            api_keys: vec![ApiVersionsResponseApiKey {
+                api_key: ApiKey::Produce,
+                min_version: ApiVersion(Int16(1)),
+                max_version: ApiVersion(Int16(5)),
+                tagged_fields: Default::default(),
+            }],
+            throttle_time_ms: None,
+            tagged_fields: None,
+        }
+        .write_versioned(
+            &mut msg,
+            ApiVersion(Int16(ApiVersionsRequest::API_VERSION_RANGE.max().0 .0 - 1)),
+        )
+        .unwrap();
+        sim.push(msg);
+
         // sync versions
-        let err = messenger.sync_versions().await.unwrap_err();
-        assert_matches!(
-            err,
-            SyncVersionsError::RequestError(RequestError::TooMuchData { .. })
-        );
+        messenger.sync_versions().await.unwrap();
+        let expected = HashMap::from([(
+            (ApiKey::Produce),
+            ApiVersionRange::new(ApiVersion(Int16(1)), ApiVersion(Int16(5))),
+        )]);
+        assert_eq!(messenger.version_ranges.read().unwrap().deref(), &expected);
     }
 
     #[tokio::test]
@@ -846,9 +891,9 @@ mod tests {
         let mut msg = vec![];
         ResponseHeader {
             correlation_id: Int32(0),
-            tagged_fields: Default::default(),
+            tagged_fields: Default::default(), // NOT serialized for ApiVersion!
         }
-        .write_versioned(&mut msg, ApiVersion(Int16(1)))
+        .write_versioned(&mut msg, ApiVersion(Int16(0)))
         .unwrap();
         let resp = ApiVersionsResponse {
             error_code: Some(ApiError::CorruptMessage),

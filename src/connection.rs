@@ -1,6 +1,6 @@
 use rand::prelude::*;
 use std::sync::Arc;
-use tracing::{debug, info, warn};
+use tracing::{info, warn};
 
 use thiserror::Error;
 use tokio::io::BufStream;
@@ -148,13 +148,13 @@ impl BrokerConnector {
     /// Returns a new connection to the broker with the provided id
     pub async fn connect(&self, broker_id: i32) -> Result<Option<BrokerConnection>> {
         match self.topology.get_broker_url(broker_id).await {
-            Some(url) => Ok(Some(self.connect_impl(&url).await?)),
+            Some(url) => Ok(Some(self.connect_impl(Some(broker_id), &url).await?)),
             None => Ok(None),
         }
     }
 
-    async fn connect_impl(&self, url: &str) -> Result<BrokerConnection> {
-        debug!(url, "Establishing new connection");
+    async fn connect_impl(&self, broker_id: Option<i32>, url: &str) -> Result<BrokerConnection> {
+        info!(broker = broker_id, url, "Establishing new connection",);
         let transport = Transport::connect(url, self.tls_config.clone())
             .await
             .map_err(|error| Error::Transport {
@@ -190,7 +190,7 @@ impl BrokerConnector {
 
         loop {
             for broker in &brokers {
-                let connection = match self.connect_impl(broker).await {
+                let connection = match self.connect_impl(None, broker).await {
                     Ok(transport) => transport,
                     Err(e) => {
                         warn!(%e, "Failed to connect to broker");
