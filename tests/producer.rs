@@ -35,7 +35,7 @@ async fn test_batch_producer() {
     futures::select! {
         _ = a => panic!("a finished!"),
         _ = b => panic!("b finished!"),
-        _ = tokio::time::sleep(Duration::from_millis(10)).fuse() => {}
+        _ = tokio::time::sleep(Duration::from_millis(100)).fuse() => {}
     };
 
     let c = producer.produce(record).fuse();
@@ -47,7 +47,7 @@ async fn test_batch_producer() {
             r = a => r.unwrap(),
             r = b => r.unwrap(),
             _ = c => panic!("c finished!"),
-            _ = tokio::time::sleep(Duration::from_millis(100)).fuse() => break
+            _ = tokio::time::sleep(Duration::from_millis(1_000)).fuse() => break
         };
     }
 
