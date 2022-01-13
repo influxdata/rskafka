@@ -95,7 +95,7 @@ impl BrokerConnector {
     /// Requests data for all topics if `topics` is `None`
     pub async fn request_metadata(
         &self,
-        broker: BrokerConnection,
+        mut broker: BrokerConnection,
         topics: Option<Vec<String>>,
     ) -> Result<MetadataResponse> {
         let mut backoff = Backoff::new(&self.backoff_config);
@@ -113,6 +113,7 @@ impl BrokerConnector {
                 Ok(response) => break response,
                 Err(e @ RequestError::Poisoned(_) | e @ RequestError::IO(_)) => {
                     self.invalidate_cached_arbitrary_broker().await;
+                    broker = self.get_arbitrary_cached_broker().await?;
                     e
                 }
                 Err(error) => {
