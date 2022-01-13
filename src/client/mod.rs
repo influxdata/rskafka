@@ -113,7 +113,7 @@ impl Client {
                     tagged_fields: None,
                 }],
                 // TODO: Expose as configuration parameter
-                timeout_ms: Int32(500),
+                timeout_ms: Int32(5_000),
                 validate_only: None,
                 tagged_fields: None,
             })
