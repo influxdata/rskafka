@@ -1,7 +1,10 @@
 use rskafka::{
-    client::{error::Error as ClientError, partition::PartitionClient, Client},
+    client::{
+        error::{Error as ClientError, ProtocolError},
+        partition::PartitionClient,
+        Client,
+    },
     record::{Record, RecordAndOffset},
-    ProtocolError,
 };
 use std::{str::FromStr, sync::Arc, time::Duration};
 

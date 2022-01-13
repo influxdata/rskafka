@@ -236,8 +236,9 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::client::producer::aggregator::RecordAggregator;
-    use crate::ProtocolError;
+    use crate::{
+        client::producer::aggregator::RecordAggregator, protocol::error::Error as ProtocolError,
+    };
     use futures::stream::FuturesUnordered;
     use futures::StreamExt;
     use time::OffsetDateTime;

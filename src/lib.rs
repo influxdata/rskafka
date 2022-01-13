@@ -22,5 +22,3 @@ mod messenger;
 mod protocol;
 pub mod record;
 pub mod topic;
-
-pub type ProtocolError = protocol::error::Error;
