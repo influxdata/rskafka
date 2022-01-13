@@ -140,7 +140,7 @@ impl BrokerConnector {
 
     /// Invalidates the current cached broker
     ///
-    /// The next call to `[BrokerPool::get_cached_broker]` will get a new connection
+    /// The next call to `[BrokerConnector::get_arbitrary_cached_broker]` will get a new connection
     #[allow(dead_code)]
     pub async fn invalidate_cached_arbitrary_broker(&self) {
         self.current_broker.lock().await.take();
