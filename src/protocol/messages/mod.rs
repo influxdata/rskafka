@@ -2,6 +2,7 @@
 //!
 //! # References
 //! - <https://kafka.apache.org/protocol#protocol_messages>
+//! - <https://cwiki.apache.org/confluence/display/KAFKA/KIP-482%3A+The+Kafka+Protocol+should+Support+Optional+Tagged+Fields>
 
 use std::io::{Read, Write};
 
@@ -113,6 +114,12 @@ impl<'a, T: RequestBody> RequestBody for &T {
         T::FIRST_TAGGED_FIELD_IN_RESPONSE_VERSION;
 }
 
+/// Read an array of versioned objects.
+///
+/// Note that this is normally only used for messages that DO NOT contain tagged fields. All messages with tagged fields
+/// normally use [`read_compact_versioned_array`] to comply with [KIP-482].
+///
+/// [KIP-482]: https://cwiki.apache.org/confluence/display/KAFKA/KIP-482%3A+The+Kafka+Protocol+should+Support+Optional+Tagged+Fields
 fn read_versioned_array<R: Read, T: ReadVersionedType<R>>(
     reader: &mut R,
     version: ApiVersion,
@@ -134,6 +141,12 @@ fn read_versioned_array<R: Read, T: ReadVersionedType<R>>(
     }
 }
 
+/// Write an array of versioned objects.
+///
+/// Note that this is normally only used for messages that DO NOT contain tagged fields. All messages with tagged fields
+/// normally use [`write_compact_versioned_array`] to comply with [KIP-482].
+///
+/// [KIP-482]: https://cwiki.apache.org/confluence/display/KAFKA/KIP-482%3A+The+Kafka+Protocol+should+Support+Optional+Tagged+Fields
 fn write_versioned_array<W: Write, T: WriteVersionedType<W>>(
     writer: &mut W,
     version: ApiVersion,
@@ -154,6 +167,12 @@ fn write_versioned_array<W: Write, T: WriteVersionedType<W>>(
     }
 }
 
+/// Read a compact array of versioned objects.
+///
+/// Note that this is normally only used for messages that DO contain tagged fields. All messages without tagged fields
+/// normally use [`read_versioned_array`] to comply with [KIP-482].
+///
+/// [KIP-482]: https://cwiki.apache.org/confluence/display/KAFKA/KIP-482%3A+The+Kafka+Protocol+should+Support+Optional+Tagged+Fields
 fn read_compact_versioned_array<R: Read, T: ReadVersionedType<R>>(
     reader: &mut R,
     version: ApiVersion,
@@ -172,6 +191,12 @@ fn read_compact_versioned_array<R: Read, T: ReadVersionedType<R>>(
     }
 }
 
+/// Write a compact array of versioned objects.
+///
+/// Note that this is normally only used for messages that DO contain tagged fields. All messages without tagged fields
+/// normally use [`write_versioned_array`] to comply with [KIP-482].
+///
+/// [KIP-482]: https://cwiki.apache.org/confluence/display/KAFKA/KIP-482%3A+The+Kafka+Protocol+should+Support+Optional+Tagged+Fields
 fn write_compact_versioned_array<W: Write, T: WriteVersionedType<W>>(
     writer: &mut W,
     version: ApiVersion,
