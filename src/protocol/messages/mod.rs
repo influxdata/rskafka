@@ -2,6 +2,7 @@
 //!
 //! # References
 //! - <https://kafka.apache.org/protocol#protocol_messages>
+//! - <https://cwiki.apache.org/confluence/display/KAFKA/KIP-482%3A+The+Kafka+Protocol+should+Support+Optional+Tagged+Fields>
 
 use std::io::{Read, Write};
 
@@ -10,14 +11,14 @@ use thiserror::Error;
 use super::{
     api_key::ApiKey,
     api_version::{ApiVersion, ApiVersionRange},
-    primitives::Int32,
+    primitives::{Int32, UnsignedVarint},
     traits::{ReadError, ReadType, WriteError, WriteType},
 };
 
 mod api_versions;
 pub use api_versions::*;
-mod create_topic;
-pub use create_topic::*;
+mod create_topics;
+pub use create_topics::*;
 mod fetch;
 pub use fetch::*;
 mod header;
@@ -96,16 +97,29 @@ pub trait RequestBody {
     /// This will be used to control which request and response header versions will be used.
     ///
     /// It's OK to specify a version here that is larger then the highest supported version.
-    const FIRST_TAGGED_FIELD_VERSION: ApiVersion;
+    const FIRST_TAGGED_FIELD_IN_REQUEST_VERSION: ApiVersion;
+
+    /// Normally the same as [`FIRST_TAGGED_FIELD_IN_REQUEST_VERSION`](Self::FIRST_TAGGED_FIELD_IN_REQUEST_VERSION) but
+    /// there are some special snowflakes.
+    const FIRST_TAGGED_FIELD_IN_RESPONSE_VERSION: ApiVersion;
 }
 
 impl<'a, T: RequestBody> RequestBody for &T {
     type ResponseBody = T::ResponseBody;
     const API_KEY: ApiKey = T::API_KEY;
     const API_VERSION_RANGE: ApiVersionRange = T::API_VERSION_RANGE;
-    const FIRST_TAGGED_FIELD_VERSION: ApiVersion = T::FIRST_TAGGED_FIELD_VERSION;
+    const FIRST_TAGGED_FIELD_IN_REQUEST_VERSION: ApiVersion =
+        T::FIRST_TAGGED_FIELD_IN_REQUEST_VERSION;
+    const FIRST_TAGGED_FIELD_IN_RESPONSE_VERSION: ApiVersion =
+        T::FIRST_TAGGED_FIELD_IN_RESPONSE_VERSION;
 }
 
+/// Read an array of versioned objects.
+///
+/// Note that this is normally only used for messages that DO NOT contain tagged fields. All messages with tagged fields
+/// normally use [`read_compact_versioned_array`] to comply with [KIP-482].
+///
+/// [KIP-482]: https://cwiki.apache.org/confluence/display/KAFKA/KIP-482%3A+The+Kafka+Protocol+should+Support+Optional+Tagged+Fields
 fn read_versioned_array<R: Read, T: ReadVersionedType<R>>(
     reader: &mut R,
     version: ApiVersion,
@@ -127,7 +141,12 @@ fn read_versioned_array<R: Read, T: ReadVersionedType<R>>(
     }
 }
 
-#[allow(dead_code)]
+/// Write an array of versioned objects.
+///
+/// Note that this is normally only used for messages that DO NOT contain tagged fields. All messages with tagged fields
+/// normally use [`write_compact_versioned_array`] to comply with [KIP-482].
+///
+/// [KIP-482]: https://cwiki.apache.org/confluence/display/KAFKA/KIP-482%3A+The+Kafka+Protocol+should+Support+Optional+Tagged+Fields
 fn write_versioned_array<W: Write, T: WriteVersionedType<W>>(
     writer: &mut W,
     version: ApiVersion,
@@ -138,6 +157,56 @@ fn write_versioned_array<W: Write, T: WriteVersionedType<W>>(
         Some(inner) => {
             let len = i32::try_from(inner.len()).map_err(WriteError::from)?;
             Int32(len).write(writer)?;
+
+            for element in inner {
+                element.write_versioned(writer, version)?
+            }
+
+            Ok(())
+        }
+    }
+}
+
+/// Read a compact array of versioned objects.
+///
+/// Note that this is normally only used for messages that DO contain tagged fields. All messages without tagged fields
+/// normally use [`read_versioned_array`] to comply with [KIP-482].
+///
+/// [KIP-482]: https://cwiki.apache.org/confluence/display/KAFKA/KIP-482%3A+The+Kafka+Protocol+should+Support+Optional+Tagged+Fields
+fn read_compact_versioned_array<R: Read, T: ReadVersionedType<R>>(
+    reader: &mut R,
+    version: ApiVersion,
+) -> Result<Option<Vec<T>>, ReadVersionedError> {
+    let len = UnsignedVarint::read(reader)?.0;
+    match len {
+        0 => Ok(None),
+        n => {
+            let len = (n - 1) as usize;
+            Ok(Some(
+                (0..len)
+                    .map(|_| T::read_versioned(reader, version))
+                    .collect::<Result<_, _>>()?,
+            ))
+        }
+    }
+}
+
+/// Write a compact array of versioned objects.
+///
+/// Note that this is normally only used for messages that DO contain tagged fields. All messages without tagged fields
+/// normally use [`write_versioned_array`] to comply with [KIP-482].
+///
+/// [KIP-482]: https://cwiki.apache.org/confluence/display/KAFKA/KIP-482%3A+The+Kafka+Protocol+should+Support+Optional+Tagged+Fields
+fn write_compact_versioned_array<W: Write, T: WriteVersionedType<W>>(
+    writer: &mut W,
+    version: ApiVersion,
+    data: Option<&[T]>,
+) -> Result<(), WriteVersionedError> {
+    match data {
+        None => Ok(UnsignedVarint(0).write(writer)?),
+        Some(inner) => {
+            let len = u64::try_from(inner.len() + 1).map_err(WriteError::from)?;
+            UnsignedVarint(len).write(writer)?;
 
             for element in inner {
                 element.write_versioned(writer, version)?
@@ -204,5 +273,36 @@ mod tests {
         assert!(read_versioned_array::<_, VersionTest>(&mut cursor, version)
             .unwrap()
             .is_none())
+    }
+
+    #[test]
+    fn test_read_write_compact_versioned() {
+        for len in [0, 6] {
+            for i in 0..3 {
+                let version = ApiVersion(Int16(i));
+                let test = VersionTest { version };
+                let input = vec![test; len];
+
+                let mut buffer = vec![];
+                write_compact_versioned_array(&mut buffer, version, Some(&input)).unwrap();
+
+                let mut cursor = std::io::Cursor::new(buffer);
+                let output = read_compact_versioned_array(&mut cursor, version)
+                    .unwrap()
+                    .unwrap();
+
+                assert_eq!(input, output);
+            }
+        }
+
+        let version = ApiVersion(Int16(0));
+        let mut buffer = vec![];
+        write_compact_versioned_array::<_, VersionTest>(&mut buffer, version, None).unwrap();
+        let mut cursor = std::io::Cursor::new(buffer);
+        assert!(
+            read_compact_versioned_array::<_, VersionTest>(&mut cursor, version)
+                .unwrap()
+                .is_none()
+        )
     }
 }

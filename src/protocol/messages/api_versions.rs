@@ -4,7 +4,9 @@ use crate::protocol::{
     api_key::ApiKey,
     api_version::{ApiVersion, ApiVersionRange},
     error::Error as ApiError,
-    messages::write_versioned_array,
+    messages::{
+        read_compact_versioned_array, write_compact_versioned_array, write_versioned_array,
+    },
     primitives::{CompactString, Int16, Int32, TaggedFields},
     traits::{ReadType, WriteType},
 };
@@ -55,7 +57,13 @@ impl RequestBody for ApiVersionsRequest {
     const API_KEY: ApiKey = ApiKey::ApiVersions;
     const API_VERSION_RANGE: ApiVersionRange =
         ApiVersionRange::new(ApiVersion(Int16(0)), ApiVersion(Int16(3)));
-    const FIRST_TAGGED_FIELD_VERSION: ApiVersion = ApiVersion(Int16(3));
+    const FIRST_TAGGED_FIELD_IN_REQUEST_VERSION: ApiVersion = ApiVersion(Int16(3));
+
+    // It seems version 3 actually doesn't use tagged fields during response, at least not for Kafka 3.
+    //
+    // rdkafka also does this, see
+    // https://github.com/edenhill/librdkafka/blob/2b76b65212e5efda213961d5f84e565038036270/src/rdkafka_broker.c#L1781-L1785
+    const FIRST_TAGGED_FIELD_IN_RESPONSE_VERSION: ApiVersion = ApiVersion(Int16(i16::MAX));
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -162,7 +170,11 @@ where
         assert!(v <= 3);
 
         let error_code = ApiError::new(Int16::read(reader)?);
-        let api_keys = read_versioned_array(reader, version)?.unwrap_or_default();
+        let api_keys = if v >= 3 {
+            read_compact_versioned_array(reader, version)?.unwrap_or_default()
+        } else {
+            read_versioned_array(reader, version)?.unwrap_or_default()
+        };
         let throttle_time_ms = (v >= 1).then(|| Int32::read(reader)).transpose()?;
         let tagged_fields = (v >= 3).then(|| TaggedFields::read(reader)).transpose()?;
 
@@ -191,7 +203,11 @@ where
         let error_code: Int16 = self.error_code.into();
         error_code.write(writer)?;
 
-        write_versioned_array(writer, version, Some(&self.api_keys))?;
+        if v >= 3 {
+            write_compact_versioned_array(writer, version, Some(&self.api_keys))?;
+        } else {
+            write_versioned_array(writer, version, Some(&self.api_keys))?;
+        }
 
         if v >= 1 {
             // defaults to "no throttle"
