@@ -1,11 +1,9 @@
+use async_trait::async_trait;
 use rand::prelude::*;
 use std::sync::Arc;
-use tracing::{debug, info, warn};
-
 use thiserror::Error;
-use tokio::io::BufStream;
-use tokio::sync::Mutex;
-use tracing::error;
+use tokio::{io::BufStream, sync::Mutex};
+use tracing::{debug, error, info, warn};
 
 use crate::backoff::{Backoff, BackoffConfig};
 use crate::connection::topology::BrokerTopology;
@@ -219,16 +217,34 @@ impl std::fmt::Debug for BrokerConnector {
     }
 }
 
-async fn metadata_request_loop<G, G1, H, H1>(
-    broker_override: Option<BrokerConnection>,
-    request: &MetadataRequest,
+#[async_trait]
+trait Connect {
+    async fn metadata_request(
+        &self,
+        request_params: &MetadataRequest,
+    ) -> Result<MetadataResponse, RequestError>;
+}
+
+#[async_trait]
+impl Connect for Messenger<BufStream<transport::Transport>> {
+    async fn metadata_request(
+        &self,
+        request_params: &MetadataRequest,
+    ) -> Result<MetadataResponse, RequestError> {
+        self.request(request_params).await
+    }
+}
+
+async fn metadata_request_loop<G, G1, C, H, H1>(
+    broker_override: Option<Arc<C>>,
+    request_params: &MetadataRequest,
     mut backoff: Backoff,
     get_cached_arbitrary_broker: G,
     invalidate_cached_arbitrary_broker: H,
 ) -> Result<MetadataResponse>
 where
     G: Fn() -> G1,
-    G1: std::future::Future<Output = Result<C>>,
+    G1: std::future::Future<Output = Result<Arc<C>>>,
     C: Connect,
     H: Fn() -> H1,
     H1: std::future::Future<Output = ()>,
@@ -240,7 +256,7 @@ where
             None => get_cached_arbitrary_broker().await?,
         };
 
-        let error = match broker.request(&request).await {
+        let error = match broker.metadata_request(&request_params).await {
             Ok(response) => break Ok(response),
             Err(e @ RequestError::Poisoned(_) | e @ RequestError::IO(_))
                 if broker_override.is_none() =>
@@ -271,6 +287,18 @@ where
 mod tests {
     use super::*;
 
+    struct FakeBroker {}
+
+    #[async_trait]
+    impl Connect for FakeBroker {
+        async fn metadata_request(
+            &self,
+            _request_params: &MetadataRequest,
+        ) -> Result<MetadataResponse, RequestError> {
+            Ok(arbitrary_metadata_response())
+        }
+    }
+
     #[tokio::test]
     async fn happy_cached_broker() {
         let metadata_request = arbitrary_metadata_request();
@@ -280,9 +308,11 @@ mod tests {
             None,
             &metadata_request,
             Backoff::new(&Default::default()),
-            || async { Ok(()) },
+            || async { Ok(Arc::new(FakeBroker {})) },
             || async {},
-        ).await.unwrap();
+        )
+        .await
+        .unwrap();
 
         assert_eq!(success_response, result)
     }
