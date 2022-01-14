@@ -286,8 +286,19 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::protocol::api_key::ApiKey;
 
-    struct FakeBroker {}
+    struct FakeBroker(Box<dyn Fn() -> Result<MetadataResponse, RequestError> + Sync>);
+
+    impl FakeBroker {
+        fn success() -> Self {
+            Self(Box::new(|| Ok(arbitrary_metadata_response())))
+        }
+
+        fn fatal_error() -> Self {
+            Self(Box::new(|| Err(arbitrary_fatal_error())))
+        }
+    }
 
     #[async_trait]
     impl Connect for FakeBroker {
@@ -295,7 +306,7 @@ mod tests {
             &self,
             _request_params: &MetadataRequest,
         ) -> Result<MetadataResponse, RequestError> {
-            Ok(arbitrary_metadata_response())
+            self.0()
         }
     }
 
@@ -308,13 +319,30 @@ mod tests {
             None,
             &metadata_request,
             Backoff::new(&Default::default()),
-            || async { Ok(Arc::new(FakeBroker {})) },
+            || async { Ok(Arc::new(FakeBroker::success())) },
             || async {},
         )
         .await
         .unwrap();
 
         assert_eq!(success_response, result)
+    }
+
+    #[tokio::test]
+    async fn fatal_error_cached_broker() {
+        let metadata_request = arbitrary_metadata_request();
+
+        let result = metadata_request_loop(
+            None,
+            &metadata_request,
+            Backoff::new(&Default::default()),
+            || async { Ok(Arc::new(FakeBroker::fatal_error())) },
+            || async {},
+        )
+        .await
+        .unwrap_err();
+
+        assert!(matches!(result, Error::Metadata(RequestError::NoVersionMatch { .. })));
     }
 
     fn arbitrary_metadata_request() -> MetadataRequest {
@@ -332,5 +360,9 @@ mod tests {
             controller_id: Default::default(),
             topics: Default::default(),
         }
+    }
+
+    fn arbitrary_fatal_error() -> RequestError {
+        RequestError::NoVersionMatch { api_key: ApiKey::Metadata }
     }
 }
