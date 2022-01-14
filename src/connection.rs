@@ -101,7 +101,7 @@ impl BrokerConnector {
         broker_override: Option<BrokerConnection>,
         topics: Option<Vec<String>>,
     ) -> Result<MetadataResponse> {
-        let mut backoff = Backoff::new(&self.backoff_config);
+        let backoff = Backoff::new(&self.backoff_config);
         let request = MetadataRequest {
             topics: topics.map(|t| {
                 t.into_iter()
@@ -111,38 +111,14 @@ impl BrokerConnector {
             allow_auto_topic_creation: None,
         };
 
-        let response = loop {
-            // Retrieve the broker within the loop, in case it is invalidated
-            let broker = match broker_override.as_ref() {
-                Some(b) => Arc::clone(b),
-                None => self.get_cached_arbitrary_broker().await?,
-            };
-
-            let error = match broker.request(&request).await {
-                Ok(response) => break response,
-                Err(e @ RequestError::Poisoned(_) | e @ RequestError::IO(_))
-                    if broker_override.is_none() =>
-                {
-                    self.invalidate_cached_arbitrary_broker().await;
-                    e
-                }
-                Err(error) => {
-                    error!(
-                        e=%error,
-                        "metadata request encountered fatal error",
-                    );
-                    return Err(Error::Metadata(error));
-                }
-            };
-
-            let backoff = backoff.next();
-            info!(
-                e=%error,
-                backoff_secs = backoff.as_secs(),
-                "metadata request encountered non-fatal error - backing off",
-            );
-            tokio::time::sleep(backoff).await;
-        };
+        let response = metadata_request_loop(
+            broker_override,
+            &request,
+            backoff,
+            || self.get_cached_arbitrary_broker(),
+            || self.invalidate_cached_arbitrary_broker(),
+        )
+        .await?;
 
         // Since the metadata request contains information about the cluster state, use it to update our view.
         self.topology.update(&response.brokers);
@@ -240,5 +216,52 @@ impl std::fmt::Debug for BrokerConnector {
             .field("tls_config", &tls_config)
             .field("max_message_size", &self.max_message_size)
             .finish()
+    }
+}
+
+async fn metadata_request_loop<G, G1, H, H1>(
+    broker_override: Option<BrokerConnection>,
+    request: &MetadataRequest,
+    mut backoff: Backoff,
+    get_cached_arbitrary_broker: G,
+    invalidate_cached_arbitrary_broker: H,
+) -> Result<MetadataResponse>
+where
+    G: Fn() -> G1,
+    G1: std::future::Future<Output = Result<BrokerConnection>>,
+    H: Fn() -> H1,
+    H1: std::future::Future<Output = ()>,
+{
+    loop {
+        // Retrieve the broker within the loop, in case it is invalidated
+        let broker = match broker_override.as_ref() {
+            Some(b) => Arc::clone(b),
+            None => get_cached_arbitrary_broker().await?,
+        };
+
+        let error = match broker.request(&request).await {
+            Ok(response) => break Ok(response),
+            Err(e @ RequestError::Poisoned(_) | e @ RequestError::IO(_))
+                if broker_override.is_none() =>
+            {
+                invalidate_cached_arbitrary_broker().await;
+                e
+            }
+            Err(error) => {
+                error!(
+                    e=%error,
+                    "metadata request encountered fatal error",
+                );
+                return Err(Error::Metadata(error));
+            }
+        };
+
+        let backoff = backoff.next();
+        info!(
+            e=%error,
+            backoff_secs = backoff.as_secs(),
+            "metadata request encountered non-fatal error - backing off",
+        );
+        tokio::time::sleep(backoff).await;
     }
 }
