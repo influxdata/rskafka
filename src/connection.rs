@@ -181,8 +181,8 @@ impl Connect for MessengerTransport {
 }
 
 #[async_trait]
-trait ArbitraryBrokerCache {
-    type C: Connect;
+trait ArbitraryBrokerCache: Send + Sync {
+    type C: Connect + Send + Sync;
 
     async fn get(&self) -> Result<Arc<Self::C>>;
 
@@ -282,7 +282,7 @@ mod tests {
     use crate::protocol::api_key::ApiKey;
     use std::sync::atomic::{AtomicBool, Ordering};
 
-    struct FakeBroker(Box<dyn Fn() -> Result<MetadataResponse, RequestError> + Sync>);
+    struct FakeBroker(Box<dyn Fn() -> Result<MetadataResponse, RequestError> + Send + Sync>);
 
     impl FakeBroker {
         fn success() -> Self {
