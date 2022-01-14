@@ -37,7 +37,8 @@ let client = Client::new_plain(vec![connection]).await.unwrap();
 
 // create a topic
 let topic = "my_topic";
-client.create_topic(
+let controller_client = client.controller_client().await.unwrap();
+controller_client.create_topic(
     topic,
     2,  // partitions
     1,  // replication factor
@@ -90,7 +91,7 @@ $ docker-compose -f docker-compose-redpanda.yml up
 in one session, and then run:
 
 ```console
-$ TEST_INTEGRATION=1 KAFKA_CONNECT=0.0.0.0:9092 cargo test
+$ TEST_INTEGRATION=1 KAFKA_CONNECT=0.0.0.0:9093 cargo test
 ```
 
 in another session.
@@ -106,7 +107,7 @@ $ docker-compose -f docker-compose-kafka.yml up
 in one session, and then run:
 
 ```console
-$ TEST_INTEGRATION=1 KAFKA_CONNECT=localhost:9093 cargo test
+$ TEST_INTEGRATION=1 KAFKA_CONNECT=localhost:9094 cargo test
 ```
 
 in another session.

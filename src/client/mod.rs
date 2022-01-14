@@ -3,21 +3,19 @@ use std::sync::Arc;
 use thiserror::Error;
 
 use crate::{
-    client::partition::PartitionClient,
-    connection::BrokerConnector,
-    protocol::{
-        messages::{CreateTopicRequest, CreateTopicsRequest},
-        primitives::*,
-    },
+    client::partition::PartitionClient, connection::BrokerConnector, protocol::primitives::Boolean,
     topic::Topic,
 };
 
 pub mod consumer;
+pub mod controller;
 pub mod error;
 pub mod partition;
 pub mod producer;
 
 use error::{Error, Result};
+
+use self::controller::ControllerClient;
 
 #[derive(Debug, Error)]
 pub enum ProduceError {
@@ -67,6 +65,11 @@ impl Client {
         Ok(Self { brokers })
     }
 
+    /// Returns a client for performing certain cluster-wide operations.
+    pub async fn controller_client(&self) -> Result<ControllerClient> {
+        Ok(ControllerClient::new(Arc::clone(&self.brokers)))
+    }
+
     /// Returns a client for performing operations on a specific partition
     pub async fn partition_client(
         &self,
@@ -97,48 +100,5 @@ impl Client {
                     .collect(),
             })
             .collect())
-    }
-
-    /// Create a topic
-    pub async fn create_topic(
-        &self,
-        name: impl Into<String> + Send,
-        num_partitions: i32,
-        replication_factor: i16,
-    ) -> Result<()> {
-        let broker = self.brokers.get_arbitrary_cached_broker().await?;
-        let response = broker
-            .request(CreateTopicsRequest {
-                topics: vec![CreateTopicRequest {
-                    name: String_(name.into()),
-                    num_partitions: Int32(num_partitions),
-                    replication_factor: Int16(replication_factor),
-                    assignments: vec![],
-                    configs: vec![],
-                    tagged_fields: None,
-                }],
-                // TODO: Expose as configuration parameter
-                timeout_ms: Int32(5_000),
-                validate_only: None,
-                tagged_fields: None,
-            })
-            .await?;
-
-        if response.topics.len() != 1 {
-            return Err(Error::InvalidResponse(format!(
-                "Expected a single topic in response, got {}",
-                response.topics.len()
-            )));
-        }
-
-        let topic = response.topics.into_iter().next().unwrap();
-
-        match topic.error {
-            None => Ok(()),
-            Some(protocol_error) => match topic.error_message {
-                Some(NullableString(Some(msg))) => Err(Error::ServerError(protocol_error, msg)),
-                _ => Err(Error::ServerError(protocol_error, Default::default())),
-            },
-        }
     }
 }
