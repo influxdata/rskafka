@@ -1,6 +1,42 @@
 //! Building blocks for a more advanced producer chain.
 //!
+//! This module provides you:
+//!
+//! - **lingering:** Control how long your data should wait until being submitted.
+//! - **aggregation:** Control how much data should be accumulated on the client side.
+//! - **transformation:** Map your own data types to [`Record`]s after they have been aggregated.
+//!
+//! # Data Flow
+//!
+//! ```text
+//!                 +--------------+                +-------------+           +-----------------+
+//! ---(MyData)---->|              |                |             |           |                 |
+//! <-(MyStatus)-o  |     impl     |--(MyAggData)-->|    impl     |-(Record)->| PartitionClient |
+//!              ║  |  Aggregator  |                | Transformer |           |                 |
+//! ---(MyData)---->|              |                |             |           +-----------------+
+//! <-(MyStatus)-o  |              |                +-------------+                    |
+//!              ║  |              |                       |                           |
+//!      ...     ║  |              |                       |                           |
+//!              ║  |              |                       |                           |
+//! ---(MyData)---->|              |                       |                           |
+//! <-(MyStatus)-o  |              |                       |                           |
+//!              ║  +--------------+                       |                           |
+//!              ║         |                               |                           |
+//!              ║         V                               V                           |
+//!              ║  +--------------+                +-------------+                    |
+//!              ║  |              |                |             |                    |
+//!              o==|     impl     |<-(MyAggStatus)-|    impl     |<-(Offsets)---------o
+//!                 |    Status-   |                |   Status-   |
+//!                 | Deaggregator |                |   Builder   |
+//!                 |              |                |             |
+//!                 +--------------+                +-------------+
+//! ```
+//!
 //! # Usage
+//!
+//! ## [`Record`] Batching
+//! This example shows you how you can send [`Record`]s in batches:
+//!
 //! ```no_run
 //! # async fn test() {
 //! use rskafka::{
@@ -46,20 +82,168 @@
 //! producer.produce(record.clone()).await.unwrap();
 //! # }
 //! ```
+//!
+//! ## Custom Data Types
+//! This example demonstrates the usage of a custom data type:
+//!
+//! ```no_run
+//! # async fn test() {
+//! use rskafka::{
+//!     client::{
+//!         Client,
+//!         producer::{
+//!             aggregator::{
+//!                 Aggregator,
+//!                 Error as AggError,
+//!                 StatusDeaggregator,
+//!             },
+//!             transformer::{
+//!                 Error as TError,
+//!                 StatusBuilder,
+//!                 Transformer,
+//!             },
+//!             BatchProducerBuilder,
+//!         },
+//!     },
+//!     record::Record,
+//! };
+//! use time::OffsetDateTime;
+//! use std::{
+//!     collections::BTreeMap,
+//!     sync::Arc,
+//!     time::Duration,
+//! };
+//!
+//! // This is the custom data type that we want to aggregate
+//! struct Payload {
+//!     inner: Vec<u8>,
+//! }
+//!
+//! // Define an aggregator
+//! #[derive(Default)]
+//! struct MyAggregator {
+//!     data: Vec<u8>,
+//! }
+//!
+//! impl Aggregator for MyAggregator {
+//!     type Input = Payload;
+//!     type Output = Payload;
+//!     type StatusDeaggregator = MyStatusDeagg;
+//!
+//!     fn try_push(
+//!         &mut self,
+//!         record: Self::Input,
+//!         tag: u64,
+//!     ) -> Result<Option<Self::Input>, AggError> {
+//!         // accumulate up to 1Kb of data
+//!         if record.inner.len() + self.data.len() > 1024 {
+//!             return Ok(Some(record));
+//!         }
+//!
+//!         let mut record = record;
+//!         self.data.append(&mut record.inner);
+//!
+//!         Ok(None)
+//!     }
+//!
+//!     fn flush(&mut self) -> (Self::Output, Self::StatusDeaggregator) {
+//!         (
+//!             Payload {
+//!                 inner: std::mem::take(&mut self.data),
+//!             },
+//!             MyStatusDeagg {}
+//!         )
+//!     }
+//! }
+//!
+//! #[derive(Debug)]
+//! struct MyStatusDeagg {}
+//!
+//! impl StatusDeaggregator for MyStatusDeagg {
+//!     type Input = ();
+//!     type Status = ();
+//!
+//!     fn build(&self, input: Self::Input, tag: u64) -> Result<Self::Status, AggError> {
+//!         // don't care about the offsets
+//!         Ok(())
+//!     }
+//! }
+//!
+//! // a transformer for our data
+//! struct MyTransformer {}
+//!
+//! impl Transformer for MyTransformer {
+//!     type Input = Payload;
+//!     type StatusBuilder = MyStatusBuilder;
+//!
+//!     fn transform(
+//!         &self,
+//!         input: Self::Input,
+//!     ) -> Result<(Vec<Record>, Self::StatusBuilder), TError> {
+//!         let records = vec![
+//!             Record {
+//!                 key: b"".to_vec(),
+//!                 value: input.inner,
+//!                 headers: BTreeMap::from([
+//!                     ("foo".to_owned(), b"bar".to_vec()),
+//!                 ]),
+//!                 timestamp: OffsetDateTime::now_utc(),
+//!             },
+//!         ];
+//!
+//!         Ok((records, MyStatusBuilder {}))
+//!     }
+//! }
+//!
+//! struct MyStatusBuilder {}
+//!
+//! impl StatusBuilder for MyStatusBuilder {
+//!     type Status = ();
+//!
+//!     fn build(&self, res: Vec<i64>) -> Result<Self::Status, TError> {
+//!         // don't care about the offsets
+//!         Ok(())
+//!     }
+//! }
+//!
+//! // get partition client
+//! let connection = "localhost:9093".to_owned();
+//! let client = Client::new_plain(vec![connection]).await.unwrap();
+//! let partition_client = Arc::new(
+//!     client.partition_client("my_topic", 0).await.unwrap()
+//! );
+//!
+//! // construct batch producer
+//! let producer = BatchProducerBuilder::new(partition_client)
+//!     .with_linger(Duration::from_secs(2))
+//!     .build_with_transformer(
+//!         MyAggregator::default(),
+//!         MyTransformer {},
+//!     );
+//!
+//! // produce data
+//! let payload = Payload {
+//!     inner: b"hello kafka".to_vec(),
+//! };
+//! producer.produce(payload).await.unwrap();
+//! # }
+//! ```
 use std::sync::Arc;
 use std::time::Duration;
 
 use futures::future::BoxFuture;
-use futures::{pin_mut, FutureExt, TryFutureExt};
+use futures::{pin_mut, FutureExt};
 use thiserror::Error;
 use tokio::sync::Mutex;
 use tracing::{debug, error, trace};
 
+use crate::client::producer::transformer::StatusBuilder;
 use crate::client::{error::Error as ClientError, partition::PartitionClient};
 use crate::record::Record;
 
 pub mod aggregator;
 mod broadcast;
+pub mod transformer;
 
 #[derive(Debug, Error)]
 pub enum Error {
@@ -71,6 +255,9 @@ pub enum Error {
 
     #[error("Input too large for aggregator")]
     TooLarge,
+
+    #[error("Transformer error: {0}")]
+    Transformer(#[from] Arc<transformer::Error>),
 }
 
 pub type Result<T, E = Error> = std::result::Result<T, E>;
@@ -102,13 +289,29 @@ impl BatchProducerBuilder {
         Self { linger, ..self }
     }
 
-    pub fn build<A>(self, aggregator: A) -> BatchProducer<A> {
+    pub fn build<A>(self, aggregator: A) -> BatchProducer<A, transformer::IdentityTransformer>
+    where
+        A: aggregator::Aggregator<Output = Vec<Record>>,
+        A::StatusDeaggregator: aggregator::StatusDeaggregator<Input = Vec<i64>>,
+    {
+        self.build_with_transformer(aggregator, transformer::IdentityTransformer::default())
+    }
+
+    pub fn build_with_transformer<A, T>(self, aggregator: A, transformer: T) -> BatchProducer<A, T>
+    where
+        A: aggregator::Aggregator,
+        T: transformer::Transformer<Input = A::Output>,
+        A::StatusDeaggregator:
+            aggregator::StatusDeaggregator<Input = <T as transformer::TransformerStatus>::Status>,
+    {
         BatchProducer {
             linger: self.linger,
             client: self.client,
             inner: Mutex::new(ProducerInner {
                 aggregator,
+                transformer,
                 result_slot: Default::default(),
+                tag_counter: 0,
             }),
         }
     }
@@ -116,12 +319,12 @@ impl BatchProducerBuilder {
 
 // A trait wrapper to allow mocking
 trait ProducerClient: std::fmt::Debug + Send + Sync {
-    fn produce(&self, records: Vec<Record>) -> BoxFuture<'_, Result<(), ClientError>>;
+    fn produce(&self, records: Vec<Record>) -> BoxFuture<'_, Result<Vec<i64>, ClientError>>;
 }
 
 impl ProducerClient for PartitionClient {
-    fn produce(&self, records: Vec<Record>) -> BoxFuture<'_, Result<(), ClientError>> {
-        Box::pin(self.produce(records).map_ok(|_| ()))
+    fn produce(&self, records: Vec<Record>) -> BoxFuture<'_, Result<Vec<i64>, ClientError>> {
+        Box::pin(self.produce(records))
     }
 }
 
@@ -135,25 +338,130 @@ impl ProducerClient for PartitionClient {
 ///
 /// [`Aggregator`]: aggregator::Aggregator
 #[derive(Debug)]
-pub struct BatchProducer<A> {
+pub struct BatchProducer<A, T>
+where
+    A: aggregator::Aggregator,
+    T: transformer::Transformer<Input = A::Output>,
+    A::StatusDeaggregator:
+        aggregator::StatusDeaggregator<Input = <T as transformer::TransformerStatus>::Status>,
+{
     linger: Duration,
 
     client: Arc<dyn ProducerClient>,
 
-    inner: Mutex<ProducerInner<A>>,
+    inner: Mutex<ProducerInner<A, T>>,
 }
 
 #[derive(Debug)]
-struct ProducerInner<A> {
-    result_slot: broadcast::BroadcastOnce<Result<(), Arc<ClientError>>>,
-
-    aggregator: A,
+struct AggregatedStatus<A, T>
+where
+    A: aggregator::Aggregator,
+    T: transformer::Transformer<Input = A::Output>,
+    A::StatusDeaggregator:
+        aggregator::StatusDeaggregator<Input = <T as transformer::TransformerStatus>::Status>,
+{
+    aggregated_status:
+        <<T as transformer::Transformer>::StatusBuilder as transformer::StatusBuilder>::Status,
+    status_builder: <A as aggregator::Aggregator>::StatusDeaggregator,
 }
 
-impl<A> BatchProducer<A>
+impl<A, T> AggregatedStatus<A, T>
 where
-    A: aggregator::Aggregator<Output = Vec<Record>> + Send,
-    <A as aggregator::Aggregator>::Input: Send,
+    A: aggregator::Aggregator,
+    T: transformer::Transformer<Input = A::Output>,
+    A::StatusDeaggregator:
+        aggregator::StatusDeaggregator<Input = <T as transformer::TransformerStatus>::Status>,
+{
+    fn extract(
+        &self,
+        tag: u64,
+    ) -> Result<<A as aggregator::AggregatorStatus>::Status, aggregator::Error> {
+        use self::aggregator::StatusDeaggregator;
+
+        self.status_builder
+            .build(self.aggregated_status.clone(), tag)
+    }
+}
+
+type SharedAggregatedStatus<A, T> = Arc<parking_lot::Mutex<AggregatedStatus<A, T>>>;
+
+#[derive(Debug, Clone)]
+enum AggregatedError {
+    Client(Arc<ClientError>),
+    Transformer(Arc<transformer::Error>),
+}
+
+#[derive(Debug)]
+struct AggregatedResult<A, T>
+where
+    A: aggregator::Aggregator,
+    T: transformer::Transformer<Input = A::Output>,
+    A::StatusDeaggregator:
+        aggregator::StatusDeaggregator<Input = <T as transformer::TransformerStatus>::Status>,
+{
+    inner: Result<SharedAggregatedStatus<A, T>, AggregatedError>,
+}
+
+impl<A, T> AggregatedResult<A, T>
+where
+    A: aggregator::Aggregator,
+    T: transformer::Transformer<Input = A::Output>,
+    A::StatusDeaggregator:
+        aggregator::StatusDeaggregator<Input = <T as transformer::TransformerStatus>::Status>,
+{
+    fn extract(&self, tag: u64) -> Result<<A as aggregator::AggregatorStatus>::Status, Error> {
+        match &self.inner {
+            Ok(status) => match status.lock().extract(tag) {
+                Ok(status) => Ok(status),
+                Err(e) => Err(Error::Aggregator(e)),
+            },
+            Err(AggregatedError::Client(client_error)) => {
+                Err(Error::Client(Arc::clone(client_error)))
+            }
+            Err(AggregatedError::Transformer(client_error)) => {
+                Err(Error::Transformer(Arc::clone(client_error)))
+            }
+        }
+    }
+}
+
+impl<A, T> Clone for AggregatedResult<A, T>
+where
+    A: aggregator::Aggregator,
+    T: transformer::Transformer<Input = A::Output>,
+    A::StatusDeaggregator:
+        aggregator::StatusDeaggregator<Input = <T as transformer::TransformerStatus>::Status>,
+{
+    fn clone(&self) -> Self {
+        Self {
+            inner: self.inner.clone(),
+        }
+    }
+}
+
+#[derive(Debug)]
+struct ProducerInner<A, T>
+where
+    A: aggregator::Aggregator,
+    T: transformer::Transformer<Input = A::Output>,
+    A::StatusDeaggregator:
+        aggregator::StatusDeaggregator<Input = <T as transformer::TransformerStatus>::Status>,
+{
+    result_slot: broadcast::BroadcastOnce<AggregatedResult<A, T>>,
+
+    aggregator: A,
+
+    transformer: T,
+
+    tag_counter: u64,
+}
+
+impl<A, T> BatchProducer<A, T>
+where
+    A: aggregator::Aggregator,
+    T: transformer::Transformer<Input = A::Output>,
+    A::StatusDeaggregator:
+        aggregator::StatusDeaggregator<Input = <T as transformer::TransformerStatus>::Status>,
 {
     /// Write `data` to this [`BatchProducer`]
     ///
@@ -165,21 +473,29 @@ where
     /// The returned future is not cancellation safe, if it is dropped the record
     /// may or may not be published
     ///
-    pub async fn produce(&self, data: A::Input) -> Result<()> {
-        let result_slot = {
+    pub async fn produce(
+        &self,
+        data: A::Input,
+    ) -> Result<<A as aggregator::AggregatorStatus>::Status> {
+        let (result_slot, tag) = {
             // Try to add the record to the aggregator
             let mut inner = self.inner.lock().await;
-            if let Some(data) = inner.aggregator.try_push(data)? {
+
+            let tag = inner.tag_counter;
+            inner.tag_counter += 1;
+
+            if let Some(data) = inner.aggregator.try_push(data, tag)? {
                 debug!("Insufficient capacity in aggregator - flushing");
 
                 Self::flush(&mut inner, self.client.as_ref()).await;
-                if inner.aggregator.try_push(data)?.is_some() {
+                if inner.aggregator.try_push(data, tag)?.is_some() {
                     error!("Record too large for aggregator");
                     return Err(Error::TooLarge);
                 }
             }
+
             // Get a future that completes when the record is published
-            inner.result_slot.receive()
+            (inner.result_slot.receive(), tag)
         };
 
         let linger = tokio::time::sleep(self.linger).fuse();
@@ -187,7 +503,7 @@ where
         pin_mut!(result_slot);
 
         futures::select! {
-            r = result_slot => return Ok(r?),
+            r = result_slot => return r.extract(tag),
             _ = linger => {}
         }
 
@@ -200,7 +516,7 @@ where
         // - the linger expired "simultaneously" with the publish
         // - the linger expired but another thread triggered the flush
         if let Some(r) = result_slot.peek() {
-            return Ok(r.clone()?);
+            return r.extract(tag);
         }
 
         debug!("Linger expired - flushing");
@@ -208,15 +524,27 @@ where
         // Flush data
         Self::flush(&mut inner, self.client.as_ref()).await;
 
-        Ok(result_slot.now_or_never().expect("just flushed")?)
+        result_slot
+            .now_or_never()
+            .expect("just flushed")
+            .extract(tag)
     }
 
     /// Flushes out the data from the aggregator, publishes the result to the result slot,
     /// and creates a fresh result slot for future writes to use
-    async fn flush(inner: &mut ProducerInner<A>, client: &dyn ProducerClient) {
+    async fn flush(inner: &mut ProducerInner<A, T>, client: &dyn ProducerClient) {
         trace!("Flushing batch producer");
 
-        let output = inner.aggregator.flush();
+        let (output, status_builder_1) = inner.aggregator.flush();
+        let (output, status_builder_2) = match inner.transformer.transform(output) {
+            Ok(t) => t,
+            Err(e) => {
+                let slot = std::mem::take(&mut inner.result_slot);
+                let inner = Err(AggregatedError::Transformer(Arc::new(e)));
+                slot.broadcast(AggregatedResult { inner });
+                return;
+            }
+        };
         if output.is_empty() {
             return;
         }
@@ -226,10 +554,29 @@ where
         // Reset result slot
         let slot = std::mem::take(&mut inner.result_slot);
 
-        match r {
-            Ok(_) => slot.broadcast(Ok(())),
-            Err(e) => slot.broadcast(Err(Arc::new(e))),
+        let status = match r {
+            Ok(status) => status,
+            Err(e) => {
+                let inner = Err(AggregatedError::Client(Arc::new(e)));
+                slot.broadcast(AggregatedResult { inner });
+                return;
+            }
         };
+
+        let r = status_builder_2.build(status);
+
+        let inner = match r {
+            Ok(status) => {
+                let aggregated_status = AggregatedStatus {
+                    aggregated_status: status,
+                    status_builder: status_builder_1,
+                };
+                Ok(Arc::new(parking_lot::Mutex::new(aggregated_status)))
+            }
+            Err(e) => Err(AggregatedError::Transformer(Arc::new(e))),
+        };
+
+        slot.broadcast(AggregatedResult { inner })
     }
 }
 
@@ -251,7 +598,7 @@ mod tests {
     }
 
     impl ProducerClient for MockClient {
-        fn produce(&self, records: Vec<Record>) -> BoxFuture<'_, Result<(), ClientError>> {
+        fn produce(&self, records: Vec<Record>) -> BoxFuture<'_, Result<Vec<i64>, ClientError>> {
             Box::pin(async move {
                 tokio::time::sleep(self.delay).await;
 
@@ -259,8 +606,13 @@ mod tests {
                     return Err(ClientError::ServerError(e, "".to_string()));
                 }
 
-                self.batch_sizes.lock().push(records.len());
-                Ok(())
+                let mut batch_sizes = self.batch_sizes.lock();
+                let offset_base = batch_sizes.iter().sum::<usize>();
+                let offsets = (0..records.len())
+                    .map(|x| (x + offset_base) as i64)
+                    .collect();
+                batch_sizes.push(records.len());
+                Ok(offsets)
             })
         }
     }
@@ -297,11 +649,23 @@ mod tests {
             futures.push(producer.produce(record.clone()));
             futures.push(producer.produce(record.clone()));
 
-            let assert_ok = |a: Result<Option<Result<_, _>>, _>| a.unwrap().unwrap().unwrap();
+            let assert_ok = |a: Result<Option<Result<_, _>>, _>, expected: i64| {
+                let offset = a
+                    .expect("no timeout")
+                    .expect("Some future left")
+                    .expect("no producer error");
+                assert_eq!(offset, expected);
+            };
 
             // First two publishes should be ok
-            assert_ok(tokio::time::timeout(Duration::from_millis(10), futures.next()).await);
-            assert_ok(tokio::time::timeout(Duration::from_millis(10), futures.next()).await);
+            assert_ok(
+                tokio::time::timeout(Duration::from_millis(10), futures.next()).await,
+                0,
+            );
+            assert_ok(
+                tokio::time::timeout(Duration::from_millis(10), futures.next()).await,
+                1,
+            );
 
             // Third should linger
             tokio::time::timeout(Duration::from_millis(10), futures.next())
@@ -311,7 +675,7 @@ mod tests {
             assert_eq!(client.batch_sizes.lock().as_slice(), &[2]);
 
             // Should publish third record after linger expires
-            assert_ok(tokio::time::timeout(linger * 2, futures.next()).await);
+            assert_ok(tokio::time::timeout(linger * 2, futures.next()).await, 2);
             assert_eq!(client.batch_sizes.lock().as_slice(), &[2, 1]);
         }
     }
