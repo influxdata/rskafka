@@ -1,5 +1,6 @@
 use async_trait::async_trait;
 use rand::prelude::*;
+use std::ops::ControlFlow;
 use std::sync::Arc;
 use thiserror::Error;
 use tokio::{io::BufStream, sync::Mutex};
@@ -248,38 +249,35 @@ async fn metadata_request_loop<A>(
 where
     A: ArbitraryBrokerCache,
 {
-    loop {
-        // Retrieve the broker within the loop, in case it is invalidated
-        let broker = match broker_override.as_ref() {
-            Some(b) => Arc::clone(b),
-            None => arbitrary_broker_cache.get().await?,
-        };
+    backoff
+        .backy_offy("metadata", || async {
+            // Retrieve the broker within the loop, in case it is invalidated
+            let broker = match broker_override.as_ref() {
+                Some(b) => Arc::clone(b),
+                None => match arbitrary_broker_cache.get().await {
+                    Ok(inner) => inner,
+                    Err(e) => return ControlFlow::Break(Err(e)),
+                },
+            };
 
-        let error = match broker.metadata_request(&request_params).await {
-            Ok(response) => break Ok(response),
-            Err(e @ RequestError::Poisoned(_) | e @ RequestError::IO(_))
-                if broker_override.is_none() =>
-            {
-                arbitrary_broker_cache.invalidate().await;
-                e
+            match broker.metadata_request(&request_params).await {
+                Ok(response) => ControlFlow::Break(Ok(response)),
+                Err(e @ RequestError::Poisoned(_) | e @ RequestError::IO(_))
+                    if broker_override.is_none() =>
+                {
+                    arbitrary_broker_cache.invalidate().await;
+                    ControlFlow::Continue(e)
+                }
+                Err(error) => {
+                    error!(
+                        e=%error,
+                        "metadata request encountered fatal error",
+                    );
+                    ControlFlow::Break(Err(Error::Metadata(error)))
+                }
             }
-            Err(error) => {
-                error!(
-                    e=%error,
-                    "metadata request encountered fatal error",
-                );
-                return Err(Error::Metadata(error));
-            }
-        };
-
-        let backoff = backoff.next();
-        info!(
-            e=%error,
-            backoff_secs = backoff.as_secs(),
-            "metadata request encountered non-fatal error - backing off",
-        );
-        tokio::time::sleep(backoff).await;
-    }
+        })
+        .await
 }
 
 #[cfg(test)]
