@@ -118,14 +118,6 @@ impl BrokerConnector {
         Ok(response)
     }
 
-    /// Invalidates the cached arbitrary broker.
-    ///
-    /// The next call to `[BrokerConnector::get_cached_arbitrary_broker]` will get a new connection
-    pub async fn invalidate_cached_arbitrary_broker(&self) {
-        debug!("Invalidating cached arbitrary broker");
-        self.cached_arbitrary_broker.lock().await.take();
-    }
-
     /// Returns a new connection to the broker with the provided id
     pub async fn connect(&self, broker_id: i32) -> Result<Option<BrokerConnection>> {
         match self.topology.get_broker_url(broker_id).await {
@@ -149,48 +141,6 @@ impl BrokerConnector {
         ));
         messenger.sync_versions().await?;
         Ok(messenger)
-    }
-
-    /// Gets a cached [`BrokerConnection`] to any broker
-    pub async fn get_cached_arbitrary_broker(&self) -> Result<BrokerConnection> {
-        let mut current_broker = self.cached_arbitrary_broker.lock().await;
-        if let Some(broker) = &*current_broker {
-            return Ok(Arc::clone(broker));
-        }
-
-        let mut brokers = if self.topology.is_empty() {
-            self.bootstrap_brokers.clone()
-        } else {
-            self.topology.get_broker_urls()
-        };
-
-        // Randomise search order to encourage different clients to choose different brokers
-        brokers.shuffle(&mut thread_rng());
-
-        let mut backoff = Backoff::new(&self.backoff_config);
-
-        loop {
-            for broker in &brokers {
-                let connection = match self.connect_impl(None, broker).await {
-                    Ok(transport) => transport,
-                    Err(e) => {
-                        warn!(%e, "Failed to connect to broker");
-                        continue;
-                    }
-                };
-
-                *current_broker = Some(Arc::clone(&connection));
-
-                return Ok(connection);
-            }
-
-            let backoff = backoff.next();
-            warn!(
-                backoff_secs = backoff.as_secs(),
-                "Failed to connect to any broker, backing off",
-            );
-            tokio::time::sleep(backoff).await;
-        }
     }
 }
 
@@ -243,11 +193,49 @@ impl ArbitraryBrokerCache for &BrokerConnector {
     type C = MessengerTransport;
 
     async fn get(&self) -> Result<Arc<Self::C>> {
-        self.get_cached_arbitrary_broker().await
+        let mut current_broker = self.cached_arbitrary_broker.lock().await;
+        if let Some(broker) = &*current_broker {
+            return Ok(Arc::clone(broker));
+        }
+
+        let mut brokers = if self.topology.is_empty() {
+            self.bootstrap_brokers.clone()
+        } else {
+            self.topology.get_broker_urls()
+        };
+
+        // Randomise search order to encourage different clients to choose different brokers
+        brokers.shuffle(&mut thread_rng());
+
+        let mut backoff = Backoff::new(&self.backoff_config);
+
+        loop {
+            for broker in &brokers {
+                let connection = match self.connect_impl(None, broker).await {
+                    Ok(transport) => transport,
+                    Err(e) => {
+                        warn!(%e, "Failed to connect to broker");
+                        continue;
+                    }
+                };
+
+                *current_broker = Some(Arc::clone(&connection));
+
+                return Ok(connection);
+            }
+
+            let backoff = backoff.next();
+            warn!(
+                backoff_secs = backoff.as_secs(),
+                "Failed to connect to any broker, backing off",
+            );
+            tokio::time::sleep(backoff).await;
+        }
     }
 
     async fn invalidate(&self) {
-        self.invalidate_cached_arbitrary_broker().await
+        debug!("Invalidating cached arbitrary broker");
+        self.cached_arbitrary_broker.lock().await.take();
     }
 }
 
