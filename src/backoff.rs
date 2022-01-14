@@ -70,7 +70,7 @@ impl Backoff {
     }
 
     /// Returns the next backoff duration to wait for
-    pub fn next(&mut self) -> Duration {
+    fn next(&mut self) -> Duration {
         let range = self.init_backoff..(self.next_backoff_secs * self.base);
 
         let rand_backoff = match self.rng.as_mut() {
