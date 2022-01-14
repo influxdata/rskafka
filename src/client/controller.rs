@@ -1,5 +1,5 @@
+use std::ops::ControlFlow;
 use std::sync::Arc;
-
 use tokio::sync::Mutex;
 use tracing::{debug, error, info};
 
@@ -89,42 +89,36 @@ impl ControllerClient {
     {
         let mut backoff = Backoff::new(&self.backoff_config);
 
-        loop {
-            let error = match f().await {
-                Ok(v) => return Ok(v),
-                Err(e) => e,
-            };
+        backoff
+            .backy_offy(request_name, || async {
+                let error = match f().await {
+                    Ok(v) => return ControlFlow::Break(Ok(v)),
+                    Err(e) => e,
+                };
 
-            match error {
-                // broken connection
-                Error::Request(RequestError::Poisoned(_) | RequestError::IO(_))
-                | Error::Connection(_) => self.invalidate_cached_controller_broker().await,
+                match error {
+                    // broken connection
+                    Error::Request(RequestError::Poisoned(_) | RequestError::IO(_))
+                    | Error::Connection(_) => self.invalidate_cached_controller_broker().await,
 
-                // our broker is actually not the controller
-                Error::ServerError(ProtocolError::NotController, _) => {
-                    self.invalidate_cached_controller_broker().await;
+                    // our broker is actually not the controller
+                    Error::ServerError(ProtocolError::NotController, _) => {
+                        self.invalidate_cached_controller_broker().await;
+                    }
+
+                    // fatal
+                    _ => {
+                        error!(
+                            e=%error,
+                            request_name,
+                            "request encountered fatal error",
+                        );
+                        return ControlFlow::Break(Err(error));
+                    }
                 }
-
-                // fatal
-                _ => {
-                    error!(
-                        e=%error,
-                        request_name,
-                        "request encountered fatal error",
-                    );
-                    return Err(error);
-                }
-            }
-
-            let backoff = backoff.next();
-            info!(
-                e=%error,
-                request_name,
-                backoff_secs=backoff.as_secs(),
-                "request encountered non-fatal error - backing off",
-            );
-            tokio::time::sleep(backoff).await;
-        }
+                ControlFlow::Continue(request_name)
+            })
+            .await
     }
 
     /// Gets a cached [`BrokerConnection`] to any cluster controller.
