@@ -287,6 +287,7 @@ where
 mod tests {
     use super::*;
     use crate::protocol::api_key::ApiKey;
+    use std::sync::atomic::{AtomicBool, Ordering};
 
     struct FakeBroker(Box<dyn Fn() -> Result<MetadataResponse, RequestError> + Sync>);
 
@@ -297,6 +298,10 @@ mod tests {
 
         fn fatal_error() -> Self {
             Self(Box::new(|| Err(arbitrary_fatal_error())))
+        }
+
+        fn recoverable() -> Self {
+            Self(Box::new(|| Err(arbitrary_recoverable_error())))
         }
     }
 
@@ -342,7 +347,51 @@ mod tests {
         .await
         .unwrap_err();
 
-        assert!(matches!(result, Error::Metadata(RequestError::NoVersionMatch { .. })));
+        assert!(matches!(
+            result,
+            Error::Metadata(RequestError::NoVersionMatch { .. })
+        ));
+    }
+
+    #[tokio::test]
+    async fn sad_cached_broker() {
+        // Start with always returning a broker that fails.
+        let succeed = Arc::new(AtomicBool::new(false));
+
+        let metadata_request = arbitrary_metadata_request();
+        let success_response = arbitrary_metadata_response();
+
+        let result = metadata_request_loop(
+            None,
+            &metadata_request,
+            Backoff::new(&Default::default()),
+            {
+                let succeed = Arc::clone(&succeed);
+                move || {
+                    let succeed = Arc::clone(&succeed);
+                    async move {
+                        Ok(Arc::new(if succeed.load(Ordering::SeqCst) {
+                            FakeBroker::success()
+                        } else {
+                            FakeBroker::recoverable()
+                        }))
+                    }
+                }
+            },
+            // If invalidate_cached_arbitrary_broker is called, switch to returning a broker
+            // that always succeeds.
+            {
+                let succeed = Arc::clone(&succeed);
+                move || {
+                    let succeed = Arc::clone(&succeed);
+                    async move { succeed.store(true, Ordering::SeqCst) }
+                }
+            },
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(success_response, result)
     }
 
     fn arbitrary_metadata_request() -> MetadataRequest {
@@ -363,6 +412,12 @@ mod tests {
     }
 
     fn arbitrary_fatal_error() -> RequestError {
-        RequestError::NoVersionMatch { api_key: ApiKey::Metadata }
+        RequestError::NoVersionMatch {
+            api_key: ApiKey::Metadata,
+        }
+    }
+
+    fn arbitrary_recoverable_error() -> RequestError {
+        RequestError::IO(std::io::Error::from(std::io::ErrorKind::UnexpectedEof))
     }
 }
