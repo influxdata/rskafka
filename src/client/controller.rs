@@ -96,13 +96,16 @@ impl ControllerClient {
             };
 
             match error {
+                // broken connection
                 Error::Request(RequestError::Poisoned(_) | RequestError::IO(_))
                 | Error::Connection(_) => self.invalidate_cached_controller_broker().await,
-                Error::ServerError(ProtocolError::LeaderNotAvailable, _) => {}
-                Error::ServerError(ProtocolError::OffsetNotAvailable, _) => {}
+
+                // our broker is actually not the controller
                 Error::ServerError(ProtocolError::NotController, _) => {
                     self.invalidate_cached_controller_broker().await;
                 }
+
+                // fatal
                 _ => {
                     error!(
                         e=%error,
