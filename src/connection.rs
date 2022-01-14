@@ -209,29 +209,25 @@ impl ArbitraryBrokerCache for &BrokerConnector {
         brokers.shuffle(&mut thread_rng());
 
         let mut backoff = Backoff::new(&self.backoff_config);
+        let connection = backoff
+            .backy_offy("broker_connect", || async {
+                for broker in &brokers {
+                    let connection = match self.connect_impl(None, broker).await {
+                        Ok(transport) => transport,
+                        Err(e) => {
+                            warn!(%e, "Failed to connect to broker");
+                            continue;
+                        }
+                    };
 
-        loop {
-            for broker in &brokers {
-                let connection = match self.connect_impl(None, broker).await {
-                    Ok(transport) => transport,
-                    Err(e) => {
-                        warn!(%e, "Failed to connect to broker");
-                        continue;
-                    }
-                };
+                    return ControlFlow::Break(connection);
+                }
+                ControlFlow::Continue("Failed to connect to any broker, backing off")
+            })
+            .await;
 
-                *current_broker = Some(Arc::clone(&connection));
-
-                return Ok(connection);
-            }
-
-            let backoff = backoff.next();
-            warn!(
-                backoff_secs = backoff.as_secs(),
-                "Failed to connect to any broker, backing off",
-            );
-            tokio::time::sleep(backoff).await;
-        }
+        *current_broker = Some(Arc::clone(&connection));
+        Ok(connection)
     }
 
     async fn invalidate(&self) {
