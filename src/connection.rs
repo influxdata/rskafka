@@ -228,7 +228,8 @@ async fn metadata_request_loop<G, G1, H, H1>(
 ) -> Result<MetadataResponse>
 where
     G: Fn() -> G1,
-    G1: std::future::Future<Output = Result<BrokerConnection>>,
+    G1: std::future::Future<Output = Result<C>>,
+    C: Connect,
     H: Fn() -> H1,
     H1: std::future::Future<Output = ()>,
 {
@@ -263,5 +264,43 @@ where
             "metadata request encountered non-fatal error - backing off",
         );
         tokio::time::sleep(backoff).await;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn happy_cached_broker() {
+        let metadata_request = arbitrary_metadata_request();
+        let success_response = arbitrary_metadata_response();
+
+        let result = metadata_request_loop(
+            None,
+            &metadata_request,
+            Backoff::new(&Default::default()),
+            || async { Ok(()) },
+            || async {},
+        ).await.unwrap();
+
+        assert_eq!(success_response, result)
+    }
+
+    fn arbitrary_metadata_request() -> MetadataRequest {
+        MetadataRequest {
+            topics: Default::default(),
+            allow_auto_topic_creation: Default::default(),
+        }
+    }
+
+    fn arbitrary_metadata_response() -> MetadataResponse {
+        MetadataResponse {
+            throttle_time_ms: Default::default(),
+            brokers: Default::default(),
+            cluster_id: Default::default(),
+            controller_id: Default::default(),
+            topics: Default::default(),
+        }
     }
 }
