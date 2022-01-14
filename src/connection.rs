@@ -394,6 +394,47 @@ mod tests {
         assert_eq!(success_response, result)
     }
 
+    #[tokio::test]
+    async fn happy_broker_override() {
+        let broker_override = Some(Arc::new(FakeBroker::success()));
+        let metadata_request = arbitrary_metadata_request();
+        let success_response = arbitrary_metadata_response();
+
+        let result = metadata_request_loop(
+            broker_override,
+            &metadata_request,
+            Backoff::new(&Default::default()),
+            || async { unreachable!() },
+            || async {
+                unreachable!();
+            },
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(success_response, result)
+    }
+
+    #[tokio::test]
+    async fn sad_broker_override() {
+        let broker_override = Some(Arc::new(FakeBroker::recoverable()));
+        let metadata_request = arbitrary_metadata_request();
+
+        let result = metadata_request_loop(
+            broker_override,
+            &metadata_request,
+            Backoff::new(&Default::default()),
+            || async { unreachable!() },
+            || async {
+                unreachable!();
+            },
+        )
+        .await
+        .unwrap_err();
+
+        assert!(matches!(result, Error::Metadata(RequestError::IO { .. })));
+    }
+
     fn arbitrary_metadata_request() -> MetadataRequest {
         MetadataRequest {
             topics: Default::default(),
