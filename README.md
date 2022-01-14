@@ -37,7 +37,8 @@ let client = Client::new_plain(vec![connection]).await.unwrap();
 
 // create a topic
 let topic = "my_topic";
-client.create_topic(
+let controller_client = client.controller_client().await.unwrap();
+controller_client.create_topic(
     topic,
     2,  // partitions
     1,  // replication factor

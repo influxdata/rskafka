@@ -15,9 +15,10 @@ async fn test_batch_producer() {
 
     let connection = maybe_skip_kafka_integration!();
     let client = Client::new_plain(vec![connection]).await.unwrap();
+    let controller_client = client.controller_client().await.unwrap();
 
     let topic = random_topic_name();
-    client.create_topic(&topic, 1, 1).await.unwrap();
+    controller_client.create_topic(&topic, 1, 1).await.unwrap();
 
     let record = record();
 
