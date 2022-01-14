@@ -440,9 +440,7 @@ impl PartitionClient {
             "Creating new partition-specific broker connection",
         );
 
-        let leader = self
-            .get_leader(self.brokers.get_arbitrary_cached_broker().await?)
-            .await?;
+        let leader = self.get_leader(None).await?;
         let broker = self.brokers.connect(leader).await?.ok_or_else(|| {
             Error::InvalidResponse(format!(
                 "Partition leader {} not found in metadata response",
@@ -458,7 +456,7 @@ impl PartitionClient {
         // LeaderNotAvailable in this case and is retried by the layer above.
         //
         // This does not seem to be required for redpanda.
-        let leader_self = self.get_leader(Arc::clone(&broker)).await?;
+        let leader_self = self.get_leader(Some(Arc::clone(&broker))).await?;
         if leader != leader_self {
             // this might happen if the leader changed after we got the hint from a arbitrary broker and this specific
             // metadata call.
@@ -476,10 +474,10 @@ impl PartitionClient {
     }
 
     /// Retrieve the broker ID of the partition leader
-    async fn get_leader(&self, broker: BrokerConnection) -> Result<i32> {
+    async fn get_leader(&self, broker_override: Option<BrokerConnection>) -> Result<i32> {
         let metadata = self
             .brokers
-            .request_metadata(broker, Some(vec![self.topic.clone()]))
+            .request_metadata(broker_override, Some(vec![self.topic.clone()]))
             .await?;
 
         if metadata.topics.len() != 1 {
