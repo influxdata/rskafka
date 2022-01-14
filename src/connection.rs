@@ -110,6 +110,7 @@ impl BrokerConnector {
         };
 
         let response = loop {
+            // Retrieve the broker within the loop, in case it is invalidated
             let broker = match broker_override.as_ref() {
                 Some(b) => Arc::clone(b),
                 None => self.get_arbitrary_cached_broker().await?,
@@ -147,8 +148,7 @@ impl BrokerConnector {
 
     /// Invalidates the current cached broker
     ///
-    /// The next call to `[BrokerPool::get_cached_broker]` will get a new connection
-    #[allow(dead_code)]
+    /// The next call to `[BrokerConnector::get_arbitrary_cached_broker]` will get a new connection
     pub async fn invalidate_cached_arbitrary_broker(&self) {
         self.current_broker.lock().await.take();
     }
