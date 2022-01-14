@@ -90,7 +90,7 @@ $ docker-compose -f docker-compose-redpanda.yml up
 in one session, and then run:
 
 ```console
-$ TEST_INTEGRATION=1 KAFKA_CONNECT=0.0.0.0:9092 cargo test
+$ TEST_INTEGRATION=1 KAFKA_CONNECT=0.0.0.0:9093 cargo test
 ```
 
 in another session.
@@ -106,7 +106,7 @@ $ docker-compose -f docker-compose-kafka.yml up
 in one session, and then run:
 
 ```console
-$ TEST_INTEGRATION=1 KAFKA_CONNECT=localhost:9093 cargo test
+$ TEST_INTEGRATION=1 KAFKA_CONNECT=localhost:9094 cargo test
 ```
 
 in another session.

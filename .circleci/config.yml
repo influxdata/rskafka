@@ -181,7 +181,9 @@ jobs:
       RUST_LOG: "trace"
       # Run integration tests
       TEST_INTEGRATION: 1
-      KAFKA_CONNECT: "redpanda-0:9092"
+      # Don't use the first node here since this is likely the controller and we want to ensure that we automatically
+      # pick the controller for certain actions (e.g. topic creation) and don't just get lucky.
+      KAFKA_CONNECT: "redpanda-1:9092"
     steps:
       - checkout
       - rust_components
@@ -244,7 +246,9 @@ jobs:
       RUST_LOG: "trace"
       # Run integration tests
       TEST_INTEGRATION: 1
-      KAFKA_CONNECT: "kafka-0:9093"
+      # Don't use the first node here since this is likely the controller and we want to ensure that we automatically
+      # pick the controller for certain actions (e.g. topic creation) and don't just get lucky.
+      KAFKA_CONNECT: "kafka-1:9093"
     steps:
       - checkout
       - rust_components
