@@ -81,21 +81,22 @@ impl BrokerConnector {
 
     /// Fetch and cache broker metadata
     pub async fn refresh_metadata(&self) -> Result<()> {
-        self.request_metadata(
-            self.get_arbitrary_cached_broker().await?,
-            // Not interested in topic metadata
-            Some(vec![]),
-        )
-        .await?;
+        // Not interested in topic metadata
+        self.request_metadata(None, Some(vec![])).await?;
         Ok(())
     }
 
     /// Requests metadata for the provided topics, updating the cached broker information
     ///
     /// Requests data for all topics if `topics` is `None`
+    ///
+    /// If `broker_override` is provided this will request metadata from that specific broker.
+    ///
+    /// Note: overriding the broker prevents automatic handling of connection-invalidating errors,
+    /// which will instead be returned to the caller
     pub async fn request_metadata(
         &self,
-        broker: BrokerConnection,
+        broker_override: Option<BrokerConnection>,
         topics: Option<Vec<String>>,
     ) -> Result<MetadataResponse> {
         let mut backoff = Backoff::new(&self.backoff_config);
@@ -109,9 +110,17 @@ impl BrokerConnector {
         };
 
         let response = loop {
+            // Retrieve the broker within the loop, in case it is invalidated
+            let broker = match broker_override.as_ref() {
+                Some(b) => Arc::clone(b),
+                None => self.get_arbitrary_cached_broker().await?,
+            };
+
             let error = match broker.request(&request).await {
                 Ok(response) => break response,
-                Err(e @ RequestError::Poisoned(_) | e @ RequestError::IO(_)) => {
+                Err(e @ RequestError::Poisoned(_) | e @ RequestError::IO(_))
+                    if broker_override.is_none() =>
+                {
                     self.invalidate_cached_arbitrary_broker().await;
                     e
                 }
@@ -139,8 +148,7 @@ impl BrokerConnector {
 
     /// Invalidates the current cached broker
     ///
-    /// The next call to `[BrokerPool::get_cached_broker]` will get a new connection
-    #[allow(dead_code)]
+    /// The next call to `[BrokerConnector::get_arbitrary_cached_broker]` will get a new connection
     pub async fn invalidate_cached_arbitrary_broker(&self) {
         self.current_broker.lock().await.take();
     }
