@@ -1,6 +1,6 @@
 use thiserror::Error;
 
-use crate::protocol::error::Error as ProtocolError;
+pub use crate::protocol::error::Error as ProtocolError;
 
 #[derive(Error, Debug)]
 pub enum Error {

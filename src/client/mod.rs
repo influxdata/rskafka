@@ -9,6 +9,7 @@ use crate::{
         messages::{CreateTopicRequest, CreateTopicsRequest},
         primitives::*,
     },
+    topic::Topic,
 };
 
 pub mod consumer;
@@ -80,7 +81,7 @@ impl Client {
     }
 
     /// Returns a list of topics in the cluster
-    pub async fn list_topics(&self) -> Result<Vec<String>> {
+    pub async fn list_topics(&self) -> Result<Vec<Topic>> {
         let response = self
             .brokers
             .request_metadata(self.brokers.get_arbitrary_cached_broker().await?, None)
@@ -90,7 +91,14 @@ impl Client {
             .topics
             .into_iter()
             .filter(|t| !matches!(t.is_internal, Some(Boolean(true))))
-            .map(|t| t.name.0)
+            .map(|t| Topic {
+                name: t.name.0,
+                partitions: t
+                    .partitions
+                    .into_iter()
+                    .map(|p| p.partition_index.0)
+                    .collect(),
+            })
             .collect())
     }
 

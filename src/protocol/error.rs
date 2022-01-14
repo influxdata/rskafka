@@ -114,15 +114,15 @@ pub enum Error {
     InconsistentTopicId,
     InconsistentClusterId,
     TransactionalIdNotFound,
-    Unknown(Int16),
+    Unknown(i16),
 }
 
 impl Error {
-    /// Coversion from [`Int16`].
+    /// Coversion from [`i16`].
     ///
     /// This cannot be a `From` trait due to <https://github.com/rust-lang/rfcs/issues/1402>.
-    pub fn new(code: Int16) -> Option<Self> {
-        match code.0 {
+    pub fn new(code: i16) -> Option<Self> {
+        match code {
             -1 => Some(Self::UnknownServerError),
             0 => None,
             1 => Some(Self::OffsetOutOfRange),
@@ -349,7 +349,7 @@ impl From<Option<Error>> for Int16 {
             Error::InconsistentTopicId => Self(103),
             Error::InconsistentClusterId => Self(104),
             Error::TransactionalIdNotFound => Self(105),
-            Error::Unknown(code) => code,
+            Error::Unknown(code) => Self(code),
         }
     }
 }

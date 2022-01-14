@@ -3,6 +3,7 @@
     rustdoc::broken_intra_doc_links,
     rustdoc::bare_urls,
     rustdoc::invalid_codeblock_attributes,
+    rustdoc::private_intra_doc_links,
     rust_2018_idioms,
     unsafe_code
 )]
@@ -21,5 +22,7 @@ mod connection;
 mod messenger;
 mod protocol;
 pub mod record;
+pub mod topic;
 
-pub type ProtocolError = protocol::error::Error;
+// re-exports
+pub use time;

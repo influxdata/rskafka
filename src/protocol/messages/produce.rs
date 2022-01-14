@@ -164,7 +164,7 @@ where
 
         Ok(Self {
             index: Int32::read(reader)?,
-            error: Error::new(Int16::read(reader)?),
+            error: Error::new(Int16::read(reader)?.0),
             base_offset: Int64::read(reader)?,
             log_append_time_ms: (v >= 2).then(|| Int64::read(reader)).transpose()?,
             log_start_offset: (v >= 5).then(|| Int64::read(reader)).transpose()?,

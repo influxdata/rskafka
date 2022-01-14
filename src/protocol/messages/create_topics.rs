@@ -399,7 +399,7 @@ where
         } else {
             String_::read(reader)?
         };
-        let error = Error::new(Int16::read(reader)?);
+        let error = Error::new(Int16::read(reader)?.0);
         let error_message = (v >= 1)
             .then(|| {
                 if v >= 5 {
