@@ -256,7 +256,7 @@ where
                 },
             };
 
-            match broker.metadata_request(&request_params).await {
+            match broker.metadata_request(request_params).await {
                 Ok(response) => ControlFlow::Break(Ok(response)),
                 Err(e @ RequestError::Poisoned(_) | e @ RequestError::IO(_))
                     if broker_override.is_none() =>
