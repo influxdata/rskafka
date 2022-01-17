@@ -96,6 +96,7 @@
 //!                 Aggregator,
 //!                 Error as AggError,
 //!                 StatusDeaggregator,
+//!                 TryPush,
 //!             },
 //!             BatchProducerBuilder,
 //!         },
@@ -122,22 +123,22 @@
 //!
 //! impl Aggregator for MyAggregator {
 //!     type Input = Payload;
+//!     type Tag = ();
 //!     type StatusDeaggregator = MyStatusDeagg;
 //!
 //!     fn try_push(
 //!         &mut self,
 //!         record: Self::Input,
-//!         tag: u64,
-//!     ) -> Result<Option<Self::Input>, AggError> {
+//!     ) -> Result<TryPush<Self::Input, Self::Tag>, AggError> {
 //!         // accumulate up to 1Kb of data
 //!         if record.inner.len() + self.data.len() > 1024 {
-//!             return Ok(Some(record));
+//!             return Ok(TryPush::NoCapacity(record));
 //!         }
 //!
 //!         let mut record = record;
 //!         self.data.append(&mut record.inner);
 //!
-//!         Ok(None)
+//!         Ok(TryPush::Aggregated(()))
 //!     }
 //!
 //!     fn flush(&mut self) -> (Vec<Record>, Self::StatusDeaggregator) {
@@ -164,8 +165,9 @@
 //!
 //! impl StatusDeaggregator for MyStatusDeagg {
 //!     type Status = ();
+//!     type Tag = ();
 //!
-//!     fn deaggregate(&self, _input: &[i64], tag: u64) -> Result<Self::Status, AggError> {
+//!     fn deaggregate(&self, _input: &[i64], _tag: Self::Tag) -> Result<Self::Status, AggError> {
 //!         // don't care about the offsets
 //!         Ok(())
 //!     }
@@ -201,6 +203,7 @@ use thiserror::Error;
 use tokio::sync::Mutex;
 use tracing::{debug, error, trace};
 
+use crate::client::producer::aggregator::TryPush;
 use crate::client::{error::Error as ClientError, partition::PartitionClient};
 use crate::record::Record;
 
@@ -258,7 +261,6 @@ impl BatchProducerBuilder {
             inner: Mutex::new(ProducerInner {
                 aggregator,
                 result_slot: Default::default(),
-                tag_counter: 0,
             }),
         }
     }
@@ -311,7 +313,7 @@ where
 {
     fn extract(
         &self,
-        tag: u64,
+        tag: A::Tag,
     ) -> Result<<A as aggregator::AggregatorStatus>::Status, aggregator::Error> {
         use self::aggregator::StatusDeaggregator;
 
@@ -334,7 +336,7 @@ impl<A> AggregatedResult<A>
 where
     A: aggregator::Aggregator,
 {
-    fn extract(&self, tag: u64) -> Result<<A as aggregator::AggregatorStatus>::Status, Error> {
+    fn extract(&self, tag: A::Tag) -> Result<<A as aggregator::AggregatorStatus>::Status, Error> {
         match &self.inner {
             Ok(status) => match status.lock().extract(tag) {
                 Ok(status) => Ok(status),
@@ -364,8 +366,6 @@ where
     result_slot: broadcast::BroadcastOnce<AggregatedResult<A>>,
 
     aggregator: A,
-
-    tag_counter: u64,
 }
 
 impl<A> BatchProducer<A>
@@ -390,18 +390,21 @@ where
             // Try to add the record to the aggregator
             let mut inner = self.inner.lock().await;
 
-            let tag = inner.tag_counter;
-            inner.tag_counter += 1;
+            let tag = match inner.aggregator.try_push(data)? {
+                TryPush::Aggregated(tag) => tag,
+                TryPush::NoCapacity(data) => {
+                    debug!("Insufficient capacity in aggregator - flushing");
 
-            if let Some(data) = inner.aggregator.try_push(data, tag)? {
-                debug!("Insufficient capacity in aggregator - flushing");
-
-                Self::flush(&mut inner, self.client.as_ref()).await;
-                if inner.aggregator.try_push(data, tag)?.is_some() {
-                    error!("Record too large for aggregator");
-                    return Err(Error::TooLarge);
+                    Self::flush(&mut inner, self.client.as_ref()).await;
+                    match inner.aggregator.try_push(data)? {
+                        TryPush::Aggregated(tag) => tag,
+                        TryPush::NoCapacity(_) => {
+                            error!("Record too large for aggregator");
+                            return Err(Error::TooLarge);
+                        }
+                    }
                 }
-            }
+            };
 
             // Get a future that completes when the record is published
             (inner.result_slot.receive(), tag)
