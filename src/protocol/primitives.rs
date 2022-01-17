@@ -14,6 +14,7 @@ use varint_rs::{VarintReader, VarintWriter};
 use super::{
     record::RecordBatch,
     traits::{ReadError, ReadType, WriteError, WriteType},
+    vec_builder::VecBuilder,
 };
 
 /// Represents a boolean
@@ -517,7 +518,7 @@ where
 {
     fn read(reader: &mut R) -> Result<Self, ReadError> {
         let len = UnsignedVarint::read(reader)?;
-        let mut res = Vec::with_capacity(len.0 as usize);
+        let mut res = VecBuilder::new(len.0 as usize);
         for _ in 0..len.0 {
             let tag = UnsignedVarint::read(reader)?;
             let data_len = UnsignedVarint::read(reader)?;
@@ -525,7 +526,7 @@ where
             reader.read_exact(&mut data)?;
             res.push((tag, data));
         }
-        Ok(Self(res))
+        Ok(Self(res.into()))
     }
 }
 
@@ -778,6 +779,16 @@ mod tests {
     }
 
     test_roundtrip!(TaggedFields, test_tagged_fields_roundtrip);
+
+    #[test]
+    fn test_tagged_fields_blowup_memory() {
+        let mut buf = Cursor::new(Vec::<u8>::new());
+        Int32(i32::MAX).write(&mut buf).unwrap();
+        buf.set_position(0);
+
+        let err = TaggedFields::read(&mut buf).unwrap_err();
+        assert_matches!(err, ReadError::IO(_));
+    }
 
     test_roundtrip!(Array<Int32>, test_array_roundtrip);
 
