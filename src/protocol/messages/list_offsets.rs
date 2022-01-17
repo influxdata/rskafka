@@ -195,7 +195,7 @@ where
 
         Ok(Self {
             partition_index: Int32::read(reader)?,
-            error_code: ApiError::new(Int16::read(reader)?),
+            error_code: ApiError::new(Int16::read(reader)?.0),
             old_style_offsets: (v < 1).then(|| Array::read(reader)).transpose()?,
             timestamp: (v >= 1).then(|| Int64::read(reader)).transpose()?,
             offset: (v >= 1).then(|| Int64::read(reader)).transpose()?,

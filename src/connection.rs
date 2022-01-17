@@ -1,6 +1,6 @@
 use rand::prelude::*;
 use std::sync::Arc;
-use tracing::{info, warn};
+use tracing::{debug, info, warn};
 
 use thiserror::Error;
 use tokio::io::BufStream;
@@ -50,8 +50,10 @@ pub struct BrokerConnector {
     /// Discovered brokers in the cluster, including bootstrap brokers
     topology: BrokerTopology,
 
-    /// The current cached broker
-    current_broker: Mutex<Option<BrokerConnection>>,
+    /// The cached arbitrary broker.
+    ///
+    /// This one is used for metadata queries.
+    cached_arbitrary_broker: Mutex<Option<BrokerConnection>>,
 
     /// The backoff configuration on error
     backoff_config: BackoffConfig,
@@ -72,7 +74,7 @@ impl BrokerConnector {
         Self {
             bootstrap_brokers,
             topology: Default::default(),
-            current_broker: Mutex::new(None),
+            cached_arbitrary_broker: Mutex::new(None),
             backoff_config: Default::default(),
             tls_config,
             max_message_size,
@@ -81,21 +83,22 @@ impl BrokerConnector {
 
     /// Fetch and cache broker metadata
     pub async fn refresh_metadata(&self) -> Result<()> {
-        self.request_metadata(
-            self.get_arbitrary_cached_broker().await?,
-            // Not interested in topic metadata
-            Some(vec![]),
-        )
-        .await?;
+        // Not interested in topic metadata
+        self.request_metadata(None, Some(vec![])).await?;
         Ok(())
     }
 
     /// Requests metadata for the provided topics, updating the cached broker information
     ///
     /// Requests data for all topics if `topics` is `None`
+    ///
+    /// If `broker_override` is provided this will request metadata from that specific broker.
+    ///
+    /// Note: overriding the broker prevents automatic handling of connection-invalidating errors,
+    /// which will instead be returned to the caller
     pub async fn request_metadata(
         &self,
-        broker: BrokerConnection,
+        broker_override: Option<BrokerConnection>,
         topics: Option<Vec<String>>,
     ) -> Result<MetadataResponse> {
         let mut backoff = Backoff::new(&self.backoff_config);
@@ -109,9 +112,17 @@ impl BrokerConnector {
         };
 
         let response = loop {
+            // Retrieve the broker within the loop, in case it is invalidated
+            let broker = match broker_override.as_ref() {
+                Some(b) => Arc::clone(b),
+                None => self.get_cached_arbitrary_broker().await?,
+            };
+
             let error = match broker.request(&request).await {
                 Ok(response) => break response,
-                Err(e @ RequestError::Poisoned(_) | e @ RequestError::IO(_)) => {
+                Err(e @ RequestError::Poisoned(_) | e @ RequestError::IO(_))
+                    if broker_override.is_none() =>
+                {
                     self.invalidate_cached_arbitrary_broker().await;
                     e
                 }
@@ -133,16 +144,18 @@ impl BrokerConnector {
             tokio::time::sleep(backoff).await;
         };
 
+        // Since the metadata request contains information about the cluster state, use it to update our view.
         self.topology.update(&response.brokers);
+
         Ok(response)
     }
 
-    /// Invalidates the current cached broker
+    /// Invalidates the cached arbitrary broker.
     ///
-    /// The next call to `[BrokerPool::get_cached_broker]` will get a new connection
-    #[allow(dead_code)]
+    /// The next call to `[BrokerConnector::get_cached_arbitrary_broker]` will get a new connection
     pub async fn invalidate_cached_arbitrary_broker(&self) {
-        self.current_broker.lock().await.take();
+        debug!("Invalidating cached arbitrary broker");
+        self.cached_arbitrary_broker.lock().await.take();
     }
 
     /// Returns a new connection to the broker with the provided id
@@ -171,8 +184,8 @@ impl BrokerConnector {
     }
 
     /// Gets a cached [`BrokerConnection`] to any broker
-    pub async fn get_arbitrary_cached_broker(&self) -> Result<BrokerConnection> {
-        let mut current_broker = self.current_broker.lock().await;
+    pub async fn get_cached_arbitrary_broker(&self) -> Result<BrokerConnection> {
+        let mut current_broker = self.cached_arbitrary_broker.lock().await;
         if let Some(broker) = &*current_broker {
             return Ok(Arc::clone(broker));
         }
@@ -222,7 +235,7 @@ impl std::fmt::Debug for BrokerConnector {
         f.debug_struct("BrokerConnector")
             .field("bootstrap_brokers", &self.bootstrap_brokers)
             .field("topology", &self.topology)
-            .field("current_broker", &self.current_broker)
+            .field("cached_arbitrary_broker", &self.cached_arbitrary_broker)
             .field("backoff_config", &self.backoff_config)
             .field("tls_config", &tls_config)
             .field("max_message_size", &self.max_message_size)

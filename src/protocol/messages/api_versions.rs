@@ -139,7 +139,7 @@ where
 #[cfg_attr(test, derive(proptest_derive::Arbitrary))]
 pub struct ApiVersionsResponse {
     /// The top-level error code.
-    #[cfg_attr(test, proptest(strategy = "any::<Int16>().prop_map(ApiError::new)"))]
+    #[cfg_attr(test, proptest(strategy = "any::<i16>().prop_map(ApiError::new)"))]
     pub error_code: Option<ApiError>,
 
     /// The APIs supported by the broker.
@@ -169,7 +169,7 @@ where
         let v = version.0 .0;
         assert!(v <= 3);
 
-        let error_code = ApiError::new(Int16::read(reader)?);
+        let error_code = ApiError::new(Int16::read(reader)?.0);
         let api_keys = if v >= 3 {
             read_compact_versioned_array(reader, version)?.unwrap_or_default()
         } else {

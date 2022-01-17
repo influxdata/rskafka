@@ -1,7 +1,10 @@
 use rskafka::{
-    client::{error::Error as ClientError, partition::PartitionClient, Client},
+    client::{
+        error::{Error as ClientError, ProtocolError},
+        partition::PartitionClient,
+        Client,
+    },
     record::{Record, RecordAndOffset},
-    ProtocolError,
 };
 use std::{str::FromStr, sync::Arc, time::Duration};
 
@@ -26,9 +29,13 @@ async fn test_partition_leader() {
 
     let connection = maybe_skip_kafka_integration!();
     let client = Client::new_plain(vec![connection]).await.unwrap();
+    let controller_client = client.controller_client().await.unwrap();
     let topic_name = random_topic_name();
 
-    client.create_topic(&topic_name, 2, 1).await.unwrap();
+    controller_client
+        .create_topic(&topic_name, 2, 1)
+        .await
+        .unwrap();
     let client = client.partition_client(&topic_name, 0).await.unwrap();
     tokio::time::timeout(Duration::from_secs(10), async move {
         loop {
@@ -51,32 +58,44 @@ async fn test_topic_crud() {
 
     let connection = maybe_skip_kafka_integration!();
     let client = Client::new_plain(vec![connection]).await.unwrap();
+    let controller_client = client.controller_client().await.unwrap();
     let topics = client.list_topics().await.unwrap();
 
     let prefix = "test_topic_crud_";
 
     let mut max_id = 0;
     for topic in topics {
-        if let Some(maybe_int) = topic.strip_prefix(prefix) {
+        if let Some(maybe_int) = topic.name.strip_prefix(prefix) {
             if let Ok(i) = usize::from_str(maybe_int) {
                 max_id = max_id.max(i);
             }
         }
     }
-
     let new_topic = format!("{}{}", prefix, max_id + 1);
-    client.create_topic(&new_topic, 1, 1).await.unwrap();
+    controller_client
+        .create_topic(&new_topic, 2, 1)
+        .await
+        .unwrap();
 
-    let topics = client.list_topics().await.unwrap();
+    // might take a while to converge
+    tokio::time::timeout(Duration::from_millis(1_000), async {
+        loop {
+            let topics = client.list_topics().await.unwrap();
+            let topic = topics.iter().find(|t| t.name == new_topic);
+            if topic.is_some() {
+                return;
+            }
 
-    assert!(
-        topics.contains(&new_topic),
-        "topic {} not found in {:?}",
-        new_topic,
-        topics
-    );
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .unwrap();
 
-    let err = client.create_topic(&new_topic, 1, 1).await.unwrap_err();
+    let err = controller_client
+        .create_topic(&new_topic, 1, 1)
+        .await
+        .unwrap_err();
     match err {
         ClientError::ServerError(ProtocolError::TopicAlreadyExists, _) => {}
         _ => panic!("Unexpected error: {}", err),
@@ -135,7 +154,8 @@ async fn test_produce_empty() {
     let n_partitions = 2;
 
     let client = Client::new_plain(vec![connection]).await.unwrap();
-    client
+    let controller_client = client.controller_client().await.unwrap();
+    controller_client
         .create_topic(&topic_name, n_partitions, 1)
         .await
         .unwrap();
@@ -173,7 +193,8 @@ async fn test_get_high_watermark() {
     let n_partitions = 1;
 
     let client = Client::new_plain(vec![connection.clone()]).await.unwrap();
-    client
+    let controller_client = client.controller_client().await.unwrap();
+    controller_client
         .create_topic(&topic_name, n_partitions, 1)
         .await
         .unwrap();
@@ -224,7 +245,8 @@ where
     let n_partitions = 2;
 
     let client = Client::new_plain(vec![connection.clone()]).await.unwrap();
-    client
+    let controller_client = client.controller_client().await.unwrap();
+    controller_client
         .create_topic(&topic_name, n_partitions, 1)
         .await
         .unwrap();
