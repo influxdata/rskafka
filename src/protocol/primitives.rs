@@ -521,10 +521,12 @@ where
         let mut res = VecBuilder::new(len.0 as usize);
         for _ in 0..len.0 {
             let tag = UnsignedVarint::read(reader)?;
+
             let data_len = UnsignedVarint::read(reader)?;
-            let mut data = vec![0u8; data_len.0 as usize];
-            reader.read_exact(&mut data)?;
-            res.push((tag, data));
+            let mut data_builder = VecBuilder::new(data_len.0 as usize);
+            data_builder.read_exact(reader)?;
+
+            res.push((tag, data_builder.into()));
         }
         Ok(Self(res.into()))
     }
@@ -783,7 +785,16 @@ mod tests {
     #[test]
     fn test_tagged_fields_blowup_memory() {
         let mut buf = Cursor::new(Vec::<u8>::new());
-        Int32(i32::MAX).write(&mut buf).unwrap();
+
+        // number of fields
+        UnsignedVarint(u64::MAX).write(&mut buf).unwrap();
+
+        // tag
+        UnsignedVarint(u64::MAX).write(&mut buf).unwrap();
+
+        // data length
+        UnsignedVarint(u64::MAX).write(&mut buf).unwrap();
+
         buf.set_position(0);
 
         let err = TaggedFields::read(&mut buf).unwrap_err();

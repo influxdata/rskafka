@@ -69,6 +69,35 @@ impl<T> VecBuilder<T> {
     }
 }
 
+impl VecBuilder<u8> {
+    pub fn read_exact<R>(&mut self, reader: &mut R) -> Result<(), std::io::Error>
+    where
+        R: std::io::Read,
+    {
+        while self.remaining_elements > 0 {
+            let mut buf = self.blocks.last_mut().expect("Has always at least 1 block");
+            if buf.len() >= self.elements_per_block {
+                self.blocks.push(Vec::with_capacity(
+                    self.remaining_elements.min(self.elements_per_block),
+                ));
+                buf = self.blocks.last_mut().expect("Just pushed a new block");
+            }
+
+            let to_read = self
+                .remaining_elements
+                .min(self.elements_per_block - buf.len());
+
+            let buf_start_pos = buf.len();
+            buf.resize(buf.len() + to_read, 0);
+
+            reader.read_exact(&mut buf[buf_start_pos..])?;
+            self.remaining_elements -= to_read;
+        }
+
+        Ok(())
+    }
+}
+
 impl<T> From<VecBuilder<T>> for Vec<T> {
     fn from(builder: VecBuilder<T>) -> Self {
         if builder.blocks.len() == 1 {
@@ -89,6 +118,8 @@ impl<T> From<VecBuilder<T>> for Vec<T> {
 
 #[cfg(test)]
 mod tests {
+    use std::io::Cursor;
+
     use super::*;
 
     #[test]
@@ -126,6 +157,21 @@ mod tests {
 
         let actual: Vec<_> = builder.into();
         assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn test_reader() {
+        let data = b"abc".to_vec();
+        let mut reader = Cursor::new(data.clone());
+
+        let mut builder = VecBuilder::<u8>::new_with_block_size(data.len(), 2);
+        builder.read_exact(&mut reader).unwrap();
+
+        let blocks = vec![b"ab".to_vec(), b"c".to_vec()];
+        assert_eq!(builder.blocks, blocks);
+
+        let actual: Vec<_> = builder.into();
+        assert_eq!(actual, data);
     }
 
     #[test]
