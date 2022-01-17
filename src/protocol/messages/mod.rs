@@ -13,6 +13,7 @@ use super::{
     api_version::{ApiVersion, ApiVersionRange},
     primitives::{Int32, UnsignedVarint},
     traits::{ReadError, ReadType, WriteError, WriteType},
+    vec_builder::VecBuilder,
 };
 
 mod api_versions;
@@ -133,11 +134,11 @@ fn read_versioned_array<R: Read, T: ReadVersionedType<R>>(
         ))),
         _ => {
             let len = len as usize;
-            Ok(Some(
-                (0..len)
-                    .map(|_| T::read_versioned(reader, version))
-                    .collect::<Result<_, _>>()?,
-            ))
+            let mut builder = VecBuilder::new(len);
+            for _ in 0..len {
+                builder.push(T::read_versioned(reader, version)?);
+            }
+            Ok(Some(builder.into()))
         }
     }
 }
@@ -183,11 +184,11 @@ fn read_compact_versioned_array<R: Read, T: ReadVersionedType<R>>(
         0 => Ok(None),
         n => {
             let len = (n - 1) as usize;
-            Ok(Some(
-                (0..len)
-                    .map(|_| T::read_versioned(reader, version))
-                    .collect::<Result<_, _>>()?,
-            ))
+            let mut builder = VecBuilder::new(len);
+            for _ in 0..len {
+                builder.push(T::read_versioned(reader, version)?);
+            }
+            Ok(Some(builder.into()))
         }
     }
 }
@@ -220,6 +221,10 @@ fn write_compact_versioned_array<W: Write, T: WriteVersionedType<W>>(
 
 #[cfg(test)]
 mod tests {
+    use std::io::Cursor;
+
+    use assert_matches::assert_matches;
+
     use crate::protocol::primitives::Int16;
 
     use super::*;
@@ -232,19 +237,18 @@ mod tests {
     impl<W: Write> WriteVersionedType<W> for VersionTest {
         fn write_versioned(
             &self,
-            _writer: &mut W,
+            writer: &mut W,
             version: ApiVersion,
         ) -> Result<(), WriteVersionedError> {
             assert_eq!(version, self.version);
+            Int32(42).write(writer)?;
             Ok(())
         }
     }
 
     impl<R: Read> ReadVersionedType<R> for VersionTest {
-        fn read_versioned(
-            _reader: &mut R,
-            version: ApiVersion,
-        ) -> Result<Self, ReadVersionedError> {
+        fn read_versioned(reader: &mut R, version: ApiVersion) -> Result<Self, ReadVersionedError> {
+            assert_eq!(Int32::read(reader)?.0, 42);
             Ok(Self { version })
         }
     }
@@ -277,6 +281,17 @@ mod tests {
     }
 
     #[test]
+    fn test_read_versioned_blowup_memory() {
+        let mut buf = Cursor::new(Vec::<u8>::new());
+        Int32(i32::MAX).write(&mut buf).unwrap();
+        buf.set_position(0);
+
+        let err =
+            read_versioned_array::<_, VersionTest>(&mut buf, ApiVersion(Int16(42))).unwrap_err();
+        assert_matches!(err, ReadVersionedError::ReadError(ReadError::IO(_)));
+    }
+
+    #[test]
     fn test_read_write_compact_versioned() {
         for len in [0, 6] {
             for i in 0..3 {
@@ -305,5 +320,16 @@ mod tests {
                 .unwrap()
                 .is_none()
         )
+    }
+
+    #[test]
+    fn test_read_compact_versioned_blowup_memory() {
+        let mut buf = Cursor::new(Vec::<u8>::new());
+        UnsignedVarint(u64::MAX).write(&mut buf).unwrap();
+        buf.set_position(0);
+
+        let err = read_compact_versioned_array::<_, VersionTest>(&mut buf, ApiVersion(Int16(42)))
+            .unwrap_err();
+        assert_matches!(err, ReadVersionedError::ReadError(ReadError::IO(_)));
     }
 }
