@@ -9,27 +9,27 @@
 //! # Data Flow
 //!
 //! ```text
-//!                 +--------------+                +-------------+           +-----------------+
-//! ---(MyData)---->|              |                |             |           |                 |
-//! <-(MyStatus)-o  |     impl     |--(MyAggData)-->|    impl     |-(Record)->| PartitionClient |
-//!              ║  |  Aggregator  |                | Transformer |           |                 |
-//! ---(MyData)---->|              |                |             |           +-----------------+
-//! <-(MyStatus)-o  |              |                +-------------+                    |
-//!              ║  |              |                       |                           |
-//!      ...     ║  |              |                       |                           |
-//!              ║  |              |                       |                           |
-//! ---(MyData)---->|              |                       |                           |
-//! <-(MyStatus)-o  |              |                       |                           |
-//!              ║  +--------------+                       |                           |
-//!              ║         |                               |                           |
-//!              ║         V                               V                           |
-//!              ║  +--------------+                +-------------+                    |
-//!              ║  |              |                |             |                    |
-//!              o==|     impl     |<-(MyAggStatus)-|    impl     |<-(Offsets)---------o
-//!                 |    Status-   |                |   Status-   |
-//!                 | Deaggregator |                |   Builder   |
-//!                 |              |                |             |
-//!                 +--------------+                +-------------+
+//!                 +--------------+            +-----------------+
+//! ---(MyData)---->|              |            |                 |
+//! <-(MyStatus)-o  |     impl     |-(Records)->| PartitionClient |
+//!              ║  |  Aggregator  |            |                 |
+//! ---(MyData)---->|              |            +-----------------+
+//! <-(MyStatus)-o  |              |                     |
+//!              ║  |              |                     |
+//!      ...     ║  |              |                     |
+//!              ║  |              |                     |
+//! ---(MyData)---->|              |                     |
+//! <-(MyStatus)-o  |              |                     |
+//!              ║  +--------------+                     |
+//!              ║         |                             |
+//!              ║         V                             |
+//!              ║  +--------------+                     |
+//!              ║  |              |                     |
+//!              o==|     impl     |<-(Offsets)----------o
+//!                 |    Status-   |
+//!                 | Deaggregator |
+//!                 |              |
+//!                 +--------------+
 //! ```
 //!
 //! # Usage
@@ -321,7 +321,12 @@ where
     }
 }
 
+/// Aggregated status that can be extracted / split into pieces.
+///
+/// This needs a [`Mutex`] so that we don't require [`aggregator::StatusDeaggregator`] to be `Sync`.
 type SharedAggregatedStatus<A> = Arc<parking_lot::Mutex<AggregatedStatus<A>>>;
+
+//// Client error that can be returned to multiple callers.
 type SharedAggregatedError = Arc<ClientError>;
 
 #[derive(Debug)]
