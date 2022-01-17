@@ -101,7 +101,8 @@ pub trait RequestBody {
 
     /// Normally the same as [`FIRST_TAGGED_FIELD_IN_REQUEST_VERSION`](Self::FIRST_TAGGED_FIELD_IN_REQUEST_VERSION) but
     /// there are some special snowflakes.
-    const FIRST_TAGGED_FIELD_IN_RESPONSE_VERSION: ApiVersion;
+    const FIRST_TAGGED_FIELD_IN_RESPONSE_VERSION: ApiVersion =
+        Self::FIRST_TAGGED_FIELD_IN_REQUEST_VERSION;
 }
 
 impl<'a, T: RequestBody> RequestBody for &T {

@@ -157,8 +157,6 @@ impl RequestBody for ListOffsetsRequest {
         ApiVersionRange::new(ApiVersion(Int16(0)), ApiVersion(Int16(3)));
 
     const FIRST_TAGGED_FIELD_IN_REQUEST_VERSION: ApiVersion = ApiVersion(Int16(6));
-    const FIRST_TAGGED_FIELD_IN_RESPONSE_VERSION: ApiVersion =
-        Self::FIRST_TAGGED_FIELD_IN_REQUEST_VERSION;
 }
 
 #[derive(Debug)]
