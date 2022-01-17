@@ -10,9 +10,6 @@ pub trait Aggregator: Send {
     /// The unaggregated input.
     type Input: Send;
 
-    /// The aggregated output
-    type Output: Send;
-
     /// De-aggregates the status for successful `produce` operations.
     type StatusDeaggregator: StatusDeaggregator;
 
@@ -27,19 +24,16 @@ pub trait Aggregator: Send {
     fn try_push(&mut self, record: Self::Input, tag: u64) -> Result<Option<Self::Input>, Error>;
 
     /// Flush the contents of this aggregator to Kafka
-    fn flush(&mut self) -> (Self::Output, Self::StatusDeaggregator);
+    fn flush(&mut self) -> (Vec<Record>, Self::StatusDeaggregator);
 }
 
 /// De-aggregate status for successful `produce` operations.
 pub trait StatusDeaggregator: Send + std::fmt::Debug {
-    /// The aggregated input status.
-    type Input;
-
     /// The de-aggregated output status.
     type Status;
 
     /// De-aggregate status.
-    fn build(&self, input: Self::Input, tag: u64) -> Result<Self::Status, Error>;
+    fn deaggregate(&self, input: &[i64], tag: u64) -> Result<Self::Status, Error>;
 }
 
 /// Helper trait to access the status of an [`Aggregator`].
@@ -70,7 +64,6 @@ pub struct RecordAggregator {
 
 impl Aggregator for RecordAggregator {
     type Input = Record;
-    type Output = Vec<Record>;
     type StatusDeaggregator = RecordAggregatorStatusDeaggregator;
 
     fn try_push(&mut self, record: Self::Input, tag: u64) -> Result<Option<Self::Input>, Error> {
@@ -89,7 +82,7 @@ impl Aggregator for RecordAggregator {
         Ok(None)
     }
 
-    fn flush(&mut self) -> (Self::Output, Self::StatusDeaggregator) {
+    fn flush(&mut self) -> (Vec<Record>, Self::StatusDeaggregator) {
         let state = std::mem::take(&mut self.state);
         (
             state.records,
@@ -115,11 +108,9 @@ pub struct RecordAggregatorStatusDeaggregator {
 }
 
 impl StatusDeaggregator for RecordAggregatorStatusDeaggregator {
-    type Input = Vec<i64>;
-
     type Status = i64;
 
-    fn build(&self, input: Self::Input, tag: u64) -> Result<Self::Status, Error> {
+    fn deaggregate(&self, input: &[i64], tag: u64) -> Result<Self::Status, Error> {
         let pos = self.reverse_mapping.get(&tag).expect("invalid tag");
         Ok(input[*pos])
     }
@@ -156,28 +147,28 @@ mod tests {
         assert!(aggregator.try_push(r1.clone(), 3).unwrap().is_some());
 
         // flush two records
-        let (records, reverse_mapper) = aggregator.flush();
+        let (records, deagg) = aggregator.flush();
         assert_eq!(records.len(), 2);
-        assert_eq!(reverse_mapper.build(vec![10, 20], 0).unwrap(), 10);
-        assert_eq!(reverse_mapper.build(vec![10, 20], 1).unwrap(), 20);
+        assert_eq!(deagg.deaggregate(&[10, 20], 0).unwrap(), 10);
+        assert_eq!(deagg.deaggregate(&[10, 20], 1).unwrap(), 20);
 
         // Test early flush
         assert!(aggregator.try_push(r1.clone(), 4).unwrap().is_none());
-        let (records, reverse_mapper) = aggregator.flush();
+        let (records, deagg) = aggregator.flush();
         assert_eq!(records.len(), 1);
-        assert_eq!(reverse_mapper.build(vec![10], 4).unwrap(), 10);
+        assert_eq!(deagg.deaggregate(&[10], 4).unwrap(), 10);
 
         // next flush has full capacity again
         assert!(aggregator.try_push(r1.clone(), 5).unwrap().is_none());
         assert!(aggregator.try_push(r1.clone(), 6).unwrap().is_none());
 
-        let (records, reverse_mapper) = aggregator.flush();
+        let (records, deagg) = aggregator.flush();
         assert_eq!(records.len(), 2);
-        assert_eq!(reverse_mapper.build(vec![10, 20], 5).unwrap(), 10);
-        assert_eq!(reverse_mapper.build(vec![10, 20], 6).unwrap(), 20);
+        assert_eq!(deagg.deaggregate(&[10, 20], 5).unwrap(), 10);
+        assert_eq!(deagg.deaggregate(&[10, 20], 6).unwrap(), 20);
 
         // Test empty flush
-        let (records, _reverse_mapper) = aggregator.flush();
+        let (records, _deagg) = aggregator.flush();
         assert_eq!(records.len(), 0);
 
         // Test flush to make space for larger record

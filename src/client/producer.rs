@@ -97,11 +97,6 @@
 //!                 Error as AggError,
 //!                 StatusDeaggregator,
 //!             },
-//!             transformer::{
-//!                 Error as TError,
-//!                 StatusBuilder,
-//!                 Transformer,
-//!             },
 //!             BatchProducerBuilder,
 //!         },
 //!     },
@@ -127,7 +122,6 @@
 //!
 //! impl Aggregator for MyAggregator {
 //!     type Input = Payload;
-//!     type Output = Payload;
 //!     type StatusDeaggregator = MyStatusDeagg;
 //!
 //!     fn try_push(
@@ -146,11 +140,20 @@
 //!         Ok(None)
 //!     }
 //!
-//!     fn flush(&mut self) -> (Self::Output, Self::StatusDeaggregator) {
-//!         (
-//!             Payload {
-//!                 inner: std::mem::take(&mut self.data),
+//!     fn flush(&mut self) -> (Vec<Record>, Self::StatusDeaggregator) {
+//!         let data = std::mem::take(&mut self.data);
+//!         let records = vec![
+//!             Record {
+//!                 key: b"".to_vec(),
+//!                 value: data,
+//!                 headers: BTreeMap::from([
+//!                     ("foo".to_owned(), b"bar".to_vec()),
+//!                 ]),
+//!                 timestamp: OffsetDateTime::now_utc(),
 //!             },
+//!         ];
+//!         (
+//!             records,
 //!             MyStatusDeagg {}
 //!         )
 //!     }
@@ -160,47 +163,9 @@
 //! struct MyStatusDeagg {}
 //!
 //! impl StatusDeaggregator for MyStatusDeagg {
-//!     type Input = ();
 //!     type Status = ();
 //!
-//!     fn build(&self, input: Self::Input, tag: u64) -> Result<Self::Status, AggError> {
-//!         // don't care about the offsets
-//!         Ok(())
-//!     }
-//! }
-//!
-//! // a transformer for our data
-//! struct MyTransformer {}
-//!
-//! impl Transformer for MyTransformer {
-//!     type Input = Payload;
-//!     type StatusBuilder = MyStatusBuilder;
-//!
-//!     fn transform(
-//!         &self,
-//!         input: Self::Input,
-//!     ) -> Result<(Vec<Record>, Self::StatusBuilder), TError> {
-//!         let records = vec![
-//!             Record {
-//!                 key: b"".to_vec(),
-//!                 value: input.inner,
-//!                 headers: BTreeMap::from([
-//!                     ("foo".to_owned(), b"bar".to_vec()),
-//!                 ]),
-//!                 timestamp: OffsetDateTime::now_utc(),
-//!             },
-//!         ];
-//!
-//!         Ok((records, MyStatusBuilder {}))
-//!     }
-//! }
-//!
-//! struct MyStatusBuilder {}
-//!
-//! impl StatusBuilder for MyStatusBuilder {
-//!     type Status = ();
-//!
-//!     fn build(&self, res: Vec<i64>) -> Result<Self::Status, TError> {
+//!     fn deaggregate(&self, _input: &[i64], tag: u64) -> Result<Self::Status, AggError> {
 //!         // don't care about the offsets
 //!         Ok(())
 //!     }
@@ -216,9 +181,8 @@
 //! // construct batch producer
 //! let producer = BatchProducerBuilder::new(partition_client)
 //!     .with_linger(Duration::from_secs(2))
-//!     .build_with_transformer(
+//!     .build(
 //!         MyAggregator::default(),
-//!         MyTransformer {},
 //!     );
 //!
 //! // produce data
@@ -237,13 +201,11 @@ use thiserror::Error;
 use tokio::sync::Mutex;
 use tracing::{debug, error, trace};
 
-use crate::client::producer::transformer::StatusBuilder;
 use crate::client::{error::Error as ClientError, partition::PartitionClient};
 use crate::record::Record;
 
 pub mod aggregator;
 mod broadcast;
-pub mod transformer;
 
 #[derive(Debug, Error)]
 pub enum Error {
@@ -255,9 +217,6 @@ pub enum Error {
 
     #[error("Input too large for aggregator")]
     TooLarge,
-
-    #[error("Transformer error: {0}")]
-    Transformer(#[from] Arc<transformer::Error>),
 }
 
 pub type Result<T, E = Error> = std::result::Result<T, E>;
@@ -289,27 +248,15 @@ impl BatchProducerBuilder {
         Self { linger, ..self }
     }
 
-    pub fn build<A>(self, aggregator: A) -> BatchProducer<A, transformer::IdentityTransformer>
-    where
-        A: aggregator::Aggregator<Output = Vec<Record>>,
-        A::StatusDeaggregator: aggregator::StatusDeaggregator<Input = Vec<i64>>,
-    {
-        self.build_with_transformer(aggregator, transformer::IdentityTransformer::default())
-    }
-
-    pub fn build_with_transformer<A, T>(self, aggregator: A, transformer: T) -> BatchProducer<A, T>
+    pub fn build<A>(self, aggregator: A) -> BatchProducer<A>
     where
         A: aggregator::Aggregator,
-        T: transformer::Transformer<Input = A::Output>,
-        A::StatusDeaggregator:
-            aggregator::StatusDeaggregator<Input = <T as transformer::TransformerStatus>::Status>,
     {
         BatchProducer {
             linger: self.linger,
             client: self.client,
             inner: Mutex::new(ProducerInner {
                 aggregator,
-                transformer,
                 result_slot: Default::default(),
                 tag_counter: 0,
             }),
@@ -338,39 +285,29 @@ impl ProducerClient for PartitionClient {
 ///
 /// [`Aggregator`]: aggregator::Aggregator
 #[derive(Debug)]
-pub struct BatchProducer<A, T>
+pub struct BatchProducer<A>
 where
     A: aggregator::Aggregator,
-    T: transformer::Transformer<Input = A::Output>,
-    A::StatusDeaggregator:
-        aggregator::StatusDeaggregator<Input = <T as transformer::TransformerStatus>::Status>,
 {
     linger: Duration,
 
     client: Arc<dyn ProducerClient>,
 
-    inner: Mutex<ProducerInner<A, T>>,
+    inner: Mutex<ProducerInner<A>>,
 }
 
 #[derive(Debug)]
-struct AggregatedStatus<A, T>
+struct AggregatedStatus<A>
 where
     A: aggregator::Aggregator,
-    T: transformer::Transformer<Input = A::Output>,
-    A::StatusDeaggregator:
-        aggregator::StatusDeaggregator<Input = <T as transformer::TransformerStatus>::Status>,
 {
-    aggregated_status:
-        <<T as transformer::Transformer>::StatusBuilder as transformer::StatusBuilder>::Status,
-    status_builder: <A as aggregator::Aggregator>::StatusDeaggregator,
+    aggregated_status: Vec<i64>,
+    status_deagg: <A as aggregator::Aggregator>::StatusDeaggregator,
 }
 
-impl<A, T> AggregatedStatus<A, T>
+impl<A> AggregatedStatus<A>
 where
     A: aggregator::Aggregator,
-    T: transformer::Transformer<Input = A::Output>,
-    A::StatusDeaggregator:
-        aggregator::StatusDeaggregator<Input = <T as transformer::TransformerStatus>::Status>,
 {
     fn extract(
         &self,
@@ -378,36 +315,24 @@ where
     ) -> Result<<A as aggregator::AggregatorStatus>::Status, aggregator::Error> {
         use self::aggregator::StatusDeaggregator;
 
-        self.status_builder
-            .build(self.aggregated_status.clone(), tag)
+        self.status_deagg.deaggregate(&self.aggregated_status, tag)
     }
 }
 
-type SharedAggregatedStatus<A, T> = Arc<parking_lot::Mutex<AggregatedStatus<A, T>>>;
-
-#[derive(Debug, Clone)]
-enum AggregatedError {
-    Client(Arc<ClientError>),
-    Transformer(Arc<transformer::Error>),
-}
+type SharedAggregatedStatus<A> = Arc<parking_lot::Mutex<AggregatedStatus<A>>>;
+type SharedAggregatedError = Arc<ClientError>;
 
 #[derive(Debug)]
-struct AggregatedResult<A, T>
+struct AggregatedResult<A>
 where
     A: aggregator::Aggregator,
-    T: transformer::Transformer<Input = A::Output>,
-    A::StatusDeaggregator:
-        aggregator::StatusDeaggregator<Input = <T as transformer::TransformerStatus>::Status>,
 {
-    inner: Result<SharedAggregatedStatus<A, T>, AggregatedError>,
+    inner: Result<SharedAggregatedStatus<A>, SharedAggregatedError>,
 }
 
-impl<A, T> AggregatedResult<A, T>
+impl<A> AggregatedResult<A>
 where
     A: aggregator::Aggregator,
-    T: transformer::Transformer<Input = A::Output>,
-    A::StatusDeaggregator:
-        aggregator::StatusDeaggregator<Input = <T as transformer::TransformerStatus>::Status>,
 {
     fn extract(&self, tag: u64) -> Result<<A as aggregator::AggregatorStatus>::Status, Error> {
         match &self.inner {
@@ -415,22 +340,14 @@ where
                 Ok(status) => Ok(status),
                 Err(e) => Err(Error::Aggregator(e)),
             },
-            Err(AggregatedError::Client(client_error)) => {
-                Err(Error::Client(Arc::clone(client_error)))
-            }
-            Err(AggregatedError::Transformer(client_error)) => {
-                Err(Error::Transformer(Arc::clone(client_error)))
-            }
+            Err(client_error) => Err(Error::Client(Arc::clone(client_error))),
         }
     }
 }
 
-impl<A, T> Clone for AggregatedResult<A, T>
+impl<A> Clone for AggregatedResult<A>
 where
     A: aggregator::Aggregator,
-    T: transformer::Transformer<Input = A::Output>,
-    A::StatusDeaggregator:
-        aggregator::StatusDeaggregator<Input = <T as transformer::TransformerStatus>::Status>,
 {
     fn clone(&self) -> Self {
         Self {
@@ -440,28 +357,20 @@ where
 }
 
 #[derive(Debug)]
-struct ProducerInner<A, T>
+struct ProducerInner<A>
 where
     A: aggregator::Aggregator,
-    T: transformer::Transformer<Input = A::Output>,
-    A::StatusDeaggregator:
-        aggregator::StatusDeaggregator<Input = <T as transformer::TransformerStatus>::Status>,
 {
-    result_slot: broadcast::BroadcastOnce<AggregatedResult<A, T>>,
+    result_slot: broadcast::BroadcastOnce<AggregatedResult<A>>,
 
     aggregator: A,
-
-    transformer: T,
 
     tag_counter: u64,
 }
 
-impl<A, T> BatchProducer<A, T>
+impl<A> BatchProducer<A>
 where
     A: aggregator::Aggregator,
-    T: transformer::Transformer<Input = A::Output>,
-    A::StatusDeaggregator:
-        aggregator::StatusDeaggregator<Input = <T as transformer::TransformerStatus>::Status>,
 {
     /// Write `data` to this [`BatchProducer`]
     ///
@@ -532,19 +441,10 @@ where
 
     /// Flushes out the data from the aggregator, publishes the result to the result slot,
     /// and creates a fresh result slot for future writes to use
-    async fn flush(inner: &mut ProducerInner<A, T>, client: &dyn ProducerClient) {
+    async fn flush(inner: &mut ProducerInner<A>, client: &dyn ProducerClient) {
         trace!("Flushing batch producer");
 
-        let (output, status_builder_1) = inner.aggregator.flush();
-        let (output, status_builder_2) = match inner.transformer.transform(output) {
-            Ok(t) => t,
-            Err(e) => {
-                let slot = std::mem::take(&mut inner.result_slot);
-                let inner = Err(AggregatedError::Transformer(Arc::new(e)));
-                slot.broadcast(AggregatedResult { inner });
-                return;
-            }
-        };
+        let (output, status_deagg) = inner.aggregator.flush();
         if output.is_empty() {
             return;
         }
@@ -554,26 +454,15 @@ where
         // Reset result slot
         let slot = std::mem::take(&mut inner.result_slot);
 
-        let status = match r {
-            Ok(status) => status,
-            Err(e) => {
-                let inner = Err(AggregatedError::Client(Arc::new(e)));
-                slot.broadcast(AggregatedResult { inner });
-                return;
-            }
-        };
-
-        let r = status_builder_2.build(status);
-
         let inner = match r {
             Ok(status) => {
                 let aggregated_status = AggregatedStatus {
                     aggregated_status: status,
-                    status_builder: status_builder_1,
+                    status_deagg,
                 };
                 Ok(Arc::new(parking_lot::Mutex::new(aggregated_status)))
             }
-            Err(e) => Err(AggregatedError::Transformer(Arc::new(e))),
+            Err(e) => Err(Arc::new(e)),
         };
 
         slot.broadcast(AggregatedResult { inner })
