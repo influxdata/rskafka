@@ -307,34 +307,12 @@ where
     status_deagg: <A as aggregator::Aggregator>::StatusDeaggregator,
 }
 
-impl<A> AggregatedStatus<A>
-where
-    A: aggregator::Aggregator,
-{
-    fn extract(
-        &self,
-        tag: A::Tag,
-    ) -> Result<<A as aggregator::AggregatorStatus>::Status, aggregator::Error> {
-        use self::aggregator::StatusDeaggregator;
-
-        self.status_deagg.deaggregate(&self.aggregated_status, tag)
-    }
-}
-
-/// Aggregated status that can be extracted / split into pieces.
-///
-/// This needs a [`Mutex`] so that we don't require [`aggregator::StatusDeaggregator`] to be `Sync`.
-type SharedAggregatedStatus<A> = Arc<parking_lot::Mutex<AggregatedStatus<A>>>;
-
-//// Client error that can be returned to multiple callers.
-type SharedAggregatedError = Arc<ClientError>;
-
 #[derive(Debug)]
 struct AggregatedResult<A>
 where
     A: aggregator::Aggregator,
 {
-    inner: Result<SharedAggregatedStatus<A>, SharedAggregatedError>,
+    inner: Result<Arc<AggregatedStatus<A>>, Arc<ClientError>>,
 }
 
 impl<A> AggregatedResult<A>
@@ -342,8 +320,13 @@ where
     A: aggregator::Aggregator,
 {
     fn extract(&self, tag: A::Tag) -> Result<<A as aggregator::AggregatorStatus>::Status, Error> {
+        use self::aggregator::StatusDeaggregator;
+
         match &self.inner {
-            Ok(status) => match status.lock().extract(tag) {
+            Ok(status) => match status
+                .status_deagg
+                .deaggregate(&status.aggregated_status, tag)
+            {
                 Ok(status) => Ok(status),
                 Err(e) => Err(Error::Aggregator(e)),
             },
@@ -468,7 +451,7 @@ where
                     aggregated_status: status,
                     status_deagg,
                 };
-                Ok(Arc::new(parking_lot::Mutex::new(aggregated_status)))
+                Ok(Arc::new(aggregated_status))
             }
             Err(e) => Err(Arc::new(e)),
         };

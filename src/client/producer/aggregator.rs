@@ -59,7 +59,7 @@ pub trait Aggregator: Send {
 }
 
 /// De-aggregate status for successful `produce` operations.
-pub trait StatusDeaggregator: Send + std::fmt::Debug {
+pub trait StatusDeaggregator: Send + Sync + std::fmt::Debug {
     /// The de-aggregated output status.
     type Status;
 
