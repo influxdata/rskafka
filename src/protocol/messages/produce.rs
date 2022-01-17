@@ -125,11 +125,10 @@ impl RequestBody for ProduceRequest {
         ApiVersionRange::new(ApiVersion(Int16(3)), ApiVersion(Int16(7)));
 
     const FIRST_TAGGED_FIELD_IN_REQUEST_VERSION: ApiVersion = ApiVersion(Int16(9));
-    const FIRST_TAGGED_FIELD_IN_RESPONSE_VERSION: ApiVersion =
-        Self::FIRST_TAGGED_FIELD_IN_REQUEST_VERSION;
 }
 
 #[derive(Debug)]
+#[allow(missing_copy_implementations)]
 pub struct ProduceResponsePartitionResponse {
     /// The partition index.
     pub index: Int32,

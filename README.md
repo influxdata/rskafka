@@ -5,7 +5,7 @@ write-ahead log.
 
 It is **not** a general-purpose Kafka implementation, instead it is heavily optimised for simplicity, both in terms of
 implementation and its emergent operational characteristics. In particular, it aims to meet the needs
-of [IOx](https://github.com/influxdata/influxdb_iox/).
+of [IOx].
 
 This crate has:
 
@@ -82,7 +82,7 @@ For more advanced production and consumption, see [`crate::client::producer`] an
 
 ### Redpanda
 
-To run integration tests against Redpanda, run:
+To run integration tests against [Redpanda], run:
 
 ```console
 $ docker-compose -f docker-compose-redpanda.yml up
@@ -96,9 +96,9 @@ $ TEST_INTEGRATION=1 KAFKA_CONNECT=0.0.0.0:9093 cargo test
 
 in another session.
 
-### Kafka
+### Apache Kafka
 
-To run integration tests against Kafka, run:
+To run integration tests against [Apache Kafka], run:
 
 ```console
 $ docker-compose -f docker-compose-kafka.yml up
@@ -111,6 +111,65 @@ $ TEST_INTEGRATION=1 KAFKA_CONNECT=localhost:9094 cargo test
 ```
 
 in another session.
+
+### Fuzzing
+RSKafka offers fuzz targets for certain protocol parsing steps. To build them make sure you have [cargo-fuzz] installed.
+Then run the fuzzer with:
+
+```console
+$ cargo +nightly fuzz run protocol_reader
+...
+```
+
+Let it running for how long you wish or until it finds a crash:
+
+```text
+...
+Failing input:
+
+        fuzz/artifacts/protocol_reader/crash-369f9787d35767c47431161d455aa696a71c23e3
+
+Output of `std::fmt::Debug`:
+
+        [0, 18, 0, 3, 0, 0, 0, 0, 71, 88, 0, 0, 0, 164, 164, 164, 164, 164, 164, 164, 164, 164, 164, 0, 0, 0, 164, 164, 164, 164, 164, 164, 164, 164, 164, 164, 164, 164, 164, 164, 164, 164, 164, 164, 164, 164, 164, 164, 164, 164, 0, 164, 164, 164, 164, 164, 164, 164, 164, 164, 164, 164, 164, 164, 164, 164, 164, 164, 164, 18, 18, 0, 164, 0, 164, 164, 164, 30, 164, 164, 0, 0, 0, 0, 63]
+
+Reproduce with:
+
+        cargo fuzz run protocol_reader fuzz/artifacts/protocol_reader/crash-369f9787d35767c47431161d455aa696a71c23e3
+
+Minimize test case with:
+
+        cargo fuzz tmin protocol_reader fuzz/artifacts/protocol_reader/crash-369f9787d35767c47431161d455aa696a71c23e3
+```
+
+Sadly the backtraces that you might get are not really helpful and you need a debugger to detect the exact source
+locations:
+
+```console
+$ rust-lldb ./fuzz/target/x86_64-unknown-linux-gnu/debug/protocol_reader fuzz/artifacts/protocol_reader/crash-7b824dad6e26002e5488e8cc84ce16728222dcf5
+...
+
+(lldb) r
+...
+Process 177543 launched: '/home/mneumann/src/rskafka/fuzz/target/x86_64-unknown-linux-gnu/debug/protocol_reader' (x86_64)
+INFO: Running with entropic power schedule (0xFF, 100).
+INFO: Seed: 3549747846
+...
+==177543==ABORTING
+(lldb) AddressSanitizer report breakpoint hit. Use 'thread info -s' to get extended information about the report.
+Process 177543 stopped
+...
+
+(lldb) bt
+* thread #1, name = 'protocol_reader', stop reason = AddressSanitizer detected: allocation-size-too-big
+  * frame #0: 0x0000555556c04f20 protocol_reader`::AsanDie() at asan_rtl.cpp:45:7
+    frame #1: 0x0000555556c1a33c protocol_reader`__sanitizer::Die() at sanitizer_termination.cpp:55:7
+    frame #2: 0x0000555556c01471 protocol_reader`::~ScopedInErrorReport() at asan_report.cpp:190:7
+    frame #3: 0x0000555556c021f4 protocol_reader`::ReportAllocationSizeTooBig() at asan_report.cpp:313:1
+...
+```
+
+Then create a unit test and fix the bug.
 
 ## License
 
@@ -128,3 +187,9 @@ in the Apache-2.0 license, shall be dual-licensed as above, without any addition
 [^1]: Kafka's design makes it hard for any client to support the converse, as ultimately each partition is an
 independent write stream within the broker. However, this crate makes no attempt to mitigate per-partition overheads
 e.g. by batching writes to multiple partitions in a single ProduceRequest
+
+
+[Apache Kafka]: https://kafka.apache.org/
+[cargo-fuzz]: https://github.com/rust-fuzz/cargo-fuzz
+[IOx]: https://github.com/influxdata/influxdb_iox/
+[Redpanda]: https://vectorized.io/redpanda

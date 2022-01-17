@@ -103,7 +103,11 @@ where
             .expect("Int32 should always be writable to in-mem buffer");
 
         self.write(len_buf.as_ref()).await?;
-        self.write(msg).await?;
+
+        // empty writes seem to block forever on some IOs (e.g. tokio duplex)
+        if !msg.is_empty() {
+            self.write(msg).await?;
+        }
 
         Ok(())
     }
@@ -152,5 +156,24 @@ mod tests {
         let err = stream.write_message(&msg).await.unwrap_err();
         assert_matches!(err, WriteError::TooLarge { .. });
         assert_eq!(err.to_string(), "Message too large: 2147483648");
+    }
+
+    #[tokio::test]
+    async fn test_roundtrip_empty_cursor() {
+        let mut data = Cursor::new(vec![]);
+        data.write_message(&[]).await.unwrap();
+
+        data.set_position(0);
+        let actual = data.read_message(0).await.unwrap();
+        assert_eq!(actual, vec![]);
+    }
+
+    #[tokio::test]
+    async fn test_roundtrip_empty_duplex() {
+        let (mut server, mut client) = tokio::io::duplex(4);
+        client.write_message(&[]).await.unwrap();
+
+        let actual = server.read_message(0).await.unwrap();
+        assert_eq!(actual, vec![]);
     }
 }
