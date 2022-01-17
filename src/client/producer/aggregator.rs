@@ -3,54 +3,120 @@ use crate::record::Record;
 /// The error returned by [`Aggregator`] implementations
 pub type Error = Box<dyn std::error::Error + Send + Sync>;
 
-/// A type that receives one or more input and returns a single output
-pub trait Aggregator {
-    type Input;
+/// Return value of [Aggregator::try_push].
+#[derive(Debug)]
+pub enum TryPush<I, T> {
+    /// Insufficient capacity.
+    ///
+    /// Return [`Input`](Aggregator::Input) back to caller.
+    NoCapacity(I),
 
-    type Output;
+    /// Aggregated input.
+    ///
+    /// Return tag to allow retrieval of [`Status`](StatusDeaggregator::Status) from [`StatusDeaggregator`].
+    Aggregated(T),
+}
+
+impl<I, T> TryPush<I, T> {
+    pub fn unwrap_input(self) -> I {
+        match self {
+            Self::NoCapacity(input) => input,
+            Self::Aggregated(_) => panic!("Aggregated"),
+        }
+    }
+
+    pub fn unwrap_tag(self) -> T {
+        match self {
+            Self::NoCapacity(_) => panic!("NoCapacity"),
+            Self::Aggregated(tag) => tag,
+        }
+    }
+}
+
+/// A type that receives one or more input and returns a single output
+pub trait Aggregator: Send {
+    /// The unaggregated input.
+    type Input: Send;
+
+    /// Tag used to deaggregate status.
+    type Tag: Send;
+
+    /// De-aggregates the status for successful `produce` operations.
+    type StatusDeaggregator: StatusDeaggregator<Tag = Self::Tag>;
 
     /// Try to append `record` implementations should return
     ///
-    /// - `Ok(None)` on success
-    /// - `Ok(Some(record))` if there is insufficient capacity in the `Aggregator`
+    /// - `Ok(TryPush::Aggregated(_))` on success
+    /// - `Ok(TryPush::NoCapacity(_))` if there is insufficient capacity in the `Aggregator`
     /// - `Err(_)` if an error is encountered
     ///
     /// [`Aggregator`] must only be modified if this method returns `Ok(None)`
     ///
-    fn try_push(&mut self, record: Self::Input) -> Result<Option<Self::Input>, Error>;
+    fn try_push(&mut self, record: Self::Input) -> Result<TryPush<Self::Input, Self::Tag>, Error>;
 
     /// Flush the contents of this aggregator to Kafka
-    fn flush(&mut self) -> Self::Output;
+    fn flush(&mut self) -> (Vec<Record>, Self::StatusDeaggregator);
+}
+
+/// De-aggregate status for successful `produce` operations.
+pub trait StatusDeaggregator: Send + Sync + std::fmt::Debug {
+    /// The de-aggregated output status.
+    type Status;
+
+    /// Tag used to deaggregate status.
+    type Tag: Send;
+
+    /// De-aggregate status.
+    fn deaggregate(&self, input: &[i64], tag: Self::Tag) -> Result<Self::Status, Error>;
+}
+
+/// Helper trait to access the status of an [`Aggregator`].
+pub trait AggregatorStatus {
+    type Status;
+}
+
+impl<T> AggregatorStatus for T
+where
+    T: Aggregator,
+{
+    type Status = <<Self as Aggregator>::StatusDeaggregator as StatusDeaggregator>::Status;
+}
+
+#[derive(Debug, Default)]
+struct AggregatorState {
+    batch_size: usize,
+    records: Vec<Record>,
 }
 
 /// a [`Aggregator`] that batches up to a certain number of bytes of [`Record`]
 #[derive(Debug)]
 pub struct RecordAggregator {
     max_batch_size: usize,
-    batch_size: usize,
-    records: Vec<Record>,
+    state: AggregatorState,
 }
 
 impl Aggregator for RecordAggregator {
     type Input = Record;
-    type Output = Vec<Record>;
+    type Tag = usize;
+    type StatusDeaggregator = RecordAggregatorStatusDeaggregator;
 
-    fn try_push(&mut self, record: Self::Input) -> Result<Option<Self::Input>, Error> {
+    fn try_push(&mut self, record: Self::Input) -> Result<TryPush<Self::Input, Self::Tag>, Error> {
         let record_size: usize = record.approximate_size();
 
-        if self.batch_size + record_size > self.max_batch_size {
-            return Ok(Some(record));
+        if self.state.batch_size + record_size > self.max_batch_size {
+            return Ok(TryPush::NoCapacity(record));
         }
 
-        self.batch_size += record_size;
-        self.records.push(record);
+        let tag = self.state.records.len();
+        self.state.batch_size += record_size;
+        self.state.records.push(record);
 
-        Ok(None)
+        Ok(TryPush::Aggregated(tag))
     }
 
-    fn flush(&mut self) -> Self::Output {
-        self.batch_size = 0;
-        std::mem::take(&mut self.records)
+    fn flush(&mut self) -> (Vec<Record>, Self::StatusDeaggregator) {
+        let state = std::mem::take(&mut self.state);
+        (state.records, RecordAggregatorStatusDeaggregator::default())
     }
 }
 
@@ -58,9 +124,20 @@ impl RecordAggregator {
     pub fn new(max_batch_size: usize) -> Self {
         Self {
             max_batch_size,
-            batch_size: 0,
-            records: vec![],
+            state: Default::default(),
         }
+    }
+}
+
+#[derive(Debug, Default, Clone, Copy)]
+pub struct RecordAggregatorStatusDeaggregator {}
+
+impl StatusDeaggregator for RecordAggregatorStatusDeaggregator {
+    type Status = i64;
+    type Tag = usize;
+
+    fn deaggregate(&self, input: &[i64], tag: Self::Tag) -> Result<Self::Status, Error> {
+        Ok(input[tag])
     }
 }
 
@@ -87,34 +164,68 @@ mod tests {
         assert!(r2.approximate_size() < r2.approximate_size() * 2);
 
         let mut aggregator = RecordAggregator::new(r1.approximate_size() * 2);
-        assert!(aggregator.try_push(r1.clone()).unwrap().is_none());
-        assert!(aggregator.try_push(r1.clone()).unwrap().is_none());
+        let t1 = aggregator.try_push(r1.clone()).unwrap().unwrap_tag();
+        let t2 = aggregator.try_push(r1.clone()).unwrap().unwrap_tag();
 
         // Cannot add more data once full
-        assert!(aggregator.try_push(r1.clone()).unwrap().is_some());
-        assert!(aggregator.try_push(r1.clone()).unwrap().is_some());
+        aggregator.try_push(r1.clone()).unwrap().unwrap_input();
+        aggregator.try_push(r1.clone()).unwrap().unwrap_input();
 
-        assert_eq!(aggregator.flush().len(), 2);
+        // flush two records
+        let (records, deagg) = aggregator.flush();
+        assert_eq!(records.len(), 2);
+        assert_eq!(deagg.deaggregate(&[10, 20], t1).unwrap(), 10);
+        assert_eq!(deagg.deaggregate(&[10, 20], t2).unwrap(), 20);
 
         // Test early flush
-        assert!(aggregator.try_push(r1.clone()).unwrap().is_none());
-        assert_eq!(aggregator.flush().len(), 1);
+        let t1 = aggregator.try_push(r1.clone()).unwrap().unwrap_tag();
+        let (records, deagg) = aggregator.flush();
+        assert_eq!(records.len(), 1);
+        assert_eq!(deagg.deaggregate(&[10], t1).unwrap(), 10);
 
-        assert!(aggregator.try_push(r1.clone()).unwrap().is_none());
-        assert!(aggregator.try_push(r1.clone()).unwrap().is_none());
-        assert_eq!(aggregator.flush().len(), 2);
+        // next flush has full capacity again
+        let t1 = aggregator.try_push(r1.clone()).unwrap().unwrap_tag();
+        let t2 = aggregator.try_push(r1.clone()).unwrap().unwrap_tag();
+
+        let (records, deagg) = aggregator.flush();
+        assert_eq!(records.len(), 2);
+        assert_eq!(deagg.deaggregate(&[10, 20], t1).unwrap(), 10);
+        assert_eq!(deagg.deaggregate(&[10, 20], t2).unwrap(), 20);
 
         // Test empty flush
-        assert_eq!(aggregator.flush().len(), 0);
+        let (records, _deagg) = aggregator.flush();
+        assert_eq!(records.len(), 0);
 
         // Test flush to make space for larger record
-        assert!(aggregator.try_push(r1.clone()).unwrap().is_none());
-        assert!(aggregator.try_push(r2.clone()).unwrap().is_some());
-        assert_eq!(aggregator.flush().len(), 1);
-        assert!(aggregator.try_push(r2.clone()).unwrap().is_none());
+        aggregator.try_push(r1.clone()).unwrap().unwrap_tag();
+        aggregator.try_push(r2.clone()).unwrap().unwrap_input();
+        assert_eq!(aggregator.flush().0.len(), 1);
+        aggregator.try_push(r2.clone()).unwrap().unwrap_tag();
 
         // Test too large record
         let mut aggregator = RecordAggregator::new(r1.approximate_size());
-        assert!(aggregator.try_push(r2).unwrap().is_some());
+        aggregator.try_push(r2).unwrap().unwrap_input();
+    }
+
+    #[test]
+    fn test_unwrap_input_ok() {
+        assert_eq!(TryPush::<i8, i8>::NoCapacity(42).unwrap_input(), 42,);
+    }
+
+    #[test]
+    #[should_panic(expected = "Aggregated")]
+    fn test_unwrap_input_panic() {
+        TryPush::<i8, i8>::Aggregated(42).unwrap_input();
+    }
+
+    #[test]
+    fn test_unwrap_tag_ok() {
+        assert_eq!(TryPush::<i8, i8>::Aggregated(42).unwrap_tag(), 42,);
+    }
+
+    #[test]
+    #[should_panic(expected = "NoCapacity")]
+    fn test_unwrap_tag_panic() {
+        TryPush::<i8, i8>::NoCapacity(42).unwrap_tag();
     }
 }
