@@ -71,7 +71,7 @@ pub struct RecordAggregator {
 impl Aggregator for RecordAggregator {
     type Input = Record;
     type Output = Vec<Record>;
-    type StatusDeaggregator = RecordAggregatorStatusBuilder;
+    type StatusDeaggregator = RecordAggregatorStatusDeaggregator;
 
     fn try_push(&mut self, record: Self::Input, tag: u64) -> Result<Option<Self::Input>, Error> {
         let record_size: usize = record.approximate_size();
@@ -93,7 +93,7 @@ impl Aggregator for RecordAggregator {
         let state = std::mem::take(&mut self.state);
         (
             state.records,
-            RecordAggregatorStatusBuilder {
+            RecordAggregatorStatusDeaggregator {
                 reverse_mapping: state.reverse_mapping,
             },
         )
@@ -110,11 +110,11 @@ impl RecordAggregator {
 }
 
 #[derive(Debug)]
-pub struct RecordAggregatorStatusBuilder {
+pub struct RecordAggregatorStatusDeaggregator {
     reverse_mapping: HashMap<u64, usize>,
 }
 
-impl StatusDeaggregator for RecordAggregatorStatusBuilder {
+impl StatusDeaggregator for RecordAggregatorStatusDeaggregator {
     type Input = Vec<i64>;
 
     type Status = i64;
