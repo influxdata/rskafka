@@ -17,11 +17,22 @@
 )]
 
 mod backoff;
+
 pub mod client;
+
 mod connection;
+#[cfg(feature = "fuzzing")]
+pub mod messenger;
+#[cfg(not(feature = "fuzzing"))]
 mod messenger;
+
+#[cfg(feature = "fuzzing")]
+pub mod protocol;
+#[cfg(not(feature = "fuzzing"))]
 mod protocol;
+
 pub mod record;
+
 pub mod topic;
 
 // re-exports

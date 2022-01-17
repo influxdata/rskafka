@@ -68,7 +68,7 @@ jobs:
       - cache_restore
       - run:
           name: Clippy
-          command: cargo clippy --all-targets --all-features -- -D warnings
+          command: cargo clippy --all-targets --all-features --workspace -- -D warnings
       - cache_save
   cargo_audit:
     docker:
@@ -115,7 +115,7 @@ jobs:
       - cache_restore
       - run:
           name: Cargo doc
-          command: cargo doc --document-private-items --no-deps
+          command: cargo doc --document-private-items --no-deps --workspace
       - cache_save
       - run:
           name: Compress Docs
@@ -190,7 +190,7 @@ jobs:
       - cache_restore
       - run:
           name: Cargo test
-          command: cargo test
+          command: cargo test --workspace
       - cache_save
       - store_artifacts:
           path: proptest-regressions
@@ -255,16 +255,13 @@ jobs:
       - cache_restore
       - run:
           name: Cargo test
-          command: cargo test
+          command: cargo test --workspace
       - cache_save
       - store_artifacts:
           path: proptest-regressions
 
-  # Build a dev binary.
-  #
-  # Compiles a binary with the default ("dev") cargo profile from the iox source
-  # using the latest ci_image.
-  build:
+  # Builds RSKafka w/ default features.
+  build-default-features:
     docker:
       - image: quay.io/influxdb/rust:ci
     resource_class: xlarge  # use of a smaller executor tends crashes on link
@@ -288,6 +285,34 @@ jobs:
           command: cargo test --benches --no-run
       - cache_save
 
+  # Builds fuzzing.
+  build-fuzz:
+    docker:
+      - image: quay.io/influxdb/rust:ci
+    resource_class: xlarge  # use of a smaller executor tends crashes on link
+    environment:
+      # Disable incremental compilation to avoid overhead. We are not preserving these files anyway.
+      CARGO_INCREMENTAL: "0"
+      # Disable full debug symbol generation to speed up CI build
+      # "1" means line tables only, which is useful for panic tracebacks.
+      RUSTFLAGS: "-C debuginfo=1"
+      # https://github.com/rust-lang/cargo/issues/10280
+      CARGO_NET_GIT_FETCH_WITH_CLI: "true"
+    steps:
+      - checkout
+      - rust_components
+      - cache_restore
+      - run:
+          name: Install cargo-fuzz
+          command: cargo install cargo-fuzz
+      - run:
+          name: Install nightly toolchain
+          command: rustup toolchain install nightly-x86_64-unknown-linux-gnu
+      - run:
+          name: Cargo fuzz build
+          command: cargo +nightly fuzz build
+      - cache_save
+
 workflows:
   version: 2
 
@@ -299,5 +324,6 @@ workflows:
       - cargo_audit
       - test-redpanda
       - test-kafka
-      - build
+      - build-default-features
+      - build-fuzz
       - doc

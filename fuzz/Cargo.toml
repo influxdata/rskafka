@@ -1,0 +1,22 @@
+[package]
+name = "rskafka-fuzz"
+version = "0.0.0"
+authors = ["Automatically generated"]
+publish = false
+edition = "2021"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4.0"
+pin-project-lite = "0.2"
+proptest = "1"
+rskafka = { path = "..", features = ["fuzzing"] }
+tokio = { version = "1.14", default-features = false, features = ["io-util", "rt"] }
+
+[[bin]]
+name = "protocol_reader"
+path = "fuzz_targets/protocol_reader.rs"
+test = false
+doc = false

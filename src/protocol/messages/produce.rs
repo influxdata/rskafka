@@ -128,6 +128,7 @@ impl RequestBody for ProduceRequest {
 }
 
 #[derive(Debug)]
+#[allow(missing_copy_implementations)]
 pub struct ProduceResponsePartitionResponse {
     /// The partition index.
     pub index: Int32,

@@ -219,7 +219,7 @@ where
 /// written out first, followed by the second-lowest, and so on.  Each time a group of 7 bits is written out, the high
 /// bit (bit 8) is cleared if this group is the last one, and set if it is not.
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Clone, Copy)]
-#[cfg_attr(test, derive(proptest_derive::Arbitrary))]
+#[cfg_attr(any(feature = "fuzzing", test), derive(proptest_derive::Arbitrary))]
 pub struct UnsignedVarint(pub u64);
 
 impl<R> ReadType<R> for UnsignedVarint
@@ -355,7 +355,7 @@ where
 
 /// Represents a string whose length is expressed as a variable-length integer rather than a fixed 2-byte length.
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
-#[cfg_attr(test, derive(proptest_derive::Arbitrary))]
+#[cfg_attr(any(feature = "fuzzing", test), derive(proptest_derive::Arbitrary))]
 pub struct CompactString(pub String);
 
 impl<R> ReadType<R> for CompactString
@@ -508,7 +508,7 @@ where
 
 /// Represents a section containing optional tagged fields.
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
-#[cfg_attr(test, derive(proptest_derive::Arbitrary))]
+#[cfg_attr(any(feature = "fuzzing", test), derive(proptest_derive::Arbitrary))]
 pub struct TaggedFields(pub Vec<(UnsignedVarint, Vec<u8>)>);
 
 impl<R> ReadType<R> for TaggedFields

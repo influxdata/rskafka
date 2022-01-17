@@ -19,6 +19,7 @@ use super::{
 };
 
 #[derive(Debug)]
+#[allow(missing_copy_implementations)]
 pub struct ListOffsetsRequestPartition {
     /// The partition index.
     pub partition_index: Int32,

@@ -14,6 +14,7 @@ use super::{
 };
 
 #[derive(Debug)]
+#[allow(missing_copy_implementations)]
 pub struct FetchRequestPartition {
     /// The partition index.
     pub partition: Int32,
@@ -162,6 +163,7 @@ impl RequestBody for FetchRequest {
 }
 
 #[derive(Debug)]
+#[allow(missing_copy_implementations)]
 pub struct FetchResponseAbortedTransaction {
     /// The producer id associated with the aborted transaction.
     pub producer_id: Int64,
