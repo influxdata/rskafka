@@ -15,3 +15,4 @@ pub mod record;
 #[cfg(test)]
 pub mod test_utils;
 pub mod traits;
+pub mod vec_builder;

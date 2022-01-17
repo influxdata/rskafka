@@ -1,0 +1,143 @@
+//! Helper to build a vector w/o blowing up memory.
+
+/// Default block size (10MB).
+const DEFAULT_BLOCK_SIZE: usize = 1024 * 1024 * 10;
+
+/// Helper to build a vector w/ limited memory consumption.
+///
+/// For small vectors the elements are not copied. For larger vectors the elements are only copied once (in contrast to
+/// `O(log n)` when using a normal vector w/o pre-allocation).
+#[derive(Debug)]
+pub struct VecBuilder<T> {
+    elements_per_block: usize,
+    blocks: Vec<Vec<T>>,
+    remaining_elements: usize,
+}
+
+impl<T> VecBuilder<T> {
+    /// Create new builder.
+    ///
+    /// # Panic
+    /// Pancis when block size is too small to hold a single element of `T`.
+    /// Create new builder.
+    pub fn new(expected_elements: usize) -> Self {
+        Self::new_with_block_size(expected_elements, DEFAULT_BLOCK_SIZE)
+    }
+
+    ///
+    /// # Panic
+    /// Pancis when block size is too small to hold a single element of `T`.
+    pub fn new_with_block_size(expected_elements: usize, block_size: usize) -> Self {
+        let element_size = std::mem::size_of::<T>();
+        let elements_per_block = if element_size == 0 {
+            expected_elements
+        } else {
+            block_size / element_size
+        };
+        if elements_per_block == 0 {
+            panic!("Block size too small for this type!");
+        }
+
+        Self {
+            elements_per_block,
+            blocks: vec![Vec::with_capacity(
+                elements_per_block.min(expected_elements),
+            )],
+            remaining_elements: expected_elements,
+        }
+    }
+
+    /// Push new element to builder
+    ///
+    /// # Panic
+    /// Panics when pushing more elements than got specific during builder creation.
+    pub fn push(&mut self, element: T) {
+        assert!(
+            self.remaining_elements > 0,
+            "Got more elements than expected!"
+        );
+
+        let mut target_block = self.blocks.last_mut().expect("Has always at least 1 block");
+        if target_block.len() >= self.elements_per_block {
+            self.blocks.push(Vec::with_capacity(
+                self.remaining_elements.min(self.elements_per_block),
+            ));
+            target_block = self.blocks.last_mut().expect("Just pushed a new block");
+        }
+        target_block.push(element);
+        self.remaining_elements -= 1;
+    }
+}
+
+impl<T> From<VecBuilder<T>> for Vec<T> {
+    fn from(builder: VecBuilder<T>) -> Self {
+        if builder.blocks.len() == 1 {
+            builder
+                .blocks
+                .into_iter()
+                .next()
+                .expect("Just checked number of blocks")
+        } else {
+            let mut out = Self::with_capacity(builder.blocks.iter().map(Self::len).sum());
+            for mut block in builder.blocks.into_iter() {
+                out.append(&mut block);
+            }
+            out
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_build() {
+        let expected_elements = 7;
+        let mut builder = VecBuilder::<i16>::new_with_block_size(expected_elements, 5);
+
+        let mut expected = vec![];
+        for i in 0..expected_elements {
+            let i = i as i16;
+            builder.push(i);
+            expected.push(i);
+        }
+
+        let blocks = vec![vec![0, 1], vec![2, 3], vec![4, 5], vec![6]];
+        assert_eq!(builder.blocks, blocks);
+
+        let actual: Vec<_> = builder.into();
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn test_zst() {
+        let expected_elements = 3;
+        let mut builder = VecBuilder::<()>::new_with_block_size(expected_elements, 1);
+
+        let mut expected = vec![];
+        for _ in 0..expected_elements {
+            builder.push(());
+            expected.push(());
+        }
+
+        let blocks = vec![vec![(), (), ()]];
+        assert_eq!(builder.blocks, blocks);
+
+        let actual: Vec<_> = builder.into();
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    #[should_panic(expected = "Block size too small for this type!")]
+    fn test_panic_block_size_too_small() {
+        VecBuilder::<i16>::new_with_block_size(0, 1);
+    }
+
+    #[test]
+    #[should_panic(expected = "Got more elements than expected!")]
+    fn test_panic_too_many_elements() {
+        let mut builder = VecBuilder::<i8>::new_with_block_size(0, 1);
+        builder.push(1);
+    }
+}
