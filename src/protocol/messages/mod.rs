@@ -34,7 +34,7 @@ mod test_utils;
 
 #[derive(Error, Debug)]
 pub enum ReadVersionedError {
-    #[error(transparent)]
+    #[error("Read error: {0}")]
     ReadError(#[from] ReadError),
 }
 
@@ -47,7 +47,7 @@ where
 
 #[derive(Error, Debug)]
 pub enum WriteVersionedError {
-    #[error(transparent)]
+    #[error("Write error: {0}")]
     WriteError(#[from] WriteError),
 
     #[error("Field {field} not available in version: {version:?}")]
