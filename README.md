@@ -171,6 +171,13 @@ Process 177543 stopped
 
 Then create a unit test and fix the bug.
 
+For out-of-memory errors [LLDB] does not stop automatically. You can however set a breakpoint before starting the
+execution that hooks right into the place where it is about to exit:
+
+```console
+(lldb) b fuzzer::PrintStackTrace()
+```
+
 ## License
 
 Licensed under either of these:
@@ -192,4 +199,5 @@ e.g. by batching writes to multiple partitions in a single ProduceRequest
 [Apache Kafka]: https://kafka.apache.org/
 [cargo-fuzz]: https://github.com/rust-fuzz/cargo-fuzz
 [IOx]: https://github.com/influxdata/influxdb_iox/
+[LLDB]: https://lldb.llvm.org/
 [Redpanda]: https://vectorized.io/redpanda
