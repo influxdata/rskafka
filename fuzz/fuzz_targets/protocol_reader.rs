@@ -3,10 +3,6 @@ use std::{collections::HashMap, io::Cursor, time::Duration};
 
 use libfuzzer_sys::fuzz_target;
 use pin_project_lite::pin_project;
-use proptest::{
-    arbitrary::Arbitrary,
-    strategy::{Strategy, ValueTree},
-};
 use rskafka::{
     messenger::Messenger,
     protocol::{
@@ -17,7 +13,7 @@ use rskafka::{
             ApiVersionsRequest, CreateTopicsRequest, ReadVersionedType, RequestBody,
             WriteVersionedType,
         },
-        primitives::Int16,
+        primitives::{CompactString, Int16, Int32, TaggedFields},
         traits::ReadType,
     },
 };
@@ -36,31 +32,41 @@ fn driver(data: &[u8]) -> Result<(), Error> {
     let api_version = ApiVersion(Int16::read(&mut cursor)?);
 
     match api_key {
-        ApiKey::ApiVersions => send_recv::<ApiVersionsRequest>(cursor, api_key, api_version),
-        ApiKey::CreateTopics => send_recv::<CreateTopicsRequest>(cursor, api_key, api_version),
+        ApiKey::ApiVersions => send_recv(
+            ApiVersionsRequest {
+                client_software_name: CompactString(String::new()),
+                client_software_version: CompactString(String::new()),
+                tagged_fields: TaggedFields::default(),
+            },
+            cursor,
+            api_key,
+            api_version,
+        ),
+        ApiKey::CreateTopics => send_recv(
+            CreateTopicsRequest {
+                topics: vec![],
+                timeout_ms: Int32(0),
+                validate_only: None,
+                tagged_fields: None,
+            },
+            cursor,
+            api_key,
+            api_version,
+        ),
         _ => Err(format!("Fuzzing not implemented for: {:?}", api_key).into()),
     }
 }
 
 fn send_recv<T>(
+    request: T,
     cursor: Cursor<&[u8]>,
     api_key: ApiKey,
     api_version: ApiVersion,
 ) -> Result<(), Error>
 where
-    T: Arbitrary + RequestBody + Send + WriteVersionedType<Vec<u8>>,
+    T: RequestBody + Send + WriteVersionedType<Vec<u8>>,
     T::ResponseBody: ReadVersionedType<Cursor<Vec<u8>>>,
 {
-    // generate a random request, it will be swallowed by the mock transport anyways
-    // Note: use a deterministic RNG to not confuse the fuzzer with this work
-    let strategy = T::arbitrary();
-    let mut runner = proptest::test_runner::TestRunner::deterministic();
-
-    let request = strategy
-        .new_tree(&mut runner)
-        .expect("proptest should work")
-        .current();
-
     let rt = tokio::runtime::Builder::new_current_thread()
         .enable_time()
         .build()
