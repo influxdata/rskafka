@@ -424,9 +424,14 @@ where
         match len.0 {
             0 => Ok(Self(None)),
             len => {
-                let mut buf = vec![0; len as usize - 1];
-                reader.read_exact(&mut buf)?;
-                let s = String::from_utf8(buf).map_err(|e| ReadError::Malformed(Box::new(e)))?;
+                let len = usize::try_from(len)?;
+                let len = len - 1;
+
+                let mut buf = VecBuilder::new(len);
+                buf.read_exact(reader)?;
+
+                let s =
+                    String::from_utf8(buf.into()).map_err(|e| ReadError::Malformed(Box::new(e)))?;
                 Ok(Self(Some(s)))
             }
         }
@@ -777,6 +782,16 @@ mod tests {
         CompactNullableString,
         test_compact_nullable_string_roundtrip
     );
+
+    #[test]
+    fn test_compact_nullable_string_blowup_memory() {
+        let mut buf = Cursor::new(Vec::<u8>::new());
+        UnsignedVarint(u64::MAX).write(&mut buf).unwrap();
+        buf.set_position(0);
+
+        let err = CompactNullableString::read(&mut buf).unwrap_err();
+        assert_matches!(err, ReadError::IO(_));
+    }
 
     test_roundtrip!(NullableBytes, test_nullable_bytes_roundtrip);
 
