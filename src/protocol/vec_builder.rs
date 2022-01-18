@@ -70,6 +70,7 @@ impl<T> VecBuilder<T> {
 }
 
 impl VecBuilder<u8> {
+    /// Read as many bytes as there are left.
     pub fn read_exact<R>(&mut self, reader: &mut R) -> Result<(), std::io::Error>
     where
         R: std::io::Read,
@@ -172,6 +173,44 @@ mod tests {
 
         let actual: Vec<_> = builder.into();
         assert_eq!(actual, data);
+    }
+
+    #[test]
+    fn test_push_reader_interaction() {
+        let data = b"bc".to_vec();
+        let mut reader = Cursor::new(data.clone());
+
+        let mut builder = VecBuilder::<u8>::new_with_block_size(data.len() + 1, 2);
+        builder.push(b'a');
+        builder.read_exact(&mut reader).unwrap();
+
+        let blocks = vec![b"ab".to_vec(), b"c".to_vec()];
+        assert_eq!(builder.blocks, blocks);
+
+        let actual: Vec<_> = builder.into();
+        assert_eq!(&actual, b"abc");
+    }
+
+    #[test]
+    fn test_single_block_not_copied() {
+        let expected_elements = 5;
+        let mut builder = VecBuilder::<i16>::new_with_block_size(expected_elements, 10);
+
+        let mut expected = vec![];
+        for i in 0..expected_elements {
+            let i = i as i16;
+            builder.push(i);
+            expected.push(i);
+        }
+
+        let blocks = vec![vec![0, 1, 2, 3, 4]];
+        assert_eq!(builder.blocks, blocks);
+
+        let addr = builder.blocks[0].as_ptr();
+
+        let actual: Vec<_> = builder.into();
+        assert_eq!(actual, expected);
+        assert_eq!(actual.as_ptr(), addr);
     }
 
     #[test]
