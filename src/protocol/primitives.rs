@@ -370,10 +370,14 @@ where
                 "CompactString must have non-zero length".into(),
             )),
             len => {
+                let len = usize::try_from(len)?;
                 let len = len - 1;
-                let mut buf = vec![0; len as usize];
-                reader.read_exact(&mut buf)?;
-                let s = String::from_utf8(buf).map_err(|e| ReadError::Malformed(Box::new(e)))?;
+
+                let mut buf = VecBuilder::new(len);
+                buf.read_exact(reader)?;
+
+                let s =
+                    String::from_utf8(buf.into()).map_err(|e| ReadError::Malformed(Box::new(e)))?;
                 Ok(Self(s))
             }
         }
@@ -758,6 +762,16 @@ mod tests {
     }
 
     test_roundtrip!(CompactString, test_compact_string_roundtrip);
+
+    #[test]
+    fn test_compact_string_blowup_memory() {
+        let mut buf = Cursor::new(Vec::<u8>::new());
+        UnsignedVarint(u64::MAX).write(&mut buf).unwrap();
+        buf.set_position(0);
+
+        let err = CompactString::read(&mut buf).unwrap_err();
+        assert_matches!(err, ReadError::IO(_));
+    }
 
     test_roundtrip!(
         CompactNullableString,
