@@ -13,7 +13,10 @@ use rskafka::{
         api_key::ApiKey,
         api_version::{ApiVersion, ApiVersionRange},
         frame::AsyncMessageWrite,
-        messages::{ApiVersionsRequest, ReadVersionedType, RequestBody, WriteVersionedType},
+        messages::{
+            ApiVersionsRequest, CreateTopicsRequest, ReadVersionedType, RequestBody,
+            WriteVersionedType,
+        },
         primitives::Int16,
         traits::ReadType,
     },
@@ -34,6 +37,7 @@ fn driver(data: &[u8]) -> Result<(), Error> {
 
     match api_key {
         ApiKey::ApiVersions => send_recv::<ApiVersionsRequest>(cursor, api_key, api_version),
+        ApiKey::CreateTopics => send_recv::<CreateTopicsRequest>(cursor, api_key, api_version),
         _ => Err(format!("Fuzzing not implemented for: {:?}", api_key).into()),
     }
 }
@@ -48,8 +52,9 @@ where
     T::ResponseBody: ReadVersionedType<Cursor<Vec<u8>>>,
 {
     // generate a random request, it will be swallowed by the mock transport anyways
+    // Note: use a deterministic RNG to not confuse the fuzzer with this work
     let strategy = T::arbitrary();
-    let mut runner = proptest::test_runner::TestRunner::default();
+    let mut runner = proptest::test_runner::TestRunner::deterministic();
 
     let request = strategy
         .new_tree(&mut runner)
@@ -88,7 +93,6 @@ where
         )]));
 
         // the actual request
-        // Note: timeout is OK here, because duplex stream has no other way to hang up
         tokio::time::timeout(Duration::from_millis(1), messenger.request(request))
             .await
             .expect("request timeout")?;
