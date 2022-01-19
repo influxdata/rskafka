@@ -136,21 +136,35 @@ impl BrokerConnector {
     }
 
     async fn connect_impl(&self, broker_id: Option<i32>, url: &str) -> Result<BrokerConnection> {
-        info!(broker = broker_id, url, "Establishing new connection",);
-        let transport = Transport::connect(url, self.tls_config.clone(), self.socks5_proxy.clone())
-            .await
-            .map_err(|error| Error::Transport {
-                broker: url.to_string(),
-                error,
-            })?;
-
-        let messenger = Arc::new(Messenger::new(
-            BufStream::new(transport),
+        new_broker_connection(
+            self.tls_config.clone(),
+            self.socks5_proxy.clone(),
             self.max_message_size,
-        ));
-        messenger.sync_versions().await?;
-        Ok(messenger)
+            broker_id,
+            url,
+        )
+        .await
     }
+}
+
+async fn new_broker_connection(
+    tls_config: TlsConfig,
+    socks5_proxy: Option<String>,
+    max_message_size: usize,
+    broker_id: Option<i32>,
+    url: &str,
+) -> Result<BrokerConnection> {
+    info!(broker = broker_id, url, "Establishing new connection",);
+    let transport = Transport::connect(url, tls_config, socks5_proxy)
+        .await
+        .map_err(|error| Error::Transport {
+            broker: url.to_string(),
+            error,
+        })?;
+
+    let messenger = Arc::new(Messenger::new(BufStream::new(transport), max_message_size));
+    messenger.sync_versions().await?;
+    Ok(messenger)
 }
 
 impl std::fmt::Debug for BrokerConnector {
