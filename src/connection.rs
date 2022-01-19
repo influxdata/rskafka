@@ -129,14 +129,14 @@ impl BrokerConnector {
 
     /// Returns a new connection to the broker with the provided id
     pub async fn connect(&self, broker_id: i32) -> Result<Option<BrokerConnection>> {
-        match self.topology.get_broker_url(broker_id).await {
-            Some(url) => {
+        match self.topology.get_broker(broker_id).await {
+            Some(broker) => {
                 let connection = new_broker_connection(
                     self.tls_config.clone(),
                     self.socks5_proxy.clone(),
                     self.max_message_size,
                     Some(broker_id),
-                    &url,
+                    &broker.to_string(),
                 )
                 .await?;
                 Ok(Some(connection))
@@ -219,7 +219,11 @@ impl ArbitraryBrokerCache for &BrokerConnector {
         let mut brokers = if self.topology.is_empty() {
             self.bootstrap_brokers.clone()
         } else {
-            self.topology.get_broker_urls()
+            self.topology
+                .get_brokers()
+                .iter()
+                .map(ToString::to_string)
+                .collect()
         };
 
         // Randomise search order to encourage different clients to choose different brokers
