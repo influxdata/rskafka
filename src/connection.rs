@@ -42,12 +42,14 @@ pub type Result<T, E = Error> = std::result::Result<T, E>;
 /// How to connect to a `Transport`
 #[async_trait]
 trait Connect {
+    type R: Request + Send + Sync;
+
     async fn connection(
         &self,
         tls_config: TlsConfig,
         socks5_proxy: Option<String>,
         max_message_size: usize,
-    ) -> Result<BrokerConnection>;
+    ) -> Result<Arc<Self::R>>;
 }
 
 /// Info needed to connect to a broker, with optional broker ID for debugging
@@ -77,12 +79,14 @@ impl BrokerRepresentation {
 
 #[async_trait]
 impl Connect for BrokerRepresentation {
+    type R = MessengerTransport;
+
     async fn connection(
         &self,
         tls_config: TlsConfig,
         socks5_proxy: Option<String>,
         max_message_size: usize,
-    ) -> Result<BrokerConnection> {
+    ) -> Result<Arc<Self::R>> {
         let url = self.url();
         info!(
             broker = self.id(),
@@ -301,7 +305,7 @@ async fn connect_to_a_broker_with_retry<B>(
     tls_config: TlsConfig,
     socks5_proxy: Option<String>,
     max_message_size: usize,
-) -> BrokerConnection
+) -> Arc<B::R>
 where
     B: Connect + Send + Sync,
 {
