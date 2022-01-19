@@ -1,11 +1,10 @@
+use async_trait::async_trait;
 use rand::prelude::*;
+use std::ops::ControlFlow;
 use std::sync::Arc;
-use tracing::{debug, info, warn};
-
 use thiserror::Error;
-use tokio::io::BufStream;
-use tokio::sync::Mutex;
-use tracing::error;
+use tokio::{io::BufStream, sync::Mutex};
+use tracing::{debug, error, info, warn};
 
 use crate::backoff::{Backoff, BackoffConfig};
 use crate::connection::topology::BrokerTopology;
@@ -18,7 +17,8 @@ mod topology;
 mod transport;
 
 /// A connection to a broker
-pub type BrokerConnection = Arc<Messenger<BufStream<transport::Transport>>>;
+pub type BrokerConnection = Arc<MessengerTransport>;
+type MessengerTransport = Messenger<BufStream<transport::Transport>>;
 
 #[derive(Debug, Error)]
 pub enum Error {
@@ -101,7 +101,7 @@ impl BrokerConnector {
         broker_override: Option<BrokerConnection>,
         topics: Option<Vec<String>>,
     ) -> Result<MetadataResponse> {
-        let mut backoff = Backoff::new(&self.backoff_config);
+        let backoff = Backoff::new(&self.backoff_config);
         let request = MetadataRequest {
             topics: topics.map(|t| {
                 t.into_iter()
@@ -111,51 +111,13 @@ impl BrokerConnector {
             allow_auto_topic_creation: None,
         };
 
-        let response = loop {
-            // Retrieve the broker within the loop, in case it is invalidated
-            let broker = match broker_override.as_ref() {
-                Some(b) => Arc::clone(b),
-                None => self.get_cached_arbitrary_broker().await?,
-            };
-
-            let error = match broker.request(&request).await {
-                Ok(response) => break response,
-                Err(e @ RequestError::Poisoned(_) | e @ RequestError::IO(_))
-                    if broker_override.is_none() =>
-                {
-                    self.invalidate_cached_arbitrary_broker().await;
-                    e
-                }
-                Err(error) => {
-                    error!(
-                        e=%error,
-                        "metadata request encountered fatal error",
-                    );
-                    return Err(Error::Metadata(error));
-                }
-            };
-
-            let backoff = backoff.next();
-            info!(
-                e=%error,
-                backoff_secs = backoff.as_secs(),
-                "metadata request encountered non-fatal error - backing off",
-            );
-            tokio::time::sleep(backoff).await;
-        };
+        let response =
+            metadata_request_with_retry(broker_override, &request, backoff, self).await?;
 
         // Since the metadata request contains information about the cluster state, use it to update our view.
         self.topology.update(&response.brokers);
 
         Ok(response)
-    }
-
-    /// Invalidates the cached arbitrary broker.
-    ///
-    /// The next call to `[BrokerConnector::get_cached_arbitrary_broker]` will get a new connection
-    pub async fn invalidate_cached_arbitrary_broker(&self) {
-        debug!("Invalidating cached arbitrary broker");
-        self.cached_arbitrary_broker.lock().await.take();
     }
 
     /// Returns a new connection to the broker with the provided id
@@ -182,48 +144,6 @@ impl BrokerConnector {
         messenger.sync_versions().await?;
         Ok(messenger)
     }
-
-    /// Gets a cached [`BrokerConnection`] to any broker
-    pub async fn get_cached_arbitrary_broker(&self) -> Result<BrokerConnection> {
-        let mut current_broker = self.cached_arbitrary_broker.lock().await;
-        if let Some(broker) = &*current_broker {
-            return Ok(Arc::clone(broker));
-        }
-
-        let mut brokers = if self.topology.is_empty() {
-            self.bootstrap_brokers.clone()
-        } else {
-            self.topology.get_broker_urls()
-        };
-
-        // Randomise search order to encourage different clients to choose different brokers
-        brokers.shuffle(&mut thread_rng());
-
-        let mut backoff = Backoff::new(&self.backoff_config);
-
-        loop {
-            for broker in &brokers {
-                let connection = match self.connect_impl(None, broker).await {
-                    Ok(transport) => transport,
-                    Err(e) => {
-                        warn!(%e, "Failed to connect to broker");
-                        continue;
-                    }
-                };
-
-                *current_broker = Some(Arc::clone(&connection));
-
-                return Ok(connection);
-            }
-
-            let backoff = backoff.next();
-            warn!(
-                backoff_secs = backoff.as_secs(),
-                "Failed to connect to any broker, backing off",
-            );
-            tokio::time::sleep(backoff).await;
-        }
-    }
 }
 
 impl std::fmt::Debug for BrokerConnector {
@@ -240,5 +160,326 @@ impl std::fmt::Debug for BrokerConnector {
             .field("tls_config", &tls_config)
             .field("max_message_size", &self.max_message_size)
             .finish()
+    }
+}
+
+#[async_trait]
+trait Connect {
+    async fn metadata_request(
+        &self,
+        request_params: &MetadataRequest,
+    ) -> Result<MetadataResponse, RequestError>;
+}
+
+#[async_trait]
+impl Connect for MessengerTransport {
+    async fn metadata_request(
+        &self,
+        request_params: &MetadataRequest,
+    ) -> Result<MetadataResponse, RequestError> {
+        self.request(request_params).await
+    }
+}
+
+#[async_trait]
+trait ArbitraryBrokerCache: Send + Sync {
+    type C: Connect + Send + Sync;
+
+    async fn get(&self) -> Result<Arc<Self::C>>;
+
+    async fn invalidate(&self);
+}
+
+#[async_trait]
+impl ArbitraryBrokerCache for &BrokerConnector {
+    type C = MessengerTransport;
+
+    async fn get(&self) -> Result<Arc<Self::C>> {
+        let mut current_broker = self.cached_arbitrary_broker.lock().await;
+        if let Some(broker) = &*current_broker {
+            return Ok(Arc::clone(broker));
+        }
+
+        let mut brokers = if self.topology.is_empty() {
+            self.bootstrap_brokers.clone()
+        } else {
+            self.topology.get_broker_urls()
+        };
+
+        // Randomise search order to encourage different clients to choose different brokers
+        brokers.shuffle(&mut thread_rng());
+
+        let mut backoff = Backoff::new(&self.backoff_config);
+        let connection = backoff
+            .retry_with_backoff("broker_connect", || async {
+                for broker in &brokers {
+                    let connection = match self.connect_impl(None, broker).await {
+                        Ok(transport) => transport,
+                        Err(e) => {
+                            warn!(%e, "Failed to connect to broker");
+                            continue;
+                        }
+                    };
+
+                    return ControlFlow::Break(connection);
+                }
+                ControlFlow::Continue("Failed to connect to any broker, backing off")
+            })
+            .await;
+
+        *current_broker = Some(Arc::clone(&connection));
+        Ok(connection)
+    }
+
+    async fn invalidate(&self) {
+        debug!("Invalidating cached arbitrary broker");
+        self.cached_arbitrary_broker.lock().await.take();
+    }
+}
+
+async fn metadata_request_with_retry<A>(
+    broker_override: Option<Arc<A::C>>,
+    request_params: &MetadataRequest,
+    mut backoff: Backoff,
+    arbitrary_broker_cache: A,
+) -> Result<MetadataResponse>
+where
+    A: ArbitraryBrokerCache,
+{
+    backoff
+        .retry_with_backoff("metadata", || async {
+            // Retrieve the broker within the loop, in case it is invalidated
+            let broker = match broker_override.as_ref() {
+                Some(b) => Arc::clone(b),
+                None => match arbitrary_broker_cache.get().await {
+                    Ok(inner) => inner,
+                    Err(e) => return ControlFlow::Break(Err(e)),
+                },
+            };
+
+            match broker.metadata_request(request_params).await {
+                Ok(response) => ControlFlow::Break(Ok(response)),
+                Err(e @ RequestError::Poisoned(_) | e @ RequestError::IO(_))
+                    if broker_override.is_none() =>
+                {
+                    arbitrary_broker_cache.invalidate().await;
+                    ControlFlow::Continue(e)
+                }
+                Err(error) => {
+                    error!(
+                        e=%error,
+                        "metadata request encountered fatal error",
+                    );
+                    ControlFlow::Break(Err(Error::Metadata(error)))
+                }
+            }
+        })
+        .await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::protocol::api_key::ApiKey;
+    use std::sync::atomic::{AtomicBool, Ordering};
+
+    struct FakeBroker(Box<dyn Fn() -> Result<MetadataResponse, RequestError> + Send + Sync>);
+
+    impl FakeBroker {
+        fn success() -> Self {
+            Self(Box::new(|| Ok(arbitrary_metadata_response())))
+        }
+
+        fn fatal_error() -> Self {
+            Self(Box::new(|| Err(arbitrary_fatal_error())))
+        }
+
+        fn recoverable() -> Self {
+            Self(Box::new(|| Err(arbitrary_recoverable_error())))
+        }
+    }
+
+    #[async_trait]
+    impl Connect for FakeBroker {
+        async fn metadata_request(
+            &self,
+            _request_params: &MetadataRequest,
+        ) -> Result<MetadataResponse, RequestError> {
+            self.0()
+        }
+    }
+
+    struct FakeBrokerCache {
+        get: Box<dyn Fn() -> Result<Arc<FakeBroker>> + Send + Sync>,
+        invalidate: Box<dyn Fn() + Send + Sync>,
+    }
+
+    #[async_trait]
+    impl ArbitraryBrokerCache for FakeBrokerCache {
+        type C = FakeBroker;
+
+        async fn get(&self) -> Result<Arc<Self::C>> {
+            (self.get)()
+        }
+
+        async fn invalidate(&self) {
+            (self.invalidate)()
+        }
+    }
+
+    #[tokio::test]
+    async fn happy_cached_broker() {
+        let metadata_request = arbitrary_metadata_request();
+        let success_response = arbitrary_metadata_response();
+
+        let broker_cache = FakeBrokerCache {
+            get: Box::new(|| Ok(Arc::new(FakeBroker::success()))),
+            invalidate: Box::new(|| {}),
+        };
+
+        let result = metadata_request_with_retry(
+            None,
+            &metadata_request,
+            Backoff::new(&Default::default()),
+            broker_cache,
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(success_response, result)
+    }
+
+    #[tokio::test]
+    async fn fatal_error_cached_broker() {
+        let metadata_request = arbitrary_metadata_request();
+
+        let broker_cache = FakeBrokerCache {
+            get: Box::new(|| Ok(Arc::new(FakeBroker::fatal_error()))),
+            invalidate: Box::new(|| {}),
+        };
+
+        let result = metadata_request_with_retry(
+            None,
+            &metadata_request,
+            Backoff::new(&Default::default()),
+            broker_cache,
+        )
+        .await
+        .unwrap_err();
+
+        assert!(matches!(
+            result,
+            Error::Metadata(RequestError::NoVersionMatch { .. })
+        ));
+    }
+
+    #[tokio::test]
+    async fn sad_cached_broker() {
+        // Start with always returning a broker that fails.
+        let succeed = Arc::new(AtomicBool::new(false));
+
+        let metadata_request = arbitrary_metadata_request();
+        let success_response = arbitrary_metadata_response();
+
+        let broker_cache = FakeBrokerCache {
+            get: Box::new({
+                let succeed = Arc::clone(&succeed);
+                move || {
+                    Ok(Arc::new(if succeed.load(Ordering::SeqCst) {
+                        FakeBroker::success()
+                    } else {
+                        FakeBroker::recoverable()
+                    }))
+                }
+            }),
+            // If invalidate is called, switch to returning a broker that always succeeds.
+            invalidate: Box::new({
+                let succeed = Arc::clone(&succeed);
+                move || succeed.store(true, Ordering::SeqCst)
+            }),
+        };
+
+        let result = metadata_request_with_retry(
+            None,
+            &metadata_request,
+            Backoff::new(&Default::default()),
+            broker_cache,
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(success_response, result)
+    }
+
+    #[tokio::test]
+    async fn happy_broker_override() {
+        let broker_override = Some(Arc::new(FakeBroker::success()));
+        let metadata_request = arbitrary_metadata_request();
+        let success_response = arbitrary_metadata_response();
+
+        let broker_cache = FakeBrokerCache {
+            get: Box::new(|| unreachable!()),
+            invalidate: Box::new(|| unreachable!()),
+        };
+
+        let result = metadata_request_with_retry(
+            broker_override,
+            &metadata_request,
+            Backoff::new(&Default::default()),
+            broker_cache,
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(success_response, result)
+    }
+
+    #[tokio::test]
+    async fn sad_broker_override() {
+        let broker_override = Some(Arc::new(FakeBroker::recoverable()));
+        let metadata_request = arbitrary_metadata_request();
+
+        let broker_cache = FakeBrokerCache {
+            get: Box::new(|| unreachable!()),
+            invalidate: Box::new(|| unreachable!()),
+        };
+
+        let result = metadata_request_with_retry(
+            broker_override,
+            &metadata_request,
+            Backoff::new(&Default::default()),
+            broker_cache,
+        )
+        .await
+        .unwrap_err();
+
+        assert!(matches!(result, Error::Metadata(RequestError::IO { .. })));
+    }
+
+    fn arbitrary_metadata_request() -> MetadataRequest {
+        MetadataRequest {
+            topics: Default::default(),
+            allow_auto_topic_creation: Default::default(),
+        }
+    }
+
+    fn arbitrary_metadata_response() -> MetadataResponse {
+        MetadataResponse {
+            throttle_time_ms: Default::default(),
+            brokers: Default::default(),
+            cluster_id: Default::default(),
+            controller_id: Default::default(),
+            topics: Default::default(),
+        }
+    }
+
+    fn arbitrary_fatal_error() -> RequestError {
+        RequestError::NoVersionMatch {
+            api_key: ApiKey::Metadata,
+        }
+    }
+
+    fn arbitrary_recoverable_error() -> RequestError {
+        RequestError::IO(std::io::Error::from(std::io::ErrorKind::UnexpectedEof))
     }
 }

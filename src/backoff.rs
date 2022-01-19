@@ -1,5 +1,7 @@
 use rand::prelude::*;
+use std::ops::ControlFlow;
 use std::time::Duration;
+use tracing::info;
 
 /// Exponential backoff with jitter
 ///
@@ -49,9 +51,7 @@ impl Backoff {
     pub fn new(config: &BackoffConfig) -> Self {
         Self::new_with_rng(config, None)
     }
-}
 
-impl Backoff {
     /// Creates a new `Backoff` with the optional `rng`
     ///
     /// Used [`rand::thread_rng()`] if no rng provided
@@ -70,7 +70,7 @@ impl Backoff {
     }
 
     /// Returns the next backoff duration to wait for
-    pub fn next(&mut self) -> Duration {
+    fn next(&mut self) -> Duration {
         let range = self.init_backoff..(self.next_backoff_secs * self.base);
 
         let rand_backoff = match self.rng.as_mut() {
@@ -80,6 +80,30 @@ impl Backoff {
 
         let next_backoff = self.max_backoff_secs.min(rand_backoff);
         Duration::from_secs_f64(std::mem::replace(&mut self.next_backoff_secs, next_backoff))
+    }
+
+    /// Perform an async operation that retries with a backoff
+    pub async fn retry_with_backoff<F, F1, B, C>(&mut self, request_name: &str, do_stuff: F) -> B
+    where
+        F: (Fn() -> F1) + Send + Sync,
+        F1: std::future::Future<Output = ControlFlow<B, C>> + Send,
+        C: core::fmt::Display + Send,
+    {
+        loop {
+            let e = match do_stuff().await {
+                ControlFlow::Break(r) => break r,
+                ControlFlow::Continue(e) => e,
+            };
+
+            let backoff = self.next();
+            info!(
+                e=%e,
+                request_name,
+                backoff_secs = backoff.as_secs(),
+                "request encountered non-fatal error - backing off",
+            );
+            tokio::time::sleep(backoff).await;
+        }
     }
 }
 

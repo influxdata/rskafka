@@ -90,7 +90,7 @@ where
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub struct MetadataResponse {
     /// The duration in milliseconds for which the request was throttled due to
     /// a quota violation, or zero if the request did not violate any quota.
@@ -139,7 +139,7 @@ where
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub struct MetadataResponseBroker {
     /// The broker ID
     pub node_id: Int32,
@@ -173,7 +173,7 @@ where
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub struct MetadataResponseTopic {
     /// The topic error if any
     pub error: Option<Error>,
@@ -207,7 +207,7 @@ where
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub struct MetadataResponsePartition {
     /// The partition error if any
     pub error: Option<Error>,
