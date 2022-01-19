@@ -39,6 +39,17 @@ pub enum Error {
 
 pub type Result<T, E = Error> = std::result::Result<T, E>;
 
+/// How to connect to a `Transport`
+#[async_trait]
+trait Connect {
+    async fn connection(
+        &self,
+        tls_config: TlsConfig,
+        socks5_proxy: Option<String>,
+        max_message_size: usize,
+    ) -> Result<BrokerConnection>;
+}
+
 /// Info needed to connect to a broker, with optional broker ID for debugging
 enum BrokerRepresentation {
     /// URL specified as a bootstrap broker
@@ -62,7 +73,10 @@ impl BrokerRepresentation {
             BrokerRepresentation::Topology(broker) => broker.to_string(),
         }
     }
+}
 
+#[async_trait]
+impl Connect for BrokerRepresentation {
     async fn connection(
         &self,
         tls_config: TlsConfig,
