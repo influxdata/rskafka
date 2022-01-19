@@ -19,10 +19,10 @@ use self::controller::ControllerClient;
 
 #[derive(Debug, Error)]
 pub enum ProduceError {
-    #[error(transparent)]
+    #[error("Broker error: {0}")]
     BrokerError(#[from] crate::connection::Error),
 
-    #[error(transparent)]
+    #[error("Request error: {0}")]
     RequestError(#[from] crate::messenger::RequestError),
 
     #[error("Got duplicate results for topic '{topic}' and partition {partition}")]

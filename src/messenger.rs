@@ -117,19 +117,19 @@ pub enum RequestError {
     #[error("Cannot find matching version for: {api_key:?}")]
     NoVersionMatch { api_key: ApiKey },
 
-    #[error(transparent)]
+    #[error("Cannot write data: {0}")]
     WriteError(#[from] WriteVersionedError),
 
-    #[error(transparent)]
+    #[error("Cannot write versioned data: {0}")]
     WriteMessageError(#[from] crate::protocol::frame::WriteError),
 
-    #[error(transparent)]
+    #[error("Cannot read data: {0}")]
     ReadError(#[from] crate::protocol::traits::ReadError),
 
-    #[error(transparent)]
+    #[error("Cannot read versioned data: {0}")]
     ReadVersionedError(#[from] ReadVersionedError),
 
-    #[error("Cannot read/write data")]
+    #[error("Cannot read/write data: {0}")]
     IO(#[from] std::io::Error),
 
     #[error(
@@ -142,10 +142,10 @@ pub enum RequestError {
         api_version: ApiVersion,
     },
 
-    #[error(transparent)]
-    ReadMessageError(#[from] crate::protocol::frame::ReadError),
+    #[error("Cannot read framed message: {0}")]
+    ReadFramedMessageError(#[from] crate::protocol::frame::ReadError),
 
-    #[error(transparent)]
+    #[error("Connection is poisened: {0}")]
     Poisoned(Arc<RequestError>),
 }
 
@@ -154,7 +154,7 @@ pub enum SyncVersionsError {
     #[error("Did not found a version for ApiVersion that works with that broker")]
     NoWorkingVersion,
 
-    #[error(transparent)]
+    #[error("Request error: {0}")]
     RequestError(#[from] RequestError),
 
     #[error("Got flipped version from server for API key {api_key:?}: min={min:?} max={max:?}")]
@@ -241,7 +241,7 @@ where
                         state_captured
                             .lock()
                             .await
-                            .poison(RequestError::ReadMessageError(e))
+                            .poison(RequestError::ReadFramedMessageError(e))
                             .await;
                         return;
                     }

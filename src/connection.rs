@@ -31,7 +31,7 @@ pub enum Error {
         error: transport::Error,
     },
 
-    #[error(transparent)]
+    #[error("cannot sync versions: {0}")]
     SyncVersions(#[from] crate::messenger::SyncVersionsError),
 }
 
