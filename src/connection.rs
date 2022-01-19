@@ -130,20 +130,19 @@ impl BrokerConnector {
     /// Returns a new connection to the broker with the provided id
     pub async fn connect(&self, broker_id: i32) -> Result<Option<BrokerConnection>> {
         match self.topology.get_broker_url(broker_id).await {
-            Some(url) => Ok(Some(self.connect_impl(Some(broker_id), &url).await?)),
+            Some(url) => {
+                let connection = new_broker_connection(
+                    self.tls_config.clone(),
+                    self.socks5_proxy.clone(),
+                    self.max_message_size,
+                    Some(broker_id),
+                    &url,
+                )
+                .await?;
+                Ok(Some(connection))
+            }
             None => Ok(None),
         }
-    }
-
-    async fn connect_impl(&self, broker_id: Option<i32>, url: &str) -> Result<BrokerConnection> {
-        new_broker_connection(
-            self.tls_config.clone(),
-            self.socks5_proxy.clone(),
-            self.max_message_size,
-            broker_id,
-            url,
-        )
-        .await
     }
 }
 
@@ -230,7 +229,16 @@ impl ArbitraryBrokerCache for &BrokerConnector {
         let connection = backoff
             .retry_with_backoff("broker_connect", || async {
                 for broker in &brokers {
-                    let connection = match self.connect_impl(None, broker).await {
+                    let conn = new_broker_connection(
+                        self.tls_config.clone(),
+                        self.socks5_proxy.clone(),
+                        self.max_message_size,
+                        None,
+                        broker,
+                    )
+                    .await;
+
+                    let connection = match conn {
                         Ok(transport) => transport,
                         Err(e) => {
                             warn!(%e, "Failed to connect to broker");
