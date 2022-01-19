@@ -631,9 +631,12 @@ where
 /// the latest generation (message version 2).
 ///
 /// It seems that during `Produce` this must contain exactly one batch, but during `Fetch` this can contain zero, one or
-/// more batches -- however I could not find any documentation stating this behavior.
+/// more batches -- however I could not find any documentation stating this behavior. [KIP-74] at least documents the
+/// `Fetch` case, although it does not clearly state that record batches might be cut off half-way (this however is what
+/// we see during integration tests w/ Apache Kafka).
 ///
 /// [KIP-32]: https://cwiki.apache.org/confluence/display/KAFKA/KIP-32+-+Add+timestamps+to+Kafka+message
+/// [KIP-74]: https://cwiki.apache.org/confluence/display/KAFKA/KIP-74%3A+Add+Fetch+Response+Size+Limit+in+Bytes
 /// [KIP-98]: https://cwiki.apache.org/confluence/display/KAFKA/KIP-98+-+Exactly+Once+Delivery+and+Transactional+Messaging
 #[derive(Debug, PartialEq, Eq)]
 #[cfg_attr(test, derive(proptest_derive::Arbitrary))]
@@ -657,7 +660,17 @@ where
 
         let mut batches = vec![];
         while buf.position() < len {
-            batches.push(RecordBatch::read(&mut buf)?);
+            let batch = match RecordBatch::read(&mut buf) {
+                Ok(batch) => batch,
+                Err(ReadError::IO(e)) if e.kind() == std::io::ErrorKind::UnexpectedEof => {
+                    // Record batch got cut off, likely due to `FetchRequest::max_bytes`.
+                    break;
+                }
+                Err(e) => {
+                    return Err(e);
+                }
+            };
+            batches.push(batch);
         }
 
         Ok(Self(batches))
@@ -683,7 +696,10 @@ where
 mod tests {
     use std::io::Cursor;
 
-    use crate::protocol::test_utils::test_roundtrip;
+    use crate::protocol::{
+        record::{ControlBatchOrRecords, RecordBatchCompression, RecordBatchTimestampType},
+        test_utils::test_roundtrip,
+    };
 
     use super::*;
 
@@ -836,4 +852,39 @@ mod tests {
     test_roundtrip!(Array<Int32>, test_array_roundtrip);
 
     test_roundtrip!(Records, test_records_roundtrip);
+
+    #[test]
+    fn test_records_partial() {
+        // Records might be partially returned when fetch requests are issued w/ size limits
+        let batch_1 = record_batch(1);
+        let batch_2 = record_batch(2);
+
+        let mut buf = vec![];
+        batch_1.write(&mut buf).unwrap();
+        batch_2.write(&mut buf).unwrap();
+        let inner = buf[..buf.len() - 1].to_vec();
+
+        let mut buf = vec![];
+        NullableBytes(Some(inner)).write(&mut buf).unwrap();
+
+        let records = Records::read(&mut Cursor::new(buf)).unwrap();
+        assert_eq!(records.0, vec![batch_1]);
+    }
+
+    fn record_batch(base_offset: i64) -> RecordBatch {
+        RecordBatch {
+            base_offset,
+            partition_leader_epoch: 0,
+            last_offset_delta: 0,
+            first_timestamp: 0,
+            max_timestamp: 0,
+            producer_id: 0,
+            producer_epoch: 0,
+            base_sequence: 0,
+            records: ControlBatchOrRecords::Records(vec![]),
+            compression: RecordBatchCompression::NoCompression,
+            is_transactional: false,
+            timestamp_type: RecordBatchTimestampType::CreateTime,
+        }
+    }
 }

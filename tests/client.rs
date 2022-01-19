@@ -6,7 +6,7 @@ use rskafka::{
     },
     record::{Record, RecordAndOffset},
 };
-use std::{str::FromStr, sync::Arc, time::Duration};
+use std::{collections::BTreeMap, str::FromStr, sync::Arc, time::Duration};
 
 mod rdkafka_helper;
 
@@ -389,4 +389,48 @@ async fn consume_rskafka(
         }
     }
     records.into_iter().take(n).collect()
+}
+
+#[tokio::test]
+async fn test_produce_consume_size_cutoff() {
+    maybe_start_logging();
+
+    let connection = maybe_skip_kafka_integration!();
+    let topic_name = random_topic_name();
+
+    let client = ClientBuilder::new(vec![connection]).build().await.unwrap();
+    let controller_client = client.controller_client().await.unwrap();
+    controller_client
+        .create_topic(&topic_name, 1, 1)
+        .await
+        .unwrap();
+
+    let partition_client = client.partition_client(&topic_name, 0).await.unwrap();
+
+    let record_1 = large_record();
+    let record_2 = large_record();
+    let limit = record_1.approximate_size() + record_2.approximate_size() / 2;
+
+    // produce in spearate request so we have two record batches
+    partition_client
+        .produce(vec![record_1.clone()])
+        .await
+        .unwrap();
+    partition_client.produce(vec![record_2]).await.unwrap();
+
+    let (records, _high_watermark) = partition_client
+        .fetch_records(0, 1..(limit as i32), 1_000)
+        .await
+        .unwrap();
+    assert_eq!(records.len(), 1);
+    assert_eq!(records[0].record, record_1);
+}
+
+pub fn large_record() -> Record {
+    Record {
+        key: b"".to_vec(),
+        value: vec![b'x'; 1024],
+        headers: BTreeMap::from([("foo".to_owned(), b"bar".to_vec())]),
+        timestamp: now(),
+    }
 }
