@@ -111,7 +111,8 @@ impl BrokerConnector {
             allow_auto_topic_creation: None,
         };
 
-        let response = metadata_request_loop(broker_override, &request, backoff, self).await?;
+        let response =
+            metadata_request_with_retry(broker_override, &request, backoff, self).await?;
 
         // Since the metadata request contains information about the cluster state, use it to update our view.
         self.topology.update(&response.brokers);
@@ -236,7 +237,7 @@ impl ArbitraryBrokerCache for &BrokerConnector {
     }
 }
 
-async fn metadata_request_loop<A>(
+async fn metadata_request_with_retry<A>(
     broker_override: Option<Arc<A::C>>,
     request_params: &MetadataRequest,
     mut backoff: Backoff,
@@ -336,7 +337,7 @@ mod tests {
             invalidate: Box::new(|| {}),
         };
 
-        let result = metadata_request_loop(
+        let result = metadata_request_with_retry(
             None,
             &metadata_request,
             Backoff::new(&Default::default()),
@@ -357,7 +358,7 @@ mod tests {
             invalidate: Box::new(|| {}),
         };
 
-        let result = metadata_request_loop(
+        let result = metadata_request_with_retry(
             None,
             &metadata_request,
             Backoff::new(&Default::default()),
@@ -398,7 +399,7 @@ mod tests {
             }),
         };
 
-        let result = metadata_request_loop(
+        let result = metadata_request_with_retry(
             None,
             &metadata_request,
             Backoff::new(&Default::default()),
@@ -421,7 +422,7 @@ mod tests {
             invalidate: Box::new(|| unreachable!()),
         };
 
-        let result = metadata_request_loop(
+        let result = metadata_request_with_retry(
             broker_override,
             &metadata_request,
             Backoff::new(&Default::default()),
@@ -443,7 +444,7 @@ mod tests {
             invalidate: Box::new(|| unreachable!()),
         };
 
-        let result = metadata_request_loop(
+        let result = metadata_request_with_retry(
             broker_override,
             &metadata_request,
             Backoff::new(&Default::default()),
