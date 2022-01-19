@@ -210,7 +210,7 @@ impl ArbitraryBrokerCache for &BrokerConnector {
 
         let mut backoff = Backoff::new(&self.backoff_config);
         let connection = backoff
-            .backy_offy("broker_connect", || async {
+            .retry_with_backoff("broker_connect", || async {
                 for broker in &brokers {
                     let connection = match self.connect_impl(None, broker).await {
                         Ok(transport) => transport,
@@ -246,7 +246,7 @@ where
     A: ArbitraryBrokerCache,
 {
     backoff
-        .backy_offy("metadata", || async {
+        .retry_with_backoff("metadata", || async {
             // Retrieve the broker within the loop, in case it is invalidated
             let broker = match broker_override.as_ref() {
                 Some(b) => Arc::clone(b),

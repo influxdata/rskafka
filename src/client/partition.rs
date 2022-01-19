@@ -381,7 +381,7 @@ impl PartitionClient {
         let mut backoff = Backoff::new(&self.backoff_config);
 
         backoff
-            .backy_offy(request_name, || async {
+            .retry_with_backoff(request_name, || async {
                 let error = match f().await {
                     Ok(v) => return ControlFlow::Break(Ok(v)),
                     Err(e) => e,

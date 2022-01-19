@@ -83,7 +83,7 @@ impl Backoff {
     }
 
     /// Perform an async operation that retries with a backoff
-    pub async fn backy_offy<F, F1, B, C>(&mut self, request_name: &str, do_stuff: F) -> B
+    pub async fn retry_with_backoff<F, F1, B, C>(&mut self, request_name: &str, do_stuff: F) -> B
     where
         F: (Fn() -> F1) + Send + Sync,
         F1: std::future::Future<Output = ControlFlow<B, C>> + Send,
