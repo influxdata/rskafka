@@ -276,36 +276,14 @@ impl ArbitraryBrokerCache for &BrokerConnector {
             return Ok(Arc::clone(broker));
         }
 
-        let mut brokers = self.brokers();
-
-        // Randomise search order to encourage different clients to choose different brokers
-        brokers.shuffle(&mut thread_rng());
-
-        let mut backoff = Backoff::new(&self.backoff_config);
-        let connection = backoff
-            .retry_with_backoff("broker_connect", || async {
-                for broker in &brokers {
-                    let conn = broker
-                        .connection(
-                            self.tls_config.clone(),
-                            self.socks5_proxy.clone(),
-                            self.max_message_size,
-                        )
-                        .await;
-
-                    let connection = match conn {
-                        Ok(transport) => transport,
-                        Err(e) => {
-                            warn!(%e, "Failed to connect to broker");
-                            continue;
-                        }
-                    };
-
-                    return ControlFlow::Break(connection);
-                }
-                ControlFlow::Continue("Failed to connect to any broker, backing off")
-            })
-            .await;
+        let connection = connect_to_a_broker_with_retry(
+            self.brokers(),
+            &self.backoff_config,
+            self.tls_config.clone(),
+            self.socks5_proxy.clone(),
+            self.max_message_size,
+        )
+        .await;
 
         *current_broker = Some(Arc::clone(&connection));
         Ok(connection)
@@ -315,6 +293,42 @@ impl ArbitraryBrokerCache for &BrokerConnector {
         debug!("Invalidating cached arbitrary broker");
         self.cached_arbitrary_broker.lock().await.take();
     }
+}
+
+async fn connect_to_a_broker_with_retry<B>(
+    mut brokers: Vec<B>,
+    backoff_config: &BackoffConfig,
+    tls_config: TlsConfig,
+    socks5_proxy: Option<String>,
+    max_message_size: usize,
+) -> BrokerConnection
+where
+    B: Connect + Send + Sync,
+{
+    // Randomise search order to encourage different clients to choose different brokers
+    brokers.shuffle(&mut thread_rng());
+
+    let mut backoff = Backoff::new(backoff_config);
+    backoff
+        .retry_with_backoff("broker_connect", || async {
+            for broker in &brokers {
+                let conn = broker
+                    .connection(tls_config.clone(), socks5_proxy.clone(), max_message_size)
+                    .await;
+
+                let connection = match conn {
+                    Ok(transport) => transport,
+                    Err(e) => {
+                        warn!(%e, "Failed to connect to broker");
+                        continue;
+                    }
+                };
+
+                return ControlFlow::Break(connection);
+            }
+            ControlFlow::Continue("Failed to connect to any broker, backing off")
+        })
+        .await
 }
 
 async fn metadata_request_with_retry<A>(
