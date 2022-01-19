@@ -26,7 +26,7 @@ impl<T> VecBuilder<T> {
 
     ///
     /// # Panic
-    /// Pancis when block size is too small to hold a single element of `T`.
+    /// Panics when block size is too small to hold a single element of `T`.
     pub fn new_with_block_size(expected_elements: usize, block_size: usize) -> Self {
         let element_size = std::mem::size_of::<T>();
         let elements_per_block = if element_size == 0 {
