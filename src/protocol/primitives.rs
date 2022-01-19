@@ -733,7 +733,10 @@ mod tests {
 
         let err = UnsignedVarint::read(&mut buf).unwrap_err();
         assert_matches!(err, ReadError::Malformed(_));
-        assert_eq!(err.to_string(), "Overflow while reading unsigned varint");
+        assert_eq!(
+            err.to_string(),
+            "Malformed data: Overflow while reading unsigned varint",
+        );
     }
 
     test_roundtrip!(String_, test_string_roundtrip);
@@ -750,7 +753,7 @@ mod tests {
         assert_matches!(err, ReadError::Malformed(_));
         assert_eq!(
             err.to_string(),
-            "Invalid negative length for nullable string: -2"
+            "Malformed data: Invalid negative length for nullable string: -2",
         );
     }
 
@@ -773,7 +776,7 @@ mod tests {
         assert_matches!(err, ReadError::Malformed(_));
         assert_eq!(
             err.to_string(),
-            "Invalid negative length for nullable bytes: -2"
+            "Malformed data: Invalid negative length for nullable bytes: -2",
         );
     }
 

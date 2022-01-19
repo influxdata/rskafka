@@ -470,6 +470,13 @@ impl PartitionClient {
         }
 
         *current_broker = Some(Arc::clone(&broker));
+
+        info!(
+            topic=%self.topic,
+            partition=%self.partition,
+            leader,
+            "Created new partition-specific broker connection",
+        );
         Ok(broker)
     }
 

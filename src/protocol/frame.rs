@@ -16,7 +16,7 @@ use super::{
 
 #[derive(Error, Debug)]
 pub enum ReadError {
-    #[error("Cannot read data")]
+    #[error("Cannot read data: {0}")]
     IO(#[from] std::io::Error),
 
     #[error("Negative message size: {size}")]
@@ -78,7 +78,7 @@ where
 
 #[derive(Error, Debug)]
 pub enum WriteError {
-    #[error("Cannot write data")]
+    #[error("Cannot write data: {0}")]
     IO(#[from] std::io::Error),
 
     #[error("Message too large: {size}")]
