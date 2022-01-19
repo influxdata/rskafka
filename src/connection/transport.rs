@@ -21,6 +21,9 @@ pub enum Error {
     #[error("IO Error: {0}")]
     IO(#[from] std::io::Error),
 
+    #[error("Invalid host-port string: {0}")]
+    InvalidHostPort(String),
+
     #[error("Invalid port: {0}")]
     InvalidPort(#[from] std::num::ParseIntError),
 
@@ -131,8 +134,13 @@ impl Transport {
                 let mut stream = TcpStream::connect(proxy).await?;
 
                 let mut broker_iter = broker.split(':');
-                let broker_host = broker_iter.next().unwrap();
-                let broker_port: u16 = broker_iter.next().unwrap().parse()?;
+                let broker_host = broker_iter
+                    .next()
+                    .ok_or_else(|| Error::InvalidHostPort(broker.to_owned()))?;
+                let broker_port: u16 = broker_iter
+                    .next()
+                    .ok_or_else(|| Error::InvalidHostPort(broker.to_owned()))?
+                    .parse()?;
 
                 connect(&mut stream, (broker_host, broker_port), None).await?;
 
@@ -152,7 +160,10 @@ impl Transport {
         match tls_config {
             Some(config) => {
                 // Strip port if any
-                let host = broker.split(':').next().unwrap();
+                let host = broker
+                    .split(':')
+                    .next()
+                    .ok_or_else(|| Error::InvalidHostPort(broker.to_owned()))?;
                 let server_name = rustls::ServerName::try_from(host)?;
 
                 let connector = TlsConnector::from(config);
