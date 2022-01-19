@@ -226,7 +226,7 @@ impl std::fmt::Debug for BrokerConnector {
 }
 
 #[async_trait]
-trait Connect {
+trait Request {
     async fn metadata_request(
         &self,
         request_params: &MetadataRequest,
@@ -234,7 +234,7 @@ trait Connect {
 }
 
 #[async_trait]
-impl Connect for MessengerTransport {
+impl Request for MessengerTransport {
     async fn metadata_request(
         &self,
         request_params: &MetadataRequest,
@@ -245,18 +245,18 @@ impl Connect for MessengerTransport {
 
 #[async_trait]
 trait ArbitraryBrokerCache: Send + Sync {
-    type C: Connect + Send + Sync;
+    type R: Request + Send + Sync;
 
-    async fn get(&self) -> Result<Arc<Self::C>>;
+    async fn get(&self) -> Result<Arc<Self::R>>;
 
     async fn invalidate(&self);
 }
 
 #[async_trait]
 impl ArbitraryBrokerCache for &BrokerConnector {
-    type C = MessengerTransport;
+    type R = MessengerTransport;
 
-    async fn get(&self) -> Result<Arc<Self::C>> {
+    async fn get(&self) -> Result<Arc<Self::R>> {
         let mut current_broker = self.cached_arbitrary_broker.lock().await;
         if let Some(broker) = &*current_broker {
             return Ok(Arc::clone(broker));
@@ -304,7 +304,7 @@ impl ArbitraryBrokerCache for &BrokerConnector {
 }
 
 async fn metadata_request_with_retry<A>(
-    broker_override: Option<Arc<A::C>>,
+    broker_override: Option<Arc<A::R>>,
     request_params: &MetadataRequest,
     mut backoff: Backoff,
     arbitrary_broker_cache: A,
@@ -366,7 +366,7 @@ mod tests {
     }
 
     #[async_trait]
-    impl Connect for FakeBroker {
+    impl Request for FakeBroker {
         async fn metadata_request(
             &self,
             _request_params: &MetadataRequest,
@@ -382,9 +382,9 @@ mod tests {
 
     #[async_trait]
     impl ArbitraryBrokerCache for FakeBrokerCache {
-        type C = FakeBroker;
+        type R = FakeBroker;
 
-        async fn get(&self) -> Result<Arc<Self::C>> {
+        async fn get(&self) -> Result<Arc<Self::R>> {
             (self.get)()
         }
 
