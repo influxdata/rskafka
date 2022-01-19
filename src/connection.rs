@@ -7,7 +7,7 @@ use tokio::{io::BufStream, sync::Mutex};
 use tracing::{debug, error, info, warn};
 
 use crate::backoff::{Backoff, BackoffConfig};
-use crate::connection::topology::BrokerTopology;
+use crate::connection::topology::{Broker, BrokerTopology};
 use crate::connection::transport::Transport;
 use crate::messenger::{Messenger, RequestError};
 use crate::protocol::messages::{MetadataRequest, MetadataRequestTopic, MetadataResponse};
@@ -39,6 +39,55 @@ pub enum Error {
 
 pub type Result<T, E = Error> = std::result::Result<T, E>;
 
+/// Info needed to connect to a broker, with optional broker ID for debugging
+enum BrokerRepresentation {
+    /// URL specified as a bootstrap broker
+    Bootstrap(String),
+
+    /// Broker received from the cluster broker topology
+    Topology(Broker),
+}
+
+impl BrokerRepresentation {
+    fn id(&self) -> Option<i32> {
+        match self {
+            BrokerRepresentation::Bootstrap(_) => None,
+            BrokerRepresentation::Topology(broker) => Some(broker.id),
+        }
+    }
+
+    fn url(&self) -> String {
+        match self {
+            BrokerRepresentation::Bootstrap(inner) => inner.clone(),
+            BrokerRepresentation::Topology(broker) => broker.to_string(),
+        }
+    }
+
+    async fn connection(
+        &self,
+        tls_config: TlsConfig,
+        socks5_proxy: Option<String>,
+        max_message_size: usize,
+    ) -> Result<BrokerConnection> {
+        let url = self.url();
+        info!(
+            broker = self.id(),
+            url = url.as_str(),
+            "Establishing new connection",
+        );
+        let transport = Transport::connect(&url, tls_config, socks5_proxy)
+            .await
+            .map_err(|error| Error::Transport {
+                broker: url.to_string(),
+                error,
+            })?;
+
+        let messenger = Arc::new(Messenger::new(BufStream::new(transport), max_message_size));
+        messenger.sync_versions().await?;
+        Ok(messenger)
+    }
+}
+
 /// Caches the broker topology and provides the ability to
 ///
 /// * Get a cached connection to an arbitrary broker
@@ -46,7 +95,7 @@ pub type Result<T, E = Error> = std::result::Result<T, E>;
 ///
 /// Maintains a list of brokers within the cluster and caches a connection to a broker
 pub struct BrokerConnector {
-    /// Brokers used to boostrap this pool
+    /// Broker URLs used to boostrap this pool
     bootstrap_brokers: Vec<String>,
 
     /// Discovered brokers in the cluster, including bootstrap brokers
@@ -131,39 +180,36 @@ impl BrokerConnector {
     pub async fn connect(&self, broker_id: i32) -> Result<Option<BrokerConnection>> {
         match self.topology.get_broker(broker_id).await {
             Some(broker) => {
-                let connection = new_broker_connection(
-                    self.tls_config.clone(),
-                    self.socks5_proxy.clone(),
-                    self.max_message_size,
-                    Some(broker_id),
-                    &broker.to_string(),
-                )
-                .await?;
+                let connection = BrokerRepresentation::Topology(broker)
+                    .connection(
+                        self.tls_config.clone(),
+                        self.socks5_proxy.clone(),
+                        self.max_message_size,
+                    )
+                    .await?;
                 Ok(Some(connection))
             }
             None => Ok(None),
         }
     }
-}
 
-async fn new_broker_connection(
-    tls_config: TlsConfig,
-    socks5_proxy: Option<String>,
-    max_message_size: usize,
-    broker_id: Option<i32>,
-    url: &str,
-) -> Result<BrokerConnection> {
-    info!(broker = broker_id, url, "Establishing new connection",);
-    let transport = Transport::connect(url, tls_config, socks5_proxy)
-        .await
-        .map_err(|error| Error::Transport {
-            broker: url.to_string(),
-            error,
-        })?;
-
-    let messenger = Arc::new(Messenger::new(BufStream::new(transport), max_message_size));
-    messenger.sync_versions().await?;
-    Ok(messenger)
+    /// Either the topology or the bootstrap brokers to be used as a connection
+    fn brokers(&self) -> Vec<BrokerRepresentation> {
+        if self.topology.is_empty() {
+            self.bootstrap_brokers
+                .iter()
+                .cloned()
+                .map(BrokerRepresentation::Bootstrap)
+                .collect()
+        } else {
+            self.topology
+                .get_brokers()
+                .iter()
+                .cloned()
+                .map(BrokerRepresentation::Topology)
+                .collect()
+        }
+    }
 }
 
 impl std::fmt::Debug for BrokerConnector {
@@ -216,15 +262,7 @@ impl ArbitraryBrokerCache for &BrokerConnector {
             return Ok(Arc::clone(broker));
         }
 
-        let mut brokers = if self.topology.is_empty() {
-            self.bootstrap_brokers.clone()
-        } else {
-            self.topology
-                .get_brokers()
-                .iter()
-                .map(ToString::to_string)
-                .collect()
-        };
+        let mut brokers = self.brokers();
 
         // Randomise search order to encourage different clients to choose different brokers
         brokers.shuffle(&mut thread_rng());
@@ -233,14 +271,13 @@ impl ArbitraryBrokerCache for &BrokerConnector {
         let connection = backoff
             .retry_with_backoff("broker_connect", || async {
                 for broker in &brokers {
-                    let conn = new_broker_connection(
-                        self.tls_config.clone(),
-                        self.socks5_proxy.clone(),
-                        self.max_message_size,
-                        None,
-                        broker,
-                    )
-                    .await;
+                    let conn = broker
+                        .connection(
+                            self.tls_config.clone(),
+                            self.socks5_proxy.clone(),
+                            self.max_message_size,
+                        )
+                        .await;
 
                     let connection = match conn {
                         Ok(transport) => transport,
