@@ -580,4 +580,62 @@ mod tests {
     fn arbitrary_recoverable_error() -> RequestError {
         RequestError::IO(std::io::Error::from(std::io::ErrorKind::UnexpectedEof))
     }
+
+    struct FakeBrokerConn {
+        conn: Box<dyn Fn() -> Result<Arc<FakeConn>> + Send + Sync>,
+    }
+
+    #[derive(Debug, PartialEq)]
+    struct FakeConn;
+
+    #[async_trait]
+    impl Request for FakeConn {
+        async fn metadata_request(
+            &self,
+            _request_params: &MetadataRequest,
+        ) -> Result<MetadataResponse, RequestError> {
+            unreachable!();
+        }
+    }
+
+    #[async_trait]
+    impl Connect for FakeBrokerConn {
+        type R = FakeConn;
+
+        async fn connection(
+            &self,
+            _tls_config: Option<Arc<rustls::ClientConfig>>,
+            _socks5_proxy: Option<String>,
+            _max_message_size: usize,
+        ) -> Result<Arc<Self::R>> {
+            (self.conn)()
+        }
+    }
+
+    #[tokio::test]
+    async fn connect_picks_successful_broker() {
+        let brokers = vec![
+            // One broker where `connection` always succceeds
+            FakeBrokerConn {
+                conn: Box::new(|| Ok(Arc::new(FakeConn))),
+            },
+            // One broker where `connection` always fails (recoverable/fatal doesn't matter)
+            FakeBrokerConn {
+                conn: Box::new(|| Err(Error::Metadata(arbitrary_recoverable_error()))),
+            },
+        ];
+
+        // No matter what order the brokers are tried in, this call should find the broker that
+        // connects successfully.
+        let conn = connect_to_a_broker_with_retry(
+            brokers,
+            &Default::default(),
+            Default::default(),
+            Default::default(),
+            Default::default(),
+        )
+        .await;
+
+        assert_eq!(*conn, FakeConn);
+    }
 }
