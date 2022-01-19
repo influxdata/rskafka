@@ -22,10 +22,6 @@ tokio-rustls = "0.23"
 tracing = "0.1"
 varint-rs = "2.2"
 
-# fuzzing-related tools
-proptest = { version = "1", optional = true}
-proptest-derive = { version = "0.3", optional = true}
-
 [dev-dependencies]
 assert_matches = "1.5"
 dotenv = "0.15"
@@ -39,7 +35,7 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 uuid = { version = "0.8", features = ["v4"] }
 
 [features]
-fuzzing = ["proptest", "proptest-derive"]
+fuzzing = []
 
 [workspace]
 members = [

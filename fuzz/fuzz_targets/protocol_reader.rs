@@ -3,18 +3,17 @@ use std::{collections::HashMap, io::Cursor, time::Duration};
 
 use libfuzzer_sys::fuzz_target;
 use pin_project_lite::pin_project;
-use proptest::{
-    arbitrary::Arbitrary,
-    strategy::{Strategy, ValueTree},
-};
 use rskafka::{
     messenger::Messenger,
     protocol::{
         api_key::ApiKey,
         api_version::{ApiVersion, ApiVersionRange},
         frame::AsyncMessageWrite,
-        messages::{ApiVersionsRequest, ReadVersionedType, RequestBody, WriteVersionedType},
-        primitives::Int16,
+        messages::{
+            ApiVersionsRequest, CreateTopicsRequest, ReadVersionedType, RequestBody,
+            WriteVersionedType,
+        },
+        primitives::{CompactString, Int16, Int32, TaggedFields},
         traits::ReadType,
     },
 };
@@ -33,29 +32,41 @@ fn driver(data: &[u8]) -> Result<(), Error> {
     let api_version = ApiVersion(Int16::read(&mut cursor)?);
 
     match api_key {
-        ApiKey::ApiVersions => send_recv::<ApiVersionsRequest>(cursor, api_key, api_version),
+        ApiKey::ApiVersions => send_recv(
+            ApiVersionsRequest {
+                client_software_name: CompactString(String::new()),
+                client_software_version: CompactString(String::new()),
+                tagged_fields: TaggedFields::default(),
+            },
+            cursor,
+            api_key,
+            api_version,
+        ),
+        ApiKey::CreateTopics => send_recv(
+            CreateTopicsRequest {
+                topics: vec![],
+                timeout_ms: Int32(0),
+                validate_only: None,
+                tagged_fields: None,
+            },
+            cursor,
+            api_key,
+            api_version,
+        ),
         _ => Err(format!("Fuzzing not implemented for: {:?}", api_key).into()),
     }
 }
 
 fn send_recv<T>(
+    request: T,
     cursor: Cursor<&[u8]>,
     api_key: ApiKey,
     api_version: ApiVersion,
 ) -> Result<(), Error>
 where
-    T: Arbitrary + RequestBody + Send + WriteVersionedType<Vec<u8>>,
+    T: RequestBody + Send + WriteVersionedType<Vec<u8>>,
     T::ResponseBody: ReadVersionedType<Cursor<Vec<u8>>>,
 {
-    // generate a random request, it will be swallowed by the mock transport anyways
-    let strategy = T::arbitrary();
-    let mut runner = proptest::test_runner::TestRunner::default();
-
-    let request = strategy
-        .new_tree(&mut runner)
-        .expect("proptest should work")
-        .current();
-
     let rt = tokio::runtime::Builder::new_current_thread()
         .enable_time()
         .build()
@@ -88,7 +99,6 @@ where
         )]));
 
         // the actual request
-        // Note: timeout is OK here, because duplex stream has no other way to hang up
         tokio::time::timeout(Duration::from_millis(1), messenger.request(request))
             .await
             .expect("request timeout")?;

@@ -20,7 +20,6 @@ use super::{
 use proptest::prelude::*;
 
 #[derive(Debug)]
-#[cfg_attr(feature = "fuzzing", derive(proptest_derive::Arbitrary))]
 pub struct ApiVersionsRequest {
     /// The name of the client.
     pub client_software_name: CompactString,

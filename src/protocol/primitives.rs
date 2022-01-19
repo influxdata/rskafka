@@ -14,6 +14,7 @@ use varint_rs::{VarintReader, VarintWriter};
 use super::{
     record::RecordBatch,
     traits::{ReadError, ReadType, WriteError, WriteType},
+    vec_builder::VecBuilder,
 };
 
 /// Represents a boolean
@@ -219,7 +220,7 @@ where
 /// written out first, followed by the second-lowest, and so on.  Each time a group of 7 bits is written out, the high
 /// bit (bit 8) is cleared if this group is the last one, and set if it is not.
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Clone, Copy)]
-#[cfg_attr(any(feature = "fuzzing", test), derive(proptest_derive::Arbitrary))]
+#[cfg_attr(test, derive(proptest_derive::Arbitrary))]
 pub struct UnsignedVarint(pub u64);
 
 impl<R> ReadType<R> for UnsignedVarint
@@ -355,7 +356,7 @@ where
 
 /// Represents a string whose length is expressed as a variable-length integer rather than a fixed 2-byte length.
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
-#[cfg_attr(any(feature = "fuzzing", test), derive(proptest_derive::Arbitrary))]
+#[cfg_attr(test, derive(proptest_derive::Arbitrary))]
 pub struct CompactString(pub String);
 
 impl<R> ReadType<R> for CompactString
@@ -369,10 +370,14 @@ where
                 "CompactString must have non-zero length".into(),
             )),
             len => {
+                let len = usize::try_from(len)?;
                 let len = len - 1;
-                let mut buf = vec![0; len as usize];
-                reader.read_exact(&mut buf)?;
-                let s = String::from_utf8(buf).map_err(|e| ReadError::Malformed(Box::new(e)))?;
+
+                let mut buf = VecBuilder::new(len);
+                buf.read_exact(reader)?;
+
+                let s =
+                    String::from_utf8(buf.into()).map_err(|e| ReadError::Malformed(Box::new(e)))?;
                 Ok(Self(s))
             }
         }
@@ -419,9 +424,14 @@ where
         match len.0 {
             0 => Ok(Self(None)),
             len => {
-                let mut buf = vec![0; len as usize - 1];
-                reader.read_exact(&mut buf)?;
-                let s = String::from_utf8(buf).map_err(|e| ReadError::Malformed(Box::new(e)))?;
+                let len = usize::try_from(len)?;
+                let len = len - 1;
+
+                let mut buf = VecBuilder::new(len);
+                buf.read_exact(reader)?;
+
+                let s =
+                    String::from_utf8(buf.into()).map_err(|e| ReadError::Malformed(Box::new(e)))?;
                 Ok(Self(Some(s)))
             }
         }
@@ -508,7 +518,7 @@ where
 
 /// Represents a section containing optional tagged fields.
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
-#[cfg_attr(any(feature = "fuzzing", test), derive(proptest_derive::Arbitrary))]
+#[cfg_attr(test, derive(proptest_derive::Arbitrary))]
 pub struct TaggedFields(pub Vec<(UnsignedVarint, Vec<u8>)>);
 
 impl<R> ReadType<R> for TaggedFields
@@ -517,15 +527,17 @@ where
 {
     fn read(reader: &mut R) -> Result<Self, ReadError> {
         let len = UnsignedVarint::read(reader)?;
-        let mut res = Vec::with_capacity(len.0 as usize);
+        let mut res = VecBuilder::new(len.0 as usize);
         for _ in 0..len.0 {
             let tag = UnsignedVarint::read(reader)?;
+
             let data_len = UnsignedVarint::read(reader)?;
-            let mut data = vec![0u8; data_len.0 as usize];
-            reader.read_exact(&mut data)?;
-            res.push((tag, data));
+            let mut data_builder = VecBuilder::new(data_len.0 as usize);
+            data_builder.read_exact(reader)?;
+
+            res.push((tag, data_builder.into()));
         }
-        Ok(Self(res))
+        Ok(Self(res.into()))
     }
 }
 
@@ -759,10 +771,30 @@ mod tests {
 
     test_roundtrip!(CompactString, test_compact_string_roundtrip);
 
+    #[test]
+    fn test_compact_string_blowup_memory() {
+        let mut buf = Cursor::new(Vec::<u8>::new());
+        UnsignedVarint(u64::MAX).write(&mut buf).unwrap();
+        buf.set_position(0);
+
+        let err = CompactString::read(&mut buf).unwrap_err();
+        assert_matches!(err, ReadError::IO(_));
+    }
+
     test_roundtrip!(
         CompactNullableString,
         test_compact_nullable_string_roundtrip
     );
+
+    #[test]
+    fn test_compact_nullable_string_blowup_memory() {
+        let mut buf = Cursor::new(Vec::<u8>::new());
+        UnsignedVarint(u64::MAX).write(&mut buf).unwrap();
+        buf.set_position(0);
+
+        let err = CompactNullableString::read(&mut buf).unwrap_err();
+        assert_matches!(err, ReadError::IO(_));
+    }
 
     test_roundtrip!(NullableBytes, test_nullable_bytes_roundtrip);
 
@@ -781,6 +813,25 @@ mod tests {
     }
 
     test_roundtrip!(TaggedFields, test_tagged_fields_roundtrip);
+
+    #[test]
+    fn test_tagged_fields_blowup_memory() {
+        let mut buf = Cursor::new(Vec::<u8>::new());
+
+        // number of fields
+        UnsignedVarint(u64::MAX).write(&mut buf).unwrap();
+
+        // tag
+        UnsignedVarint(u64::MAX).write(&mut buf).unwrap();
+
+        // data length
+        UnsignedVarint(u64::MAX).write(&mut buf).unwrap();
+
+        buf.set_position(0);
+
+        let err = TaggedFields::read(&mut buf).unwrap_err();
+        assert_matches!(err, ReadError::IO(_));
+    }
 
     test_roundtrip!(Array<Int32>, test_array_roundtrip);
 

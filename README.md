@@ -146,12 +146,12 @@ Sadly the backtraces that you might get are not really helpful and you need a de
 locations:
 
 ```console
-$ rust-lldb ./fuzz/target/x86_64-unknown-linux-gnu/debug/protocol_reader fuzz/artifacts/protocol_reader/crash-7b824dad6e26002e5488e8cc84ce16728222dcf5
+$ rust-lldb ./target/x86_64-unknown-linux-gnu/release/protocol_reader fuzz/artifacts/protocol_reader/crash-7b824dad6e26002e5488e8cc84ce16728222dcf5
 ...
 
 (lldb) r
 ...
-Process 177543 launched: '/home/mneumann/src/rskafka/fuzz/target/x86_64-unknown-linux-gnu/debug/protocol_reader' (x86_64)
+Process 177543 launched: '/home/mneumann/src/rskafka/target/x86_64-unknown-linux-gnu/release/protocol_reader' (x86_64)
 INFO: Running with entropic power schedule (0xFF, 100).
 INFO: Seed: 3549747846
 ...
@@ -170,6 +170,13 @@ Process 177543 stopped
 ```
 
 Then create a unit test and fix the bug.
+
+For out-of-memory errors [LLDB] does not stop automatically. You can however set a breakpoint before starting the
+execution that hooks right into the place where it is about to exit:
+
+```console
+(lldb) b fuzzer::PrintStackTrace()
+```
 
 ## License
 
@@ -192,4 +199,5 @@ e.g. by batching writes to multiple partitions in a single ProduceRequest
 [Apache Kafka]: https://kafka.apache.org/
 [cargo-fuzz]: https://github.com/rust-fuzz/cargo-fuzz
 [IOx]: https://github.com/influxdata/influxdb_iox/
+[LLDB]: https://lldb.llvm.org/
 [Redpanda]: https://vectorized.io/redpanda
