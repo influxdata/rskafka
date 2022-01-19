@@ -84,6 +84,7 @@ For more advanced production and consumption, see [`crate::client::producer`] an
 - **`fuzzing`:** Exposes some internal data structures so that they can be used by our fuzzers. This is NOT a stable
   feature / API!
 - **`transport-tls` (default):** Allows TLS transport via [`rustls`].
+- **`transport-socks5`:** Allow transport via SOCKS5 proxy.
 
 ## Testing
 

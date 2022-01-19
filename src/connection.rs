@@ -63,6 +63,9 @@ pub struct BrokerConnector {
     /// TLS configuration if any
     tls_config: TlsConfig,
 
+    /// SOCKS5 proxy.
+    socks5_proxy: Option<String>,
+
     /// Maximum message size for framing protocol.
     max_message_size: usize,
 }
@@ -71,6 +74,7 @@ impl BrokerConnector {
     pub fn new(
         bootstrap_brokers: Vec<String>,
         tls_config: TlsConfig,
+        socks5_proxy: Option<String>,
         max_message_size: usize,
     ) -> Self {
         Self {
@@ -79,6 +83,7 @@ impl BrokerConnector {
             cached_arbitrary_broker: Mutex::new(None),
             backoff_config: Default::default(),
             tls_config,
+            socks5_proxy,
             max_message_size,
         }
     }
@@ -132,7 +137,7 @@ impl BrokerConnector {
 
     async fn connect_impl(&self, broker_id: Option<i32>, url: &str) -> Result<BrokerConnection> {
         info!(broker = broker_id, url, "Establishing new connection",);
-        let transport = Transport::connect(url, self.tls_config.clone())
+        let transport = Transport::connect(url, self.tls_config.clone(), self.socks5_proxy.clone())
             .await
             .map_err(|error| Error::Transport {
                 broker: url.to_string(),

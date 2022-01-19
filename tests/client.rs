@@ -147,6 +147,25 @@ async fn test_tls() {
         .unwrap();
 }
 
+// Disabled as currently no SOCKS5 integration tests
+#[cfg(feature = "transport-socks5")]
+#[ignore]
+#[tokio::test]
+async fn test_socks5() {
+    maybe_start_logging();
+
+    let client = ClientBuilder::new(vec!["my-cluster-kafka-bootstrap:9092".to_owned()])
+        .socks5_proxy("localhost:1080".to_owned())
+        .build()
+        .await
+        .unwrap();
+    let partition_client = client.partition_client("myorg_mybucket", 0).await.unwrap();
+    partition_client
+        .fetch_records(0, 1..10_000_001, 1_000)
+        .await
+        .unwrap();
+}
+
 #[tokio::test]
 async fn test_produce_empty() {
     maybe_start_logging();

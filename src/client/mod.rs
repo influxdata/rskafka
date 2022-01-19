@@ -38,6 +38,7 @@ pub enum ProduceError {
 pub struct ClientBuilder {
     bootstrap_brokers: Vec<String>,
     tls_config: TlsConfig,
+    socks5_proxy: Option<String>,
 }
 
 impl ClientBuilder {
@@ -46,6 +47,7 @@ impl ClientBuilder {
         Self {
             bootstrap_brokers,
             tls_config: TlsConfig::default(),
+            socks5_proxy: None,
         }
     }
 
@@ -56,11 +58,19 @@ impl ClientBuilder {
         self
     }
 
+    /// Use SOCKS5 proxy.
+    #[cfg(feature = "transport-socks5")]
+    pub fn socks5_proxy(mut self, proxy: String) -> Self {
+        self.socks5_proxy = Some(proxy);
+        self
+    }
+
     /// Build [`Client`].
     pub async fn build(self) -> Result<Client> {
         let brokers = Arc::new(BrokerConnector::new(
             self.bootstrap_brokers,
             self.tls_config,
+            self.socks5_proxy,
             1024 * 1024 * 1024,
         ));
         brokers.refresh_metadata().await?;

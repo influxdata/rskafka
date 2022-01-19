@@ -21,9 +21,16 @@ pub enum Error {
     #[error("IO Error: {0}")]
     IO(#[from] std::io::Error),
 
+    #[error("Invalid port: {0}")]
+    InvalidPort(#[from] std::num::ParseIntError),
+
     #[cfg(feature = "transport-tls")]
     #[error("Invalid Hostname: {0}")]
     BadHostname(#[from] rustls::client::InvalidDnsNameError),
+
+    #[cfg(feature = "transport-socks5")]
+    #[error("Cannot establish SOCKS5 connection: {0}")]
+    Socks5(#[from] async_socks5::Error),
 }
 
 pub type Result<T, E = Error> = std::result::Result<T, E>;
@@ -106,9 +113,38 @@ impl AsyncWrite for Transport {
 }
 
 impl Transport {
-    pub async fn connect(broker: &str, tls_config: TlsConfig) -> Result<Self> {
-        let tcp_stream = TcpStream::connect(&broker).await?;
+    pub async fn connect(
+        broker: &str,
+        tls_config: TlsConfig,
+        socks5_proxy: Option<String>,
+    ) -> Result<Self> {
+        let tcp_stream = Self::connect_tcp(broker, socks5_proxy).await?;
         Self::wrap_tls(tcp_stream, broker, tls_config).await
+    }
+
+    #[cfg(feature = "transport-socks5")]
+    async fn connect_tcp(broker: &str, socks5_proxy: Option<String>) -> Result<TcpStream> {
+        use async_socks5::connect;
+
+        match socks5_proxy {
+            Some(proxy) => {
+                let mut stream = TcpStream::connect(proxy).await?;
+
+                let mut broker_iter = broker.split(':');
+                let broker_host = broker_iter.next().unwrap();
+                let broker_port: u16 = broker_iter.next().unwrap().parse()?;
+
+                connect(&mut stream, (broker_host, broker_port), None).await?;
+
+                Ok(stream)
+            }
+            None => Ok(TcpStream::connect(broker).await?),
+        }
+    }
+
+    #[cfg(not(feature = "transport-socks5"))]
+    async fn connect_tcp(broker: &str, _socks5_proxy: Option<String>) -> Result<TcpStream> {
+        Ok(TcpStream::connect(broker).await?)
     }
 
     #[cfg(feature = "transport-tls")]
