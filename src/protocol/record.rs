@@ -595,7 +595,10 @@ mod tests {
 
         let err = ControlBatchRecord::read(&mut buf).unwrap_err();
         assert_matches!(err, ReadError::Malformed(_));
-        assert_eq!(err.to_string(), "Unknown control batch record version: 1");
+        assert_eq!(
+            err.to_string(),
+            "Malformed data: Unknown control batch record version: 1",
+        );
     }
 
     #[test]
@@ -607,7 +610,10 @@ mod tests {
 
         let err = ControlBatchRecord::read(&mut buf).unwrap_err();
         assert_matches!(err, ReadError::Malformed(_));
-        assert_eq!(err.to_string(), "Unknown control batch record type: 2");
+        assert_eq!(
+            err.to_string(),
+            "Malformed data: Unknown control batch record type: 2",
+        );
     }
 
     test_roundtrip!(RecordBatch, test_record_batch_roundtrip);

@@ -16,7 +16,7 @@ use crate::{
     },
     record::Record,
 };
-use std::ops::{Deref, Range};
+use std::ops::{ControlFlow, Deref, Range};
 use std::sync::Arc;
 use time::OffsetDateTime;
 use tokio::sync::Mutex;
@@ -380,39 +380,34 @@ impl PartitionClient {
     {
         let mut backoff = Backoff::new(&self.backoff_config);
 
-        loop {
-            let error = match f().await {
-                Ok(v) => return Ok(v),
-                Err(e) => e,
-            };
+        backoff
+            .retry_with_backoff(request_name, || async {
+                let error = match f().await {
+                    Ok(v) => return ControlFlow::Break(Ok(v)),
+                    Err(e) => e,
+                };
 
-            match error {
-                Error::Request(RequestError::Poisoned(_) | RequestError::IO(_))
-                | Error::Connection(_) => self.invalidate_cached_leader_broker().await,
-                Error::ServerError(ProtocolError::LeaderNotAvailable, _) => {}
-                Error::ServerError(ProtocolError::OffsetNotAvailable, _) => {}
-                Error::ServerError(ProtocolError::NotLeaderOrFollower, _) => {
-                    self.invalidate_cached_leader_broker().await;
+                match error {
+                    Error::Request(RequestError::Poisoned(_) | RequestError::IO(_))
+                    | Error::Connection(_) => self.invalidate_cached_leader_broker().await,
+                    Error::ServerError(ProtocolError::LeaderNotAvailable, _) => {}
+                    Error::ServerError(ProtocolError::OffsetNotAvailable, _) => {}
+                    Error::ServerError(ProtocolError::NotLeaderOrFollower, _) => {
+                        self.invalidate_cached_leader_broker().await;
+                    }
+                    _ => {
+                        error!(
+                            e=%error,
+                            request_name,
+                            "request encountered fatal error",
+                        );
+                        return ControlFlow::Break(Err(error));
+                    }
                 }
-                _ => {
-                    error!(
-                        e=%error,
-                        request_name,
-                        "request encountered fatal error",
-                    );
-                    return Err(error);
-                }
-            }
 
-            let backoff = backoff.next();
-            info!(
-                e=%error,
-                request_name,
-                backoff_secs=backoff.as_secs(),
-                "request encountered non-fatal error - backing off",
-            );
-            tokio::time::sleep(backoff).await;
-        }
+                ControlFlow::Continue(request_name)
+            })
+            .await
     }
 
     /// Invalidate the cached broker connection
@@ -470,6 +465,13 @@ impl PartitionClient {
         }
 
         *current_broker = Some(Arc::clone(&broker));
+
+        info!(
+            topic=%self.topic,
+            partition=%self.partition,
+            leader,
+            "Created new partition-specific broker connection",
+        );
         Ok(broker)
     }
 

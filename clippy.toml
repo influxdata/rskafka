@@ -1,0 +1,3 @@
+disallowed-methods = [
+    { path = "tokio::io::AsyncWriteExt::write", reason = "Use `write_all`, because you likely forgot to use the IO amount. Also see `unused_io_amount` clippy lint." },
+]

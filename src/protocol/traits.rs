@@ -4,13 +4,13 @@ use thiserror::Error;
 
 #[derive(Error, Debug)]
 pub enum ReadError {
-    #[error("Cannot read data")]
+    #[error("Cannot read data: {0}")]
     IO(#[from] std::io::Error),
 
-    #[error("Overflow converting integer")]
+    #[error("Overflow converting integer: {0}")]
     Overflow(#[from] std::num::TryFromIntError),
 
-    #[error(transparent)]
+    #[error("Malformed data: {0}")]
     Malformed(#[from] Box<dyn std::error::Error + Send + Sync>),
 }
 
@@ -23,13 +23,13 @@ where
 
 #[derive(Error, Debug)]
 pub enum WriteError {
-    #[error("Cannot write data")]
+    #[error("Cannot write data: {0}")]
     IO(#[from] std::io::Error),
 
-    #[error("Overflow converting integer")]
+    #[error("Overflow converting integer: {0}")]
     Overflow(#[from] std::num::TryFromIntError),
 
-    #[error(transparent)]
+    #[error("Malformed data: {0}")]
     Malformed(#[from] Box<dyn std::error::Error + Send + Sync>),
 }
 
