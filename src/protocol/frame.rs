@@ -102,11 +102,11 @@ where
         len.write(&mut len_buf)
             .expect("Int32 should always be writable to in-mem buffer");
 
-        self.write(len_buf.as_ref()).await?;
+        self.write_all(len_buf.as_ref()).await?;
 
         // empty writes seem to block forever on some IOs (e.g. tokio duplex)
         if !msg.is_empty() {
-            self.write(msg).await?;
+            self.write_all(msg).await?;
         }
 
         Ok(())
