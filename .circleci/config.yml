@@ -285,6 +285,51 @@ jobs:
           command: cargo test --benches --no-run
       - cache_save
 
+  # Builds RSKafka with minimal features.
+  build-no-default-features:
+    docker:
+      - image: quay.io/influxdb/rust:ci
+    resource_class: xlarge  # use of a smaller executor tends crashes on link
+    environment:
+      # Disable incremental compilation to avoid overhead. We are not preserving these files anyway.
+      CARGO_INCREMENTAL: "0"
+      # Disable full debug symbol generation to speed up CI build
+      # "1" means line tables only, which is useful for panic tracebacks.
+      RUSTFLAGS: "-C debuginfo=1"
+      # https://github.com/rust-lang/cargo/issues/10280
+      CARGO_NET_GIT_FETCH_WITH_CLI: "true"
+    steps:
+      - checkout
+      - rust_components
+      - cache_restore
+      - run:
+          name: Cargo build
+          command: cargo build --no-default-features
+      - cache_save
+
+  # Builds RSKafka w/ all features.
+  build-all-features:
+    docker:
+      - image: quay.io/influxdb/rust:ci
+    resource_class: xlarge  # use of a smaller executor tends crashes on link
+    environment:
+      # Disable incremental compilation to avoid overhead. We are not preserving these files anyway.
+      CARGO_INCREMENTAL: "0"
+      # Disable full debug symbol generation to speed up CI build
+      # "1" means line tables only, which is useful for panic tracebacks.
+      RUSTFLAGS: "-C debuginfo=1"
+      # https://github.com/rust-lang/cargo/issues/10280
+      CARGO_NET_GIT_FETCH_WITH_CLI: "true"
+    steps:
+      - checkout
+      - rust_components
+      - cache_restore
+      - run:
+          name: Cargo build
+          command: cargo build --all-features
+      - cache_save
+
+
   # Builds fuzzing.
   build-fuzz:
     docker:
@@ -325,5 +370,7 @@ workflows:
       - test-redpanda
       - test-kafka
       - build-default-features
+      - build-no-default-features
+      - build-all-features
       - build-fuzz
       - doc

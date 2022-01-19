@@ -6,7 +6,7 @@ use tokio::time::timeout;
 
 use rskafka::client::{
     consumer::{StreamConsumer, StreamConsumerBuilder},
-    Client,
+    ClientBuilder,
 };
 use test_helpers::{maybe_start_logging, random_topic_name, record};
 
@@ -17,7 +17,7 @@ async fn test_stream_consumer() {
     maybe_start_logging();
 
     let connection = maybe_skip_kafka_integration!();
-    let client = Client::new_plain(vec![connection]).await.unwrap();
+    let client = ClientBuilder::new(vec![connection]).build().await.unwrap();
     let controller_client = client.controller_client().await.unwrap();
 
     let topic = random_topic_name();

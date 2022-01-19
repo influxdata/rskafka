@@ -13,6 +13,8 @@ use crate::messenger::{Messenger, RequestError};
 use crate::protocol::messages::{MetadataRequest, MetadataRequestTopic, MetadataResponse};
 use crate::protocol::primitives::String_;
 
+pub use self::transport::TlsConfig;
+
 mod topology;
 mod transport;
 
@@ -59,7 +61,7 @@ pub struct BrokerConnector {
     backoff_config: BackoffConfig,
 
     /// TLS configuration if any
-    tls_config: Option<Arc<rustls::ClientConfig>>,
+    tls_config: TlsConfig,
 
     /// Maximum message size for framing protocol.
     max_message_size: usize,
@@ -68,7 +70,7 @@ pub struct BrokerConnector {
 impl BrokerConnector {
     pub fn new(
         bootstrap_brokers: Vec<String>,
-        tls_config: Option<Arc<rustls::ClientConfig>>,
+        tls_config: TlsConfig,
         max_message_size: usize,
     ) -> Self {
         Self {
@@ -148,16 +150,12 @@ impl BrokerConnector {
 
 impl std::fmt::Debug for BrokerConnector {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let tls_config: &'static str = match self.tls_config {
-            Some(_) => "Some",
-            None => "None",
-        };
         f.debug_struct("BrokerConnector")
             .field("bootstrap_brokers", &self.bootstrap_brokers)
             .field("topology", &self.topology)
             .field("cached_arbitrary_broker", &self.cached_arbitrary_broker)
             .field("backoff_config", &self.backoff_config)
-            .field("tls_config", &tls_config)
+            .field("tls_config", &"...")
             .field("max_message_size", &self.max_message_size)
             .finish()
     }

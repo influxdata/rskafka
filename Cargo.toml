@@ -14,11 +14,11 @@ futures = "0.3"
 parking_lot = "0.11"
 pin-project-lite = "0.2"
 rand = "0.8"
-rustls = "0.20"
+rustls = { version = "0.20", optional = true }
 thiserror = "1.0"
 time = "0.3"
 tokio = { version = "1.14", default-features = false, features = ["io-util", "net", "rt", "sync", "time"] }
-tokio-rustls = "0.23"
+tokio-rustls = { version = "0.23", optional = true }
 tracing = "0.1"
 varint-rs = "2.2"
 
@@ -35,7 +35,9 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 uuid = { version = "0.8", features = ["v4"] }
 
 [features]
+default = ["transport-tls"]
 fuzzing = []
+transport-tls = ["rustls", "tokio-rustls"]
 
 [workspace]
 members = [
