@@ -263,7 +263,7 @@ impl RequestHandler for MessengerTransport {
 
 #[async_trait]
 trait ArbitraryBrokerCache: Send + Sync {
-    type R: RequestHandler + Send + Sync;
+    type R: Send + Sync;
 
     async fn get(&self) -> Result<Arc<Self::R>>;
 
@@ -343,6 +343,7 @@ async fn metadata_request_with_retry<A>(
 ) -> Result<MetadataResponse>
 where
     A: ArbitraryBrokerCache,
+    A::R: RequestHandler,
 {
     backoff
         .retry_with_backoff("metadata", || async {
