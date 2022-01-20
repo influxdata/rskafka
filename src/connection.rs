@@ -262,7 +262,7 @@ impl RequestHandler for MessengerTransport {
 }
 
 #[async_trait]
-trait ArbitraryBrokerCache: Send + Sync {
+pub trait BrokerCache: Send + Sync {
     type R: Send + Sync;
 
     async fn get(&self) -> Result<Arc<Self::R>>;
@@ -270,8 +270,9 @@ trait ArbitraryBrokerCache: Send + Sync {
     async fn invalidate(&self);
 }
 
+/// BrokerConnector caches an arbitrary broker that can successfully connect.
 #[async_trait]
-impl ArbitraryBrokerCache for &BrokerConnector {
+impl BrokerCache for &BrokerConnector {
     type R = MessengerTransport;
 
     async fn get(&self) -> Result<Arc<Self::R>> {
@@ -342,7 +343,7 @@ async fn metadata_request_with_retry<A>(
     arbitrary_broker_cache: A,
 ) -> Result<MetadataResponse>
 where
-    A: ArbitraryBrokerCache,
+    A: BrokerCache,
     A::R: RequestHandler,
 {
     backoff
@@ -414,7 +415,7 @@ mod tests {
     }
 
     #[async_trait]
-    impl ArbitraryBrokerCache for FakeBrokerCache {
+    impl BrokerCache for FakeBrokerCache {
         type R = FakeBroker;
 
         async fn get(&self) -> Result<Arc<Self::R>> {
