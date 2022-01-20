@@ -41,7 +41,7 @@ pub type Result<T, E = Error> = std::result::Result<T, E>;
 
 /// How to connect to a `Transport`
 #[async_trait]
-trait Connect {
+trait ConnectionHandler {
     type R: RequestHandler + Send + Sync;
 
     async fn connection(
@@ -78,7 +78,7 @@ impl BrokerRepresentation {
 }
 
 #[async_trait]
-impl Connect for BrokerRepresentation {
+impl ConnectionHandler for BrokerRepresentation {
     type R = MessengerTransport;
 
     async fn connection(
@@ -307,7 +307,7 @@ async fn connect_to_a_broker_with_retry<B>(
     max_message_size: usize,
 ) -> Arc<B::R>
 where
-    B: Connect + Send + Sync,
+    B: ConnectionHandler + Send + Sync,
 {
     // Randomise search order to encourage different clients to choose different brokers
     brokers.shuffle(&mut thread_rng());
@@ -599,7 +599,7 @@ mod tests {
     }
 
     #[async_trait]
-    impl Connect for FakeBrokerConn {
+    impl ConnectionHandler for FakeBrokerConn {
         type R = FakeConn;
 
         async fn connection(
