@@ -1,3 +1,4 @@
+use async_trait::async_trait;
 use std::ops::ControlFlow;
 use std::sync::Arc;
 use tokio::sync::Mutex;
@@ -6,7 +7,7 @@ use tracing::{debug, error, info};
 use crate::{
     backoff::{Backoff, BackoffConfig},
     client::{Error, Result},
-    connection::{BrokerConnection, BrokerConnector},
+    connection::{BrokerCache, BrokerConnection, BrokerConnector, MessengerTransport},
     messenger::RequestError,
     protocol::{
         error::Error as ProtocolError,
@@ -58,7 +59,7 @@ impl ControllerClient {
         };
 
         self.maybe_retry("create_topic", || async move {
-            let broker = self.get_cached_controller_broker().await?;
+            let broker = self.get().await?;
             let response = broker.request(request).await?;
 
             let topic = response
@@ -96,11 +97,11 @@ impl ControllerClient {
                 match error {
                     // broken connection
                     Error::Request(RequestError::Poisoned(_) | RequestError::IO(_))
-                    | Error::Connection(_) => self.invalidate_cached_controller_broker().await,
+                    | Error::Connection(_) => self.invalidate().await,
 
                     // our broker is actually not the controller
                     Error::ServerError(ProtocolError::NotController, _) => {
-                        self.invalidate_cached_controller_broker().await;
+                        self.invalidate().await;
                     }
 
                     // fatal
@@ -119,8 +120,26 @@ impl ControllerClient {
             .map_err(|e| Error::RetryFailed(e))?
     }
 
-    /// Gets a cached [`BrokerConnection`] to any cluster controller.
-    async fn get_cached_controller_broker(&self) -> Result<BrokerConnection> {
+    /// Retrieve the broker ID of the controller
+    async fn get_controller_id(&self) -> Result<i32> {
+        let metadata = self.brokers.request_metadata(None, Some(vec![])).await?;
+
+        let controller_id = metadata
+            .controller_id
+            .ok_or_else(|| Error::InvalidResponse("Leader is NULL".to_owned()))?
+            .0;
+
+        Ok(controller_id)
+    }
+}
+
+/// Caches the cluster controller broker.
+#[async_trait]
+impl BrokerCache for &ControllerClient {
+    type R = MessengerTransport;
+    type E = Error;
+
+    async fn get(&self) -> Result<Arc<Self::R>> {
         let mut current_broker = self.current_broker.lock().await;
         if let Some(broker) = &*current_broker {
             return Ok(Arc::clone(broker));
@@ -140,23 +159,8 @@ impl ControllerClient {
         Ok(broker)
     }
 
-    /// Invalidates the cached controller broker.
-    ///
-    /// The next call to `[ContollerClient::get_cached_controller_broker]` will get a new connection
-    pub async fn invalidate_cached_controller_broker(&self) {
+    async fn invalidate(&self) {
         debug!("Invalidating cached controller broker");
         self.current_broker.lock().await.take();
-    }
-
-    /// Retrieve the broker ID of the controller
-    async fn get_controller_id(&self) -> Result<i32> {
-        let metadata = self.brokers.request_metadata(None, Some(vec![])).await?;
-
-        let controller_id = metadata
-            .controller_id
-            .ok_or_else(|| Error::InvalidResponse("Leader is NULL".to_owned()))?
-            .0;
-
-        Ok(controller_id)
     }
 }
