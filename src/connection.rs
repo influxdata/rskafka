@@ -20,12 +20,12 @@ mod transport;
 
 /// A connection to a broker
 pub type BrokerConnection = Arc<MessengerTransport>;
-type MessengerTransport = Messenger<BufStream<transport::Transport>>;
+pub type MessengerTransport = Messenger<BufStream<transport::Transport>>;
 
 #[derive(Debug, Error)]
 pub enum Error {
     #[error("error getting cluster metadata: {0}")]
-    Metadata(RequestError),
+    Metadata(#[from] RequestError),
 
     #[error("error connecting to broker \"{broker}\": {error}")]
     Transport {
@@ -267,8 +267,9 @@ impl RequestHandler for MessengerTransport {
 #[async_trait]
 pub trait BrokerCache: Send + Sync {
     type R: Send + Sync;
+    type E: std::error::Error + Send + Sync;
 
-    async fn get(&self) -> Result<Arc<Self::R>>;
+    async fn get(&self) -> Result<Arc<Self::R>, Self::E>;
 
     async fn invalidate(&self);
 }
@@ -277,8 +278,9 @@ pub trait BrokerCache: Send + Sync {
 #[async_trait]
 impl BrokerCache for &BrokerConnector {
     type R = MessengerTransport;
+    type E = Error;
 
-    async fn get(&self) -> Result<Arc<Self::R>> {
+    async fn get(&self) -> Result<Arc<Self::R>, Self::E> {
         let mut current_broker = self.cached_arbitrary_broker.lock().await;
         if let Some(broker) = &*current_broker {
             return Ok(Arc::clone(broker));
@@ -349,6 +351,7 @@ async fn metadata_request_with_retry<A>(
 where
     A: BrokerCache,
     A::R: RequestHandler,
+    Error: From<A::E>,
 {
     backoff
         .retry_with_backoff("metadata", || async {
@@ -357,7 +360,7 @@ where
                 Some(b) => Arc::clone(b),
                 None => match arbitrary_broker_cache.get().await {
                     Ok(inner) => inner,
-                    Err(e) => return ControlFlow::Break(Err(e)),
+                    Err(e) => return ControlFlow::Break(Err(e.into())),
                 },
             };
 
@@ -374,7 +377,7 @@ where
                         e=%error,
                         "metadata request encountered fatal error",
                     );
-                    ControlFlow::Break(Err(Error::Metadata(error)))
+                    ControlFlow::Break(Err(error.into()))
                 }
             }
         })
@@ -422,6 +425,7 @@ mod tests {
     #[async_trait]
     impl BrokerCache for FakeBrokerCache {
         type R = FakeBroker;
+        type E = Error;
 
         async fn get(&self) -> Result<Arc<Self::R>> {
             (self.get)()
