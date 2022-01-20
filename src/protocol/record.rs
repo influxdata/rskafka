@@ -19,6 +19,7 @@ use proptest::prelude::*;
 use super::{
     primitives::{Array, ArrayRef, Int16, Int32, Int64, Int8, Varint, Varlong},
     traits::{ReadError, ReadType, WriteError, WriteType},
+    vec_builder::VecBuilder,
 };
 
 /// CRC used to check payload data.
@@ -48,15 +49,16 @@ where
         // key
         let len = Varint::read(reader)?;
         let len = usize::try_from(len.0).map_err(|e| ReadError::Malformed(Box::new(e)))?;
-        let mut buf = vec![0; len];
-        reader.read_exact(&mut buf)?;
-        let key = String::from_utf8(buf).map_err(|e| ReadError::Malformed(Box::new(e)))?;
+        let mut buf = VecBuilder::new(len);
+        buf.read_exact(reader)?;
+        let key = String::from_utf8(buf.into()).map_err(|e| ReadError::Malformed(Box::new(e)))?;
 
         // value
         let len = Varint::read(reader)?;
         let len = usize::try_from(len.0).map_err(|e| ReadError::Malformed(Box::new(e)))?;
-        let mut value = vec![0; len];
-        reader.read_exact(&mut value)?;
+        let mut value = VecBuilder::new(len);
+        value.read_exact(reader)?;
+        let value = value.into();
 
         Ok(Self { key, value })
     }
@@ -117,21 +119,23 @@ where
         // key
         let len = Varint::read(reader)?;
         let len = usize::try_from(len.0).map_err(|e| ReadError::Malformed(Box::new(e)))?;
-        let mut key = vec![0; len];
-        reader.read_exact(&mut key)?;
+        let mut key = VecBuilder::new(len);
+        key.read_exact(reader)?;
+        let key = key.into();
 
         // value
         let len = Varint::read(reader)?;
         let len = usize::try_from(len.0).map_err(|e| ReadError::Malformed(Box::new(e)))?;
-        let mut value = vec![0; len];
-        reader.read_exact(&mut value)?;
+        let mut value = VecBuilder::new(len);
+        value.read_exact(reader)?;
+        let value = value.into();
 
         // headers
         // Note: This is NOT a normal array but uses a Varint instead.
         let n_headers = Varint::read(reader)?;
         let n_headers =
             usize::try_from(n_headers.0).map_err(|e| ReadError::Malformed(Box::new(e)))?;
-        let mut headers = Vec::with_capacity(n_headers);
+        let mut headers = VecBuilder::new(n_headers);
         for _ in 0..n_headers {
             headers.push(RecordHeader::read(reader)?);
         }
@@ -148,7 +152,7 @@ where
             offset_delta,
             key,
             value,
-            headers,
+            headers: headers.into(),
         })
     }
 }
@@ -355,8 +359,9 @@ where
         let crc = u32::from_be_bytes(crc.to_be_bytes());
 
         // data
-        let mut data = vec![0; len];
-        reader.read_exact(&mut data)?;
+        let mut data = VecBuilder::new(len);
+        data.read_exact(reader)?;
+        let data: Vec<u8> = data.into();
         let actual_crc = CASTAGNOLI.checksum(&data);
         if crc != actual_crc {
             return Err(ReadError::Malformed(
