@@ -6,7 +6,7 @@ use rskafka::{
     },
     record::{Record, RecordAndOffset},
 };
-use std::{str::FromStr, sync::Arc, time::Duration};
+use std::{collections::BTreeMap, str::FromStr, sync::Arc, time::Duration};
 
 mod rdkafka_helper;
 
@@ -389,4 +389,86 @@ async fn consume_rskafka(
         }
     }
     records.into_iter().take(n).collect()
+}
+
+#[tokio::test]
+async fn test_produce_consume_size_cutoff() {
+    maybe_start_logging();
+
+    let connection = maybe_skip_kafka_integration!();
+    let topic_name = random_topic_name();
+
+    let client = ClientBuilder::new(vec![connection]).build().await.unwrap();
+    let controller_client = client.controller_client().await.unwrap();
+    controller_client
+        .create_topic(&topic_name, 1, 1)
+        .await
+        .unwrap();
+
+    let partition_client = Arc::new(client.partition_client(&topic_name, 0).await.unwrap());
+
+    let record_1 = large_record();
+    let record_2 = large_record();
+    let record_3 = large_record();
+
+    // produce in spearate request so we have three record batches
+    partition_client
+        .produce(vec![record_1.clone()])
+        .await
+        .unwrap();
+    partition_client
+        .produce(vec![record_2.clone()])
+        .await
+        .unwrap();
+    partition_client
+        .produce(vec![record_3.clone()])
+        .await
+        .unwrap();
+
+    // `max_bytes` limits seem to work slightly differently under redpanda and Apache Kafka. It seems that when amaing
+    // for an cutoff "in the middle" of a record batch, Kafka just cuts off the batch while redpanda delivers it.
+    // However both deliver at least one record batch.
+    let limit_minimal = 2;
+    let limit_one_and_half = (record_1.approximate_size() + record_2.approximate_size() / 2) as i32;
+
+    // set up a small test closure
+    let get_with_limit = |limit: i32| {
+        let partition_client = Arc::clone(&partition_client);
+        let record_1 = record_1.clone();
+        let record_2 = record_2.clone();
+
+        async move {
+            let (records, _high_watermark) = partition_client
+                .fetch_records(0, 1..(limit as i32), 1_000)
+                .await
+                .unwrap();
+            if records.len() == 1 {
+                assert_eq!(records[0].record, record_1);
+            } else {
+                assert_eq!(records.len(), 2);
+                assert_eq!(records[0].record, record_1);
+                assert_eq!(records[1].record, record_2);
+            }
+
+            records.len()
+        }
+    };
+
+    // run tests
+    let n_records_minimal = get_with_limit(limit_minimal).await;
+    let n_records_one_and_half = get_with_limit(limit_one_and_half).await;
+
+    // check our assumptions
+    let is_kafka = (n_records_minimal == 1) && (n_records_one_and_half == 1);
+    let is_redpanda = (n_records_minimal == 1) && (n_records_one_and_half == 2);
+    assert!(is_kafka ^ is_redpanda);
+}
+
+pub fn large_record() -> Record {
+    Record {
+        key: b"".to_vec(),
+        value: vec![b'x'; 1024],
+        headers: BTreeMap::from([("foo".to_owned(), b"bar".to_vec())]),
+        timestamp: now(),
+    }
 }
