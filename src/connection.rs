@@ -52,7 +52,7 @@ trait Connect {
     ) -> Result<Arc<Self::R>>;
 }
 
-/// Info needed to connect to a broker, with optional broker ID for debugging
+/// Info needed to connect to a broker, with [optional broker ID](Self::id) for debugging
 enum BrokerRepresentation {
     /// URL specified as a bootstrap broker
     Bootstrap(String),
