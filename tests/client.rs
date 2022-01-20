@@ -2,7 +2,7 @@ use rskafka::{
     client::{
         error::{Error as ClientError, ProtocolError},
         partition::PartitionClient,
-        Client,
+        ClientBuilder,
     },
     record::{Record, RecordAndOffset},
 };
@@ -20,7 +20,7 @@ async fn test_plain() {
     maybe_start_logging();
 
     let connection = maybe_skip_kafka_integration!();
-    Client::new_plain(vec![connection]).await.unwrap();
+    ClientBuilder::new(vec![connection]).build().await.unwrap();
 }
 
 #[tokio::test]
@@ -28,7 +28,7 @@ async fn test_partition_leader() {
     maybe_start_logging();
 
     let connection = maybe_skip_kafka_integration!();
-    let client = Client::new_plain(vec![connection]).await.unwrap();
+    let client = ClientBuilder::new(vec![connection]).build().await.unwrap();
     let controller_client = client.controller_client().await.unwrap();
     let topic_name = random_topic_name();
 
@@ -57,7 +57,7 @@ async fn test_topic_crud() {
     maybe_start_logging();
 
     let connection = maybe_skip_kafka_integration!();
-    let client = Client::new_plain(vec![connection]).await.unwrap();
+    let client = ClientBuilder::new(vec![connection]).build().await.unwrap();
     let controller_client = client.controller_client().await.unwrap();
     let topics = client.list_topics().await.unwrap();
 
@@ -140,7 +140,28 @@ async fn test_tls() {
         .unwrap();
 
     let connection = maybe_skip_kafka_integration!();
-    Client::new_with_tls(vec![connection], Arc::new(config))
+    ClientBuilder::new(vec![connection])
+        .tls_config(Arc::new(config))
+        .build()
+        .await
+        .unwrap();
+}
+
+// Disabled as currently no SOCKS5 integration tests
+#[cfg(feature = "transport-socks5")]
+#[ignore]
+#[tokio::test]
+async fn test_socks5() {
+    maybe_start_logging();
+
+    let client = ClientBuilder::new(vec!["my-cluster-kafka-bootstrap:9092".to_owned()])
+        .socks5_proxy("localhost:1080".to_owned())
+        .build()
+        .await
+        .unwrap();
+    let partition_client = client.partition_client("myorg_mybucket", 0).await.unwrap();
+    partition_client
+        .fetch_records(0, 1..10_000_001, 1_000)
         .await
         .unwrap();
 }
@@ -153,7 +174,7 @@ async fn test_produce_empty() {
     let topic_name = random_topic_name();
     let n_partitions = 2;
 
-    let client = Client::new_plain(vec![connection]).await.unwrap();
+    let client = ClientBuilder::new(vec![connection]).build().await.unwrap();
     let controller_client = client.controller_client().await.unwrap();
     controller_client
         .create_topic(&topic_name, n_partitions, 1)
@@ -192,7 +213,10 @@ async fn test_get_high_watermark() {
     let topic_name = random_topic_name();
     let n_partitions = 1;
 
-    let client = Client::new_plain(vec![connection.clone()]).await.unwrap();
+    let client = ClientBuilder::new(vec![connection.clone()])
+        .build()
+        .await
+        .unwrap();
     let controller_client = client.controller_client().await.unwrap();
     controller_client
         .create_topic(&topic_name, n_partitions, 1)
@@ -244,7 +268,10 @@ where
     let topic_name = random_topic_name();
     let n_partitions = 2;
 
-    let client = Client::new_plain(vec![connection.clone()]).await.unwrap();
+    let client = ClientBuilder::new(vec![connection.clone()])
+        .build()
+        .await
+        .unwrap();
     let controller_client = client.controller_client().await.unwrap();
     controller_client
         .create_topic(&topic_name, n_partitions, 1)

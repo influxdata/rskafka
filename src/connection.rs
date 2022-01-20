@@ -13,6 +13,8 @@ use crate::messenger::{Messenger, RequestError};
 use crate::protocol::messages::{MetadataRequest, MetadataRequestTopic, MetadataResponse};
 use crate::protocol::primitives::String_;
 
+pub use self::transport::TlsConfig;
+
 mod topology;
 mod transport;
 
@@ -59,7 +61,10 @@ pub struct BrokerConnector {
     backoff_config: BackoffConfig,
 
     /// TLS configuration if any
-    tls_config: Option<Arc<rustls::ClientConfig>>,
+    tls_config: TlsConfig,
+
+    /// SOCKS5 proxy.
+    socks5_proxy: Option<String>,
 
     /// Maximum message size for framing protocol.
     max_message_size: usize,
@@ -68,7 +73,8 @@ pub struct BrokerConnector {
 impl BrokerConnector {
     pub fn new(
         bootstrap_brokers: Vec<String>,
-        tls_config: Option<Arc<rustls::ClientConfig>>,
+        tls_config: TlsConfig,
+        socks5_proxy: Option<String>,
         max_message_size: usize,
     ) -> Self {
         Self {
@@ -77,6 +83,7 @@ impl BrokerConnector {
             cached_arbitrary_broker: Mutex::new(None),
             backoff_config: Default::default(),
             tls_config,
+            socks5_proxy,
             max_message_size,
         }
     }
@@ -130,7 +137,7 @@ impl BrokerConnector {
 
     async fn connect_impl(&self, broker_id: Option<i32>, url: &str) -> Result<BrokerConnection> {
         info!(broker = broker_id, url, "Establishing new connection",);
-        let transport = Transport::connect(url, self.tls_config.clone())
+        let transport = Transport::connect(url, self.tls_config.clone(), self.socks5_proxy.clone())
             .await
             .map_err(|error| Error::Transport {
                 broker: url.to_string(),
@@ -148,16 +155,12 @@ impl BrokerConnector {
 
 impl std::fmt::Debug for BrokerConnector {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let tls_config: &'static str = match self.tls_config {
-            Some(_) => "Some",
-            None => "None",
-        };
         f.debug_struct("BrokerConnector")
             .field("bootstrap_brokers", &self.bootstrap_brokers)
             .field("topology", &self.topology)
             .field("cached_arbitrary_broker", &self.cached_arbitrary_broker)
             .field("backoff_config", &self.backoff_config)
-            .field("tls_config", &tls_config)
+            .field("tls_config", &"...")
             .field("max_message_size", &self.max_message_size)
             .finish()
     }

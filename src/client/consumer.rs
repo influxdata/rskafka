@@ -5,14 +5,14 @@
 //! # async fn test() {
 //! use futures::StreamExt;
 //! use rskafka::client::{
-//!     Client,
+//!     ClientBuilder,
 //!     consumer::StreamConsumerBuilder,
 //! };
 //! use std::sync::Arc;
 //!
 //! // get partition client
 //! let connection = "localhost:9093".to_owned();
-//! let client = Client::new_plain(vec![connection]).await.unwrap();
+//! let client = ClientBuilder::new(vec![connection]).build().await.unwrap();
 //! let partition_client = Arc::new(
 //!     client.partition_client("my_topic", 0).await.unwrap()
 //! );

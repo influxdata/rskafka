@@ -1,7 +1,7 @@
 use futures::{future::FusedFuture, pin_mut, FutureExt};
 use rskafka::client::{
     producer::{aggregator::RecordAggregator, BatchProducerBuilder},
-    Client,
+    ClientBuilder,
 };
 use std::time::Duration;
 
@@ -14,7 +14,7 @@ async fn test_batch_producer() {
     maybe_start_logging();
 
     let connection = maybe_skip_kafka_integration!();
-    let client = Client::new_plain(vec![connection]).await.unwrap();
+    let client = ClientBuilder::new(vec![connection]).build().await.unwrap();
     let controller_client = client.controller_client().await.unwrap();
 
     let topic = random_topic_name();

@@ -3,7 +3,9 @@ use std::sync::Arc;
 use thiserror::Error;
 
 use crate::{
-    client::partition::PartitionClient, connection::BrokerConnector, protocol::primitives::Boolean,
+    client::partition::PartitionClient,
+    connection::{BrokerConnector, TlsConfig},
+    protocol::primitives::Boolean,
     topic::Topic,
 };
 
@@ -32,39 +34,63 @@ pub enum ProduceError {
     NoResult { index: usize },
 }
 
+/// Builder for [`Client`].
+pub struct ClientBuilder {
+    bootstrap_brokers: Vec<String>,
+    tls_config: TlsConfig,
+    socks5_proxy: Option<String>,
+}
+
+impl ClientBuilder {
+    /// Create a new [`ClientBuilder`] with the list of bootstrap brokers
+    pub fn new(bootstrap_brokers: Vec<String>) -> Self {
+        Self {
+            bootstrap_brokers,
+            tls_config: TlsConfig::default(),
+            socks5_proxy: None,
+        }
+    }
+
+    /// Setup TLS.
+    #[cfg(feature = "transport-tls")]
+    pub fn tls_config(mut self, tls_config: Arc<rustls::ClientConfig>) -> Self {
+        self.tls_config = Some(tls_config);
+        self
+    }
+
+    /// Use SOCKS5 proxy.
+    #[cfg(feature = "transport-socks5")]
+    pub fn socks5_proxy(mut self, proxy: String) -> Self {
+        self.socks5_proxy = Some(proxy);
+        self
+    }
+
+    /// Build [`Client`].
+    pub async fn build(self) -> Result<Client> {
+        let brokers = Arc::new(BrokerConnector::new(
+            self.bootstrap_brokers,
+            self.tls_config,
+            self.socks5_proxy,
+            1024 * 1024 * 1024,
+        ));
+        brokers.refresh_metadata().await?;
+
+        Ok(Client { brokers })
+    }
+}
+
+impl std::fmt::Debug for ClientBuilder {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ClientBuilder").finish_non_exhaustive()
+    }
+}
+
 #[derive(Debug)]
 pub struct Client {
     brokers: Arc<BrokerConnector>,
 }
 
 impl Client {
-    /// Create a new [`Client`] with the list of bootstrap brokers
-    pub async fn new_plain(boostrap_brokers: Vec<String>) -> Result<Self> {
-        Self::new(boostrap_brokers, None).await
-    }
-
-    /// Create a new [`Client`] using TLS
-    pub async fn new_with_tls(
-        boostrap_brokers: Vec<String>,
-        tls_config: Arc<rustls::ClientConfig>,
-    ) -> Result<Self> {
-        Self::new(boostrap_brokers, Some(tls_config)).await
-    }
-
-    async fn new(
-        boostrap_brokers: Vec<String>,
-        tls_config: Option<Arc<rustls::ClientConfig>>,
-    ) -> Result<Self> {
-        let brokers = Arc::new(BrokerConnector::new(
-            boostrap_brokers,
-            tls_config,
-            1024 * 1024 * 1024,
-        ));
-        brokers.refresh_metadata().await?;
-
-        Ok(Self { brokers })
-    }
-
     /// Returns a client for performing certain cluster-wide operations.
     pub async fn controller_client(&self) -> Result<ControllerClient> {
         Ok(ControllerClient::new(Arc::clone(&self.brokers)))

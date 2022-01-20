@@ -25,7 +25,7 @@ It will be a good fit for workloads that:
 ```rust,no_run
 # async fn test() {
 use rskafka::{
-    client::Client,
+    client::ClientBuilder,
     record::Record,
 };
 use time::OffsetDateTime;
@@ -33,7 +33,7 @@ use std::collections::BTreeMap;
 
 // setup client
 let connection = "localhost:9093".to_owned();
-let client = Client::new_plain(vec![connection]).await.unwrap();
+let client = ClientBuilder::new(vec![connection]).build().await.unwrap();
 
 // create a topic
 let topic = "my_topic";
@@ -77,6 +77,14 @@ let (records, high_watermark) = partition_client
 ```
 
 For more advanced production and consumption, see [`crate::client::producer`] and [`crate::client::consumer`].
+
+
+## Features
+
+- **`fuzzing`:** Exposes some internal data structures so that they can be used by our fuzzers. This is NOT a stable
+  feature / API!
+- **`transport-tls` (default):** Allows TLS transport via [`rustls`].
+- **`transport-socks5`:** Allow transport via SOCKS5 proxy.
 
 ## Testing
 
@@ -201,3 +209,4 @@ e.g. by batching writes to multiple partitions in a single ProduceRequest
 [IOx]: https://github.com/influxdata/influxdb_iox/
 [LLDB]: https://lldb.llvm.org/
 [Redpanda]: https://vectorized.io/redpanda
+[rustls]: https://github.com/rustls/rustls
