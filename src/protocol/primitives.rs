@@ -578,11 +578,11 @@ where
             Ok(Self(None))
         } else {
             let len = usize::try_from(len.0)?;
-            let mut res = Vec::with_capacity(len);
+            let mut res = VecBuilder::new(len);
             for _ in 0..len {
                 res.push(T::read(reader)?);
             }
-            Ok(Self(Some(res)))
+            Ok(Self(Some(res.into())))
         }
     }
 }
@@ -834,6 +834,32 @@ mod tests {
     }
 
     test_roundtrip!(Array<Int32>, test_array_roundtrip);
+
+    #[test]
+    fn test_array_blowup_memory() {
+        let mut buf = Cursor::new(Vec::<u8>::new());
+        Int32(i32::MAX).write(&mut buf).unwrap();
+        buf.set_position(0);
+
+        // Use a rather large struct here to trigger OOM
+        #[derive(Debug)]
+        struct Large {
+            _inner: [u8; 1024],
+        }
+
+        impl<R> ReadType<R> for Large
+        where
+            R: Read,
+        {
+            fn read(reader: &mut R) -> Result<Self, ReadError> {
+                Int32::read(reader)?;
+                unreachable!()
+            }
+        }
+
+        let err = Array::<Large>::read(&mut buf).unwrap_err();
+        assert_matches!(err, ReadError::IO(_));
+    }
 
     test_roundtrip!(Records, test_records_roundtrip);
 }
