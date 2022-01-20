@@ -581,7 +581,7 @@ mod tests {
         RequestError::IO(std::io::Error::from(std::io::ErrorKind::UnexpectedEof))
     }
 
-    struct FakeBrokerConn {
+    struct FakeBrokerRepresentation {
         conn: Box<dyn Fn() -> Result<Arc<FakeConn>> + Send + Sync>,
     }
 
@@ -599,7 +599,7 @@ mod tests {
     }
 
     #[async_trait]
-    impl ConnectionHandler for FakeBrokerConn {
+    impl ConnectionHandler for FakeBrokerRepresentation {
         type R = FakeConn;
 
         async fn connect(
@@ -616,11 +616,11 @@ mod tests {
     async fn connect_picks_successful_broker() {
         let brokers = vec![
             // One broker where `connection` always succceeds
-            FakeBrokerConn {
+            FakeBrokerRepresentation {
                 conn: Box::new(|| Ok(Arc::new(FakeConn))),
             },
             // One broker where `connection` always fails (recoverable/fatal doesn't matter)
-            FakeBrokerConn {
+            FakeBrokerRepresentation {
                 conn: Box::new(|| Err(Error::Metadata(arbitrary_recoverable_error()))),
             },
         ];
