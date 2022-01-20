@@ -6,10 +6,10 @@
 
 use std::io::{Cursor, Read, Write};
 
+use integer_encoding::{VarIntReader, VarIntWriter};
+
 #[cfg(test)]
 use proptest::prelude::*;
-
-use varint_rs::{VarintReader, VarintWriter};
 
 use super::{
     record::RecordBatch,
@@ -174,7 +174,10 @@ where
     R: Read,
 {
     fn read(reader: &mut R) -> Result<Self, ReadError> {
-        Ok(Self(reader.read_i32_varint()?))
+        // workaround for https://github.com/dermesser/integer-encoding-rs/issues/21
+        // read 64bit and use a checked downcast instead
+        let i: i64 = reader.read_varint()?;
+        Ok(Self(i32::try_from(i)?))
     }
 }
 
@@ -183,7 +186,7 @@ where
     W: Write,
 {
     fn write(&self, writer: &mut W) -> Result<(), WriteError> {
-        writer.write_i32_varint(self.0)?;
+        writer.write_varint(self.0)?;
         Ok(())
     }
 }
@@ -200,7 +203,7 @@ where
     R: Read,
 {
     fn read(reader: &mut R) -> Result<Self, ReadError> {
-        Ok(Self(reader.read_i64_varint()?))
+        Ok(Self(reader.read_varint()?))
     }
 }
 
@@ -209,7 +212,7 @@ where
     W: Write,
 {
     fn write(&self, writer: &mut W) -> Result<(), WriteError> {
-        writer.write_i64_varint(self.0)?;
+        writer.write_varint(self.0)?;
         Ok(())
     }
 }
@@ -726,6 +729,31 @@ mod tests {
         }
     }
 
+    #[test]
+    fn test_varint_read_read_overflow() {
+        // this should overflow a 64bit bytes varint
+        let mut buf = Cursor::new(vec![0xffu8; 11]);
+
+        let err = Varint::read(&mut buf).unwrap_err();
+        assert_matches!(err, ReadError::IO(_));
+        assert_eq!(err.to_string(), "Cannot read data: Unterminated varint",);
+    }
+
+    #[test]
+    fn test_varint_read_downcast_overflow() {
+        // this should overflow when reading a 64bit varint and casting it down to 32bit
+        let mut data = vec![0xffu8; 9];
+        data.push(0x00);
+        let mut buf = Cursor::new(data);
+
+        let err = Varint::read(&mut buf).unwrap_err();
+        assert_matches!(err, ReadError::Overflow(_));
+        assert_eq!(
+            err.to_string(),
+            "Overflow converting integer: out of range integral type conversion attempted",
+        );
+    }
+
     test_roundtrip!(Varlong, test_varlong_roundtrip);
 
     #[test]
@@ -738,6 +766,15 @@ mod tests {
             let restored = Varlong::read(&mut Cursor::new(data)).unwrap();
             assert_eq!(restored.0, v);
         }
+    }
+
+    #[test]
+    fn test_varlong_read_overflow() {
+        let mut buf = Cursor::new(vec![0xffu8; 11]);
+
+        let err = Varlong::read(&mut buf).unwrap_err();
+        assert_matches!(err, ReadError::IO(_));
+        assert_eq!(err.to_string(), "Cannot read data: Unterminated varint",);
     }
 
     test_roundtrip!(UnsignedVarint, test_unsigned_varint_roundtrip);
