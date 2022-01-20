@@ -294,9 +294,11 @@ where
             )),
             -1 => Ok(Self(None)),
             l => {
-                let mut buf = vec![0; l as usize];
-                reader.read_exact(&mut buf)?;
-                let s = String::from_utf8(buf).map_err(|e| ReadError::Malformed(Box::new(e)))?;
+                let len = usize::try_from(l)?;
+                let mut buf = VecBuilder::new(len);
+                buf.read_exact(reader)?;
+                let s =
+                    String::from_utf8(buf.into()).map_err(|e| ReadError::Malformed(Box::new(e)))?;
                 Ok(Self(Some(s)))
             }
         }
@@ -767,6 +769,16 @@ mod tests {
             err.to_string(),
             "Malformed data: Invalid negative length for nullable string: -2",
         );
+    }
+
+    #[test]
+    fn test_nullable_string_blowup_memory() {
+        let mut buf = Cursor::new(Vec::<u8>::new());
+        Int16(i16::MAX).write(&mut buf).unwrap();
+        buf.set_position(0);
+
+        let err = NullableString::read(&mut buf).unwrap_err();
+        assert_matches!(err, ReadError::IO(_));
     }
 
     test_roundtrip!(CompactString, test_compact_string_roundtrip);
