@@ -493,9 +493,10 @@ where
             )),
             -1 => Ok(Self(None)),
             l => {
-                let mut buf = vec![0; l as usize];
-                reader.read_exact(&mut buf)?;
-                Ok(Self(Some(buf)))
+                let len = usize::try_from(l)?;
+                let mut buf = VecBuilder::new(len);
+                buf.read_exact(reader)?;
+                Ok(Self(Some(buf.into())))
             }
         }
     }
@@ -832,6 +833,16 @@ mod tests {
             err.to_string(),
             "Malformed data: Invalid negative length for nullable bytes: -2",
         );
+    }
+
+    #[test]
+    fn test_nullable_bytes_blowup_memory() {
+        let mut buf = Cursor::new(Vec::<u8>::new());
+        Int32(i32::MAX).write(&mut buf).unwrap();
+        buf.set_position(0);
+
+        let err = NullableBytes::read(&mut buf).unwrap_err();
+        assert_matches!(err, ReadError::IO(_));
     }
 
     test_roundtrip!(TaggedFields, test_tagged_fields_roundtrip);
