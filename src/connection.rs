@@ -44,7 +44,7 @@ pub type Result<T, E = Error> = std::result::Result<T, E>;
 trait ConnectionHandler {
     type R: RequestHandler + Send + Sync;
 
-    async fn connection(
+    async fn connect(
         &self,
         tls_config: TlsConfig,
         socks5_proxy: Option<String>,
@@ -81,7 +81,7 @@ impl BrokerRepresentation {
 impl ConnectionHandler for BrokerRepresentation {
     type R = MessengerTransport;
 
-    async fn connection(
+    async fn connect(
         &self,
         tls_config: TlsConfig,
         socks5_proxy: Option<String>,
@@ -199,7 +199,7 @@ impl BrokerConnector {
         match self.topology.get_broker(broker_id).await {
             Some(broker) => {
                 let connection = BrokerRepresentation::Topology(broker)
-                    .connection(
+                    .connect(
                         self.tls_config.clone(),
                         self.socks5_proxy.clone(),
                         self.max_message_size,
@@ -317,7 +317,7 @@ where
         .retry_with_backoff("broker_connect", || async {
             for broker in &brokers {
                 let conn = broker
-                    .connection(tls_config.clone(), socks5_proxy.clone(), max_message_size)
+                    .connect(tls_config.clone(), socks5_proxy.clone(), max_message_size)
                     .await;
 
                 let connection = match conn {
@@ -602,7 +602,7 @@ mod tests {
     impl ConnectionHandler for FakeBrokerConn {
         type R = FakeConn;
 
-        async fn connection(
+        async fn connect(
             &self,
             _tls_config: Option<Arc<rustls::ClientConfig>>,
             _socks5_proxy: Option<String>,
