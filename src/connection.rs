@@ -42,7 +42,7 @@ pub type Result<T, E = Error> = std::result::Result<T, E>;
 /// How to connect to a `Transport`
 #[async_trait]
 trait Connect {
-    type R: Request + Send + Sync;
+    type R: RequestHandler + Send + Sync;
 
     async fn connection(
         &self,
@@ -244,7 +244,7 @@ impl std::fmt::Debug for BrokerConnector {
 }
 
 #[async_trait]
-trait Request {
+trait RequestHandler {
     async fn metadata_request(
         &self,
         request_params: &MetadataRequest,
@@ -252,7 +252,7 @@ trait Request {
 }
 
 #[async_trait]
-impl Request for MessengerTransport {
+impl RequestHandler for MessengerTransport {
     async fn metadata_request(
         &self,
         request_params: &MetadataRequest,
@@ -263,7 +263,7 @@ impl Request for MessengerTransport {
 
 #[async_trait]
 trait ArbitraryBrokerCache: Send + Sync {
-    type R: Request + Send + Sync;
+    type R: RequestHandler + Send + Sync;
 
     async fn get(&self) -> Result<Arc<Self::R>>;
 
@@ -398,7 +398,7 @@ mod tests {
     }
 
     #[async_trait]
-    impl Request for FakeBroker {
+    impl RequestHandler for FakeBroker {
         async fn metadata_request(
             &self,
             _request_params: &MetadataRequest,
@@ -589,7 +589,7 @@ mod tests {
     struct FakeConn;
 
     #[async_trait]
-    impl Request for FakeConn {
+    impl RequestHandler for FakeConn {
         async fn metadata_request(
             &self,
             _request_params: &MetadataRequest,
