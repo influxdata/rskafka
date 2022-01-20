@@ -337,9 +337,9 @@ where
     fn read(reader: &mut R) -> Result<Self, ReadError> {
         let len = Int16::read(reader)?;
         let len = usize::try_from(len.0).map_err(|e| ReadError::Malformed(Box::new(e)))?;
-        let mut buf = vec![0; len];
-        reader.read_exact(&mut buf)?;
-        let s = String::from_utf8(buf).map_err(|e| ReadError::Malformed(Box::new(e)))?;
+        let mut buf = VecBuilder::new(len);
+        buf.read_exact(reader)?;
+        let s = String::from_utf8(buf.into()).map_err(|e| ReadError::Malformed(Box::new(e)))?;
         Ok(Self(s))
     }
 }
@@ -754,6 +754,16 @@ mod tests {
     }
 
     test_roundtrip!(String_, test_string_roundtrip);
+
+    #[test]
+    fn test_string_blowup_memory() {
+        let mut buf = Cursor::new(Vec::<u8>::new());
+        Int16(i16::MAX).write(&mut buf).unwrap();
+        buf.set_position(0);
+
+        let err = String_::read(&mut buf).unwrap_err();
+        assert_matches!(err, ReadError::IO(_));
+    }
 
     test_roundtrip!(NullableString, test_nullable_string_roundtrip);
 
