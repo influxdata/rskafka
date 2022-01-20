@@ -381,6 +381,7 @@ impl PartitionClient {
                 ControlFlow::Continue(request_name)
             })
             .await
+            .map_err(|e| Error::RetryFailed(e))?
     }
 
     /// Invalidate the cached broker connection

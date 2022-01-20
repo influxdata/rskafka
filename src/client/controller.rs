@@ -116,6 +116,7 @@ impl ControllerClient {
                 ControlFlow::Continue(request_name)
             })
             .await
+            .map_err(|e| Error::RetryFailed(e))?
     }
 
     /// Gets a cached [`BrokerConnection`] to any cluster controller.

@@ -6,7 +6,7 @@ use thiserror::Error;
 use tokio::{io::BufStream, sync::Mutex};
 use tracing::{debug, error, info, warn};
 
-use crate::backoff::{Backoff, BackoffConfig};
+use crate::backoff::{Backoff, BackoffConfig, BackoffError};
 use crate::connection::topology::{Broker, BrokerTopology};
 use crate::connection::transport::Transport;
 use crate::messenger::{Messenger, RequestError};
@@ -35,6 +35,9 @@ pub enum Error {
 
     #[error("cannot sync versions: {0}")]
     SyncVersions(#[from] crate::messenger::SyncVersionsError),
+
+    #[error("all retries failed: {0}")]
+    RetryFailed(BackoffError),
 }
 
 pub type Result<T, E = Error> = std::result::Result<T, E>;
@@ -288,7 +291,7 @@ impl BrokerCache for &BrokerConnector {
             self.socks5_proxy.clone(),
             self.max_message_size,
         )
-        .await;
+        .await?;
 
         *current_broker = Some(Arc::clone(&connection));
         Ok(connection)
@@ -306,7 +309,7 @@ async fn connect_to_a_broker_with_retry<B>(
     tls_config: TlsConfig,
     socks5_proxy: Option<String>,
     max_message_size: usize,
-) -> Arc<B::R>
+) -> Result<Arc<B::R>>
 where
     B: ConnectionHandler + Send + Sync,
 {
@@ -334,6 +337,7 @@ where
             ControlFlow::Continue("Failed to connect to any broker, backing off")
         })
         .await
+        .map_err(|e| Error::RetryFailed(e))
 }
 
 async fn metadata_request_with_retry<A>(
@@ -375,6 +379,7 @@ where
             }
         })
         .await
+        .map_err(|e| Error::RetryFailed(e))?
 }
 
 #[cfg(test)]
@@ -636,7 +641,8 @@ mod tests {
             Default::default(),
             Default::default(),
         )
-        .await;
+        .await
+        .unwrap();
 
         assert_eq!(*conn, FakeConn);
     }
