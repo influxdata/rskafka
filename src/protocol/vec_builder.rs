@@ -76,7 +76,7 @@ impl VecBuilder<u8> {
         R: std::io::Read,
     {
         // Note: We can modify `self` here and still return an error because there is no way the taken/moved `self` will
-        //       be accessible in the error case.S
+        //       be accessible in the error case.
 
         while self.remaining_elements > 0 {
             let mut buf = self.blocks.last_mut().expect("Has always at least 1 block");
