@@ -372,68 +372,7 @@ where
         // ==========================================================================================
         // ======================================== CRC data ========================================
         let mut data = Cursor::new(data);
-
-        // attributes
-        let attributes = Int16::read(&mut data)?.0;
-        let compression = match attributes & 0x7 {
-            0 => RecordBatchCompression::NoCompression,
-            1 => RecordBatchCompression::Gzip,
-            2 => RecordBatchCompression::Snappy,
-            3 => RecordBatchCompression::Lz4,
-            4 => RecordBatchCompression::Zstd,
-            other => {
-                return Err(ReadError::Malformed(
-                    format!("Invalid compression type: {}", other).into(),
-                ));
-            }
-        };
-        let timestamp_type = if ((attributes >> 3) & 0x1) == 0 {
-            RecordBatchTimestampType::CreateTime
-        } else {
-            RecordBatchTimestampType::LogAppendTime
-        };
-        let is_transactional = ((attributes >> 4) & 0x1) == 1;
-        let is_control = ((attributes >> 5) & 0x1) == 1;
-
-        // lastOffsetDelta
-        let last_offset_delta = Int32::read(&mut data)?.0;
-
-        // firstTimestamp
-        let first_timestamp = Int64::read(&mut data)?.0;
-
-        // maxTimestamp
-        let max_timestamp = Int64::read(&mut data)?.0;
-
-        // producerId
-        let producer_id = Int64::read(&mut data)?.0;
-
-        // producerEpoch
-        let producer_epoch = Int16::read(&mut data)?.0;
-
-        // baseSequence
-        let base_sequence = Int32::read(&mut data)?.0;
-
-        // records
-        if !matches!(compression, RecordBatchCompression::NoCompression) {
-            // TODO: implement compression
-            return Err(ReadError::Malformed(
-                format!("Unimplemented compression: {:?}", compression).into(),
-            ));
-        }
-        let records = if is_control {
-            let mut records = Array::<ControlBatchRecord>::read(&mut data)?
-                .0
-                .unwrap_or_default();
-            if records.len() != 1 {
-                return Err(ReadError::Malformed(
-                    format!("Expected 1 control record but got {}", records.len()).into(),
-                ));
-            }
-            ControlBatchOrRecords::ControlBatch(records.pop().expect("Just checked the size"))
-        } else {
-            let records = Array::<Record>::read(&mut data)?.0.unwrap_or_default();
-            ControlBatchOrRecords::Records(records)
-        };
+        let body = RecordBatchBody::read(&mut data)?;
 
         // check if there is any trailing data because this is likely a bug
         let bytes_read = data.position();
@@ -451,16 +390,16 @@ where
         Ok(Self {
             base_offset,
             partition_leader_epoch,
-            last_offset_delta,
-            first_timestamp,
-            max_timestamp,
-            producer_id,
-            producer_epoch,
-            base_sequence,
-            compression,
-            timestamp_type,
-            is_transactional,
-            records,
+            last_offset_delta: body.last_offset_delta,
+            first_timestamp: body.first_timestamp,
+            max_timestamp: body.max_timestamp,
+            producer_id: body.producer_id,
+            producer_epoch: body.producer_epoch,
+            base_sequence: body.base_sequence,
+            compression: body.compression,
+            timestamp_type: body.timestamp_type,
+            is_transactional: body.is_transactional,
+            records: body.records,
         })
     }
 }
@@ -474,63 +413,19 @@ where
         // ======================================== CRC data ========================================
         // collect everything that should be part of the CRC calculation
         let mut data = vec![];
-
-        // attributes
-        let mut attributes: i16 = match self.compression {
-            RecordBatchCompression::NoCompression => 0,
-            RecordBatchCompression::Gzip => 1,
-            RecordBatchCompression::Snappy => 2,
-            RecordBatchCompression::Lz4 => 3,
-            RecordBatchCompression::Zstd => 4,
+        let body_ref = RecordBatchBodyRef {
+            last_offset_delta: self.last_offset_delta,
+            first_timestamp: self.first_timestamp,
+            max_timestamp: self.max_timestamp,
+            producer_id: self.producer_id,
+            producer_epoch: self.producer_epoch,
+            base_sequence: self.base_sequence,
+            records: &self.records,
+            compression: self.compression,
+            is_transactional: self.is_transactional,
+            timestamp_type: self.timestamp_type,
         };
-        match self.timestamp_type {
-            RecordBatchTimestampType::CreateTime => (),
-            RecordBatchTimestampType::LogAppendTime => {
-                attributes |= 1 << 3;
-            }
-        }
-        if self.is_transactional {
-            attributes |= 1 << 4;
-        }
-        if matches!(self.records, ControlBatchOrRecords::ControlBatch(_)) {
-            attributes |= 1 << 5;
-        }
-        Int16(attributes).write(&mut data)?;
-
-        // lastOffsetDelta
-        Int32(self.last_offset_delta).write(&mut data)?;
-
-        // firstTimestamp
-        Int64(self.first_timestamp).write(&mut data)?;
-
-        // maxTimestamp
-        Int64(self.max_timestamp).write(&mut data)?;
-
-        // producerId
-        Int64(self.producer_id).write(&mut data)?;
-
-        // producerEpoch
-        Int16(self.producer_epoch).write(&mut data)?;
-
-        // baseSequence
-        Int32(self.base_sequence).write(&mut data)?;
-
-        // records
-        if !matches!(self.compression, RecordBatchCompression::NoCompression) {
-            // TODO: implement compression
-            return Err(WriteError::Malformed(
-                format!("Unimplemented compression: {:?}", self.compression).into(),
-            ));
-        }
-        match &self.records {
-            ControlBatchOrRecords::ControlBatch(control_batch) => {
-                let records = vec![*control_batch];
-                Array::<ControlBatchRecord>(Some(records)).write(&mut data)?;
-            }
-            ControlBatchOrRecords::Records(records) => {
-                ArrayRef::<Record>(Some(records)).write(&mut data)?;
-            }
-        }
+        body_ref.write(&mut data)?;
 
         // ==========================================================================================
         // ==========================================================================================
@@ -570,6 +465,208 @@ where
 
         // the actual CRC-checked data
         writer.write_all(&data)?;
+
+        Ok(())
+    }
+}
+
+/// Inner part of a [`RecordBatch`] that is protected by a header containing its length and a CRC checksum.
+#[derive(Debug, PartialEq, Eq)]
+#[cfg_attr(test, derive(proptest_derive::Arbitrary))]
+pub struct RecordBatchBody {
+    pub last_offset_delta: i32,
+    pub first_timestamp: i64,
+    pub max_timestamp: i64,
+    pub producer_id: i64,
+    pub producer_epoch: i16,
+    pub base_sequence: i32,
+    pub records: ControlBatchOrRecords,
+    pub compression: RecordBatchCompression,
+    pub is_transactional: bool,
+    pub timestamp_type: RecordBatchTimestampType,
+}
+
+impl<R> ReadType<R> for RecordBatchBody
+where
+    R: Read,
+{
+    fn read(reader: &mut R) -> Result<Self, ReadError> {
+        // attributes
+        let attributes = Int16::read(reader)?.0;
+        let compression = match attributes & 0x7 {
+            0 => RecordBatchCompression::NoCompression,
+            1 => RecordBatchCompression::Gzip,
+            2 => RecordBatchCompression::Snappy,
+            3 => RecordBatchCompression::Lz4,
+            4 => RecordBatchCompression::Zstd,
+            other => {
+                return Err(ReadError::Malformed(
+                    format!("Invalid compression type: {}", other).into(),
+                ));
+            }
+        };
+        let timestamp_type = if ((attributes >> 3) & 0x1) == 0 {
+            RecordBatchTimestampType::CreateTime
+        } else {
+            RecordBatchTimestampType::LogAppendTime
+        };
+        let is_transactional = ((attributes >> 4) & 0x1) == 1;
+        let is_control = ((attributes >> 5) & 0x1) == 1;
+
+        // lastOffsetDelta
+        let last_offset_delta = Int32::read(reader)?.0;
+
+        // firstTimestamp
+        let first_timestamp = Int64::read(reader)?.0;
+
+        // maxTimestamp
+        let max_timestamp = Int64::read(reader)?.0;
+
+        // producerId
+        let producer_id = Int64::read(reader)?.0;
+
+        // producerEpoch
+        let producer_epoch = Int16::read(reader)?.0;
+
+        // baseSequence
+        let base_sequence = Int32::read(reader)?.0;
+
+        // records
+        if !matches!(compression, RecordBatchCompression::NoCompression) {
+            // TODO: implement compression
+            return Err(ReadError::Malformed(
+                format!("Unimplemented compression: {:?}", compression).into(),
+            ));
+        }
+        let records = if is_control {
+            let mut records = Array::<ControlBatchRecord>::read(reader)?
+                .0
+                .unwrap_or_default();
+            if records.len() != 1 {
+                return Err(ReadError::Malformed(
+                    format!("Expected 1 control record but got {}", records.len()).into(),
+                ));
+            }
+            ControlBatchOrRecords::ControlBatch(records.pop().expect("Just checked the size"))
+        } else {
+            let records = Array::<Record>::read(reader)?.0.unwrap_or_default();
+            ControlBatchOrRecords::Records(records)
+        };
+
+        Ok(Self {
+            last_offset_delta,
+            first_timestamp,
+            max_timestamp,
+            producer_id,
+            producer_epoch,
+            base_sequence,
+            compression,
+            timestamp_type,
+            is_transactional,
+            records,
+        })
+    }
+}
+
+impl<W> WriteType<W> for RecordBatchBody
+where
+    W: Write,
+{
+    fn write(&self, writer: &mut W) -> Result<(), WriteError> {
+        let body_ref = RecordBatchBodyRef {
+            last_offset_delta: self.last_offset_delta,
+            first_timestamp: self.first_timestamp,
+            max_timestamp: self.max_timestamp,
+            producer_id: self.producer_id,
+            producer_epoch: self.producer_epoch,
+            base_sequence: self.base_sequence,
+            records: &self.records,
+            compression: self.compression,
+            is_transactional: self.is_transactional,
+            timestamp_type: self.timestamp_type,
+        };
+        body_ref.write(writer)
+    }
+}
+
+/// Same as [`RecordBatchBody`] but contains referenced data.
+///
+/// This only supports writing.
+#[derive(Debug)]
+struct RecordBatchBodyRef<'a> {
+    pub last_offset_delta: i32,
+    pub first_timestamp: i64,
+    pub max_timestamp: i64,
+    pub producer_id: i64,
+    pub producer_epoch: i16,
+    pub base_sequence: i32,
+    pub records: &'a ControlBatchOrRecords,
+    pub compression: RecordBatchCompression,
+    pub is_transactional: bool,
+    pub timestamp_type: RecordBatchTimestampType,
+}
+
+impl<'a, W> WriteType<W> for RecordBatchBodyRef<'a>
+where
+    W: Write,
+{
+    fn write(&self, writer: &mut W) -> Result<(), WriteError> {
+        // attributes
+        let mut attributes: i16 = match self.compression {
+            RecordBatchCompression::NoCompression => 0,
+            RecordBatchCompression::Gzip => 1,
+            RecordBatchCompression::Snappy => 2,
+            RecordBatchCompression::Lz4 => 3,
+            RecordBatchCompression::Zstd => 4,
+        };
+        match self.timestamp_type {
+            RecordBatchTimestampType::CreateTime => (),
+            RecordBatchTimestampType::LogAppendTime => {
+                attributes |= 1 << 3;
+            }
+        }
+        if self.is_transactional {
+            attributes |= 1 << 4;
+        }
+        if matches!(self.records, ControlBatchOrRecords::ControlBatch(_)) {
+            attributes |= 1 << 5;
+        }
+        Int16(attributes).write(writer)?;
+
+        // lastOffsetDelta
+        Int32(self.last_offset_delta).write(writer)?;
+
+        // firstTimestamp
+        Int64(self.first_timestamp).write(writer)?;
+
+        // maxTimestamp
+        Int64(self.max_timestamp).write(writer)?;
+
+        // producerId
+        Int64(self.producer_id).write(writer)?;
+
+        // producerEpoch
+        Int16(self.producer_epoch).write(writer)?;
+
+        // baseSequence
+        Int32(self.base_sequence).write(writer)?;
+
+        // records
+        if !matches!(self.compression, RecordBatchCompression::NoCompression) {
+            // TODO: implement compression
+            return Err(WriteError::Malformed(
+                format!("Unimplemented compression: {:?}", self.compression).into(),
+            ));
+        }
+        match &self.records {
+            ControlBatchOrRecords::ControlBatch(control_batch) => {
+                let records = vec![*control_batch];
+                Array::<ControlBatchRecord>(Some(records)).write(writer)?;
+            }
+            ControlBatchOrRecords::Records(records) => {
+                ArrayRef::<Record>(Some(records)).write(writer)?;
+            }
+        }
 
         Ok(())
     }
@@ -620,6 +717,8 @@ mod tests {
             "Malformed data: Unknown control batch record type: 2",
         );
     }
+
+    test_roundtrip!(RecordBatchBody, test_record_batch_body_roundtrip);
 
     test_roundtrip!(RecordBatch, test_record_batch_roundtrip);
 

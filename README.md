@@ -122,6 +122,14 @@ in another session.
 
 ### Fuzzing
 RSKafka offers fuzz targets for certain protocol parsing steps. To build them make sure you have [cargo-fuzz] installed.
+Select one of the following fuzzers:
+
+- **`protocol_reader`:** Selects an API key and API version and then reads message frames and tries to decode the
+  response object. The message frames are read w/o the length marker for more efficient fuzzing.
+- **`record_batch_body_reader`:** Reads the inner part of a record batch (w/o the prefix that contains length and CRC)
+  and tries to decode it. In theory this is covered by `protocol_reader` as well but the length fields and CRC make it
+  hard for the fuzzer to traverse this data structure.
+
 Then run the fuzzer with:
 
 ```console

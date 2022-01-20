@@ -19,3 +19,9 @@ name = "protocol_reader"
 path = "fuzz_targets/protocol_reader.rs"
 test = false
 doc = false
+
+[[bin]]
+name = "record_batch_body_reader"
+path = "fuzz_targets/record_batch_body_reader.rs"
+test = false
+doc = false
