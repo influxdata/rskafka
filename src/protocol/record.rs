@@ -50,14 +50,14 @@ where
         let len = Varint::read(reader)?;
         let len = usize::try_from(len.0).map_err(|e| ReadError::Malformed(Box::new(e)))?;
         let mut buf = VecBuilder::new(len);
-        buf.read_exact(reader)?;
+        buf = buf.read_exact(reader)?;
         let key = String::from_utf8(buf.into()).map_err(|e| ReadError::Malformed(Box::new(e)))?;
 
         // value
         let len = Varint::read(reader)?;
         let len = usize::try_from(len.0).map_err(|e| ReadError::Malformed(Box::new(e)))?;
         let mut value = VecBuilder::new(len);
-        value.read_exact(reader)?;
+        value = value.read_exact(reader)?;
         let value = value.into();
 
         Ok(Self { key, value })
@@ -120,14 +120,14 @@ where
         let len = Varint::read(reader)?;
         let len = usize::try_from(len.0).map_err(|e| ReadError::Malformed(Box::new(e)))?;
         let mut key = VecBuilder::new(len);
-        key.read_exact(reader)?;
+        key = key.read_exact(reader)?;
         let key = key.into();
 
         // value
         let len = Varint::read(reader)?;
         let len = usize::try_from(len.0).map_err(|e| ReadError::Malformed(Box::new(e)))?;
         let mut value = VecBuilder::new(len);
-        value.read_exact(reader)?;
+        value = value.read_exact(reader)?;
         let value = value.into();
 
         // headers
@@ -360,7 +360,7 @@ where
 
         // data
         let mut data = VecBuilder::new(len);
-        data.read_exact(reader)?;
+        data = data.read_exact(reader)?;
         let data: Vec<u8> = data.into();
         let actual_crc = CASTAGNOLI.checksum(&data);
         if crc != actual_crc {

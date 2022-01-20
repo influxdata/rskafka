@@ -296,7 +296,7 @@ where
             l => {
                 let len = usize::try_from(l)?;
                 let mut buf = VecBuilder::new(len);
-                buf.read_exact(reader)?;
+                buf = buf.read_exact(reader)?;
                 let s =
                     String::from_utf8(buf.into()).map_err(|e| ReadError::Malformed(Box::new(e)))?;
                 Ok(Self(Some(s)))
@@ -338,7 +338,7 @@ where
         let len = Int16::read(reader)?;
         let len = usize::try_from(len.0).map_err(|e| ReadError::Malformed(Box::new(e)))?;
         let mut buf = VecBuilder::new(len);
-        buf.read_exact(reader)?;
+        buf = buf.read_exact(reader)?;
         let s = String::from_utf8(buf.into()).map_err(|e| ReadError::Malformed(Box::new(e)))?;
         Ok(Self(s))
     }
@@ -376,7 +376,7 @@ where
                 let len = len - 1;
 
                 let mut buf = VecBuilder::new(len);
-                buf.read_exact(reader)?;
+                buf = buf.read_exact(reader)?;
 
                 let s =
                     String::from_utf8(buf.into()).map_err(|e| ReadError::Malformed(Box::new(e)))?;
@@ -430,7 +430,7 @@ where
                 let len = len - 1;
 
                 let mut buf = VecBuilder::new(len);
-                buf.read_exact(reader)?;
+                buf = buf.read_exact(reader)?;
 
                 let s =
                     String::from_utf8(buf.into()).map_err(|e| ReadError::Malformed(Box::new(e)))?;
@@ -495,7 +495,7 @@ where
             l => {
                 let len = usize::try_from(l)?;
                 let mut buf = VecBuilder::new(len);
-                buf.read_exact(reader)?;
+                buf = buf.read_exact(reader)?;
                 Ok(Self(Some(buf.into())))
             }
         }
@@ -536,7 +536,7 @@ where
 
             let data_len = UnsignedVarint::read(reader)?;
             let mut data_builder = VecBuilder::new(data_len.0 as usize);
-            data_builder.read_exact(reader)?;
+            data_builder = data_builder.read_exact(reader)?;
 
             res.push((tag, data_builder.into()));
         }
