@@ -127,7 +127,7 @@ impl PartitionClient {
             }],
         };
 
-        self.maybe_retry("produce", || async move {
+        maybe_retry(&self.backoff_config, self, "produce", || async move {
             let broker = self.get().await?;
             let response = broker.request(&request).await?;
 
@@ -172,61 +172,60 @@ impl PartitionClient {
         bytes: Range<i32>,
         max_wait_ms: i32,
     ) -> Result<(Vec<RecordAndOffset>, i64)> {
-        let partition = self
-            .maybe_retry("fetch_records", || async move {
-                let response = self
-                    .get()
-                    .await?
-                    .request(FetchRequest {
-                        // normal consumer
-                        replica_id: Int32(-1),
-                        max_wait_ms: Int32(max_wait_ms),
-                        min_bytes: Int32(bytes.start),
-                        max_bytes: Some(Int32(bytes.end.saturating_sub(1))),
-                        // `READ_COMMITTED`
-                        isolation_level: Some(Int8(1)),
-                        topics: vec![FetchRequestTopic {
-                            topic: String_(self.topic.clone()),
-                            partitions: vec![FetchRequestPartition {
-                                partition: Int32(self.partition),
-                                fetch_offset: Int64(offset),
-                                partition_max_bytes: Int32(bytes.end.saturating_sub(1)),
-                            }],
+        let partition = maybe_retry(&self.backoff_config, self, "fetch_records", || async move {
+            let response = self
+                .get()
+                .await?
+                .request(FetchRequest {
+                    // normal consumer
+                    replica_id: Int32(-1),
+                    max_wait_ms: Int32(max_wait_ms),
+                    min_bytes: Int32(bytes.start),
+                    max_bytes: Some(Int32(bytes.end.saturating_sub(1))),
+                    // `READ_COMMITTED`
+                    isolation_level: Some(Int8(1)),
+                    topics: vec![FetchRequestTopic {
+                        topic: String_(self.topic.clone()),
+                        partitions: vec![FetchRequestPartition {
+                            partition: Int32(self.partition),
+                            fetch_offset: Int64(offset),
+                            partition_max_bytes: Int32(bytes.end.saturating_sub(1)),
                         }],
-                    })
-                    .await?;
+                    }],
+                })
+                .await?;
 
-                let topic = response
-                    .responses
-                    .exactly_one()
-                    .map_err(Error::exactly_one_topic)?;
+            let topic = response
+                .responses
+                .exactly_one()
+                .map_err(Error::exactly_one_topic)?;
 
-                if topic.topic.0 != self.topic {
-                    return Err(Error::InvalidResponse(format!(
-                        "Expected data for topic '{}' but got data for topic '{}'",
-                        self.topic, topic.topic.0
-                    )));
-                }
+            if topic.topic.0 != self.topic {
+                return Err(Error::InvalidResponse(format!(
+                    "Expected data for topic '{}' but got data for topic '{}'",
+                    self.topic, topic.topic.0
+                )));
+            }
 
-                let partition = topic
-                    .partitions
-                    .exactly_one()
-                    .map_err(Error::exactly_one_partition)?;
+            let partition = topic
+                .partitions
+                .exactly_one()
+                .map_err(Error::exactly_one_partition)?;
 
-                if partition.partition_index.0 != self.partition {
-                    return Err(Error::InvalidResponse(format!(
-                        "Expected data for partition {} but got data for partition {}",
-                        self.partition, partition.partition_index.0
-                    )));
-                }
+            if partition.partition_index.0 != self.partition {
+                return Err(Error::InvalidResponse(format!(
+                    "Expected data for partition {} but got data for partition {}",
+                    self.partition, partition.partition_index.0
+                )));
+            }
 
-                if let Some(err) = partition.error_code {
-                    return Err(Error::ServerError(err, String::new()));
-                }
+            if let Some(err) = partition.error_code {
+                return Err(Error::ServerError(err, String::new()));
+            }
 
-                Ok(partition)
-            })
-            .await?;
+            Ok(partition)
+        })
+        .await?;
 
         // extract records
         let mut records = vec![];
@@ -269,8 +268,11 @@ impl PartitionClient {
 
     /// Get high watermark for this partition.
     pub async fn get_high_watermark(&self) -> Result<i64> {
-        let partition = self
-            .maybe_retry("get_high_watermark", || async move {
+        let partition = maybe_retry(
+            &self.backoff_config,
+            self,
+            "get_high_watermark",
+            || async move {
                 let response = self
                     .get()
                     .await?
@@ -319,8 +321,9 @@ impl PartitionClient {
                     Some(err) => Err(Error::ServerError(err, String::new())),
                     None => Ok(partition),
                 }
-            })
-            .await?;
+            },
+        )
+        .await?;
 
         match (
             partition.old_style_offsets.as_ref(),
@@ -343,46 +346,6 @@ impl PartitionClient {
             (None, Some(offset)) => Ok(offset.0),
             _ => unreachable!(),
         }
-    }
-
-    /// Takes a `request_name` and a function yielding a fallible future
-    /// and handles certain classes of error
-    async fn maybe_retry<R, F, T>(&self, request_name: &str, f: R) -> Result<T>
-    where
-        R: (Fn() -> F) + Send + Sync,
-        F: std::future::Future<Output = Result<T>> + Send,
-    {
-        let mut backoff = Backoff::new(&self.backoff_config);
-
-        backoff
-            .retry_with_backoff(request_name, || async {
-                let error = match f().await {
-                    Ok(v) => return ControlFlow::Break(Ok(v)),
-                    Err(e) => e,
-                };
-
-                match error {
-                    Error::Request(RequestError::Poisoned(_) | RequestError::IO(_))
-                    | Error::Connection(_) => self.invalidate().await,
-                    Error::ServerError(ProtocolError::LeaderNotAvailable, _) => {}
-                    Error::ServerError(ProtocolError::OffsetNotAvailable, _) => {}
-                    Error::ServerError(ProtocolError::NotLeaderOrFollower, _) => {
-                        self.invalidate().await;
-                    }
-                    _ => {
-                        error!(
-                            e=%error,
-                            request_name,
-                            "request encountered fatal error",
-                        );
-                        return ControlFlow::Break(Err(error));
-                    }
-                }
-
-                ControlFlow::Continue(request_name)
-            })
-            .await
-            .map_err(|e| Error::RetryFailed(e))?
     }
 
     /// Retrieve the broker ID of the partition leader
@@ -520,4 +483,50 @@ impl BrokerCache for &PartitionClient {
         );
         *self.current_broker.lock().await = None
     }
+}
+
+/// Takes a `request_name` and a function yielding a fallible future
+/// and handles certain classes of error
+async fn maybe_retry<B, R, F, T>(
+    backoff_config: &BackoffConfig,
+    broker_cache: B,
+    request_name: &str,
+    f: R,
+) -> Result<T>
+where
+    B: BrokerCache,
+    R: (Fn() -> F) + Send + Sync,
+    F: std::future::Future<Output = Result<T>> + Send,
+{
+    let mut backoff = Backoff::new(backoff_config);
+
+    backoff
+        .retry_with_backoff(request_name, || async {
+            let error = match f().await {
+                Ok(v) => return ControlFlow::Break(Ok(v)),
+                Err(e) => e,
+            };
+
+            match error {
+                Error::Request(RequestError::Poisoned(_) | RequestError::IO(_))
+                | Error::Connection(_) => broker_cache.invalidate().await,
+                Error::ServerError(ProtocolError::LeaderNotAvailable, _) => {}
+                Error::ServerError(ProtocolError::OffsetNotAvailable, _) => {}
+                Error::ServerError(ProtocolError::NotLeaderOrFollower, _) => {
+                    broker_cache.invalidate().await;
+                }
+                _ => {
+                    error!(
+                        e=%error,
+                        request_name,
+                        "request encountered fatal error",
+                    );
+                    return ControlFlow::Break(Err(error));
+                }
+            }
+
+            ControlFlow::Continue(request_name)
+        })
+        .await
+        .map_err(|e| Error::RetryFailed(e))?
 }

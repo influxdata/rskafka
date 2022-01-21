@@ -58,7 +58,7 @@ impl ControllerClient {
             tagged_fields: None,
         };
 
-        self.maybe_retry("create_topic", || async move {
+        maybe_retry(&self.backoff_config, self, "create_topic", || async move {
             let broker = self.get().await?;
             let response = broker.request(request).await?;
 
@@ -76,48 +76,6 @@ impl ControllerClient {
             }
         })
         .await
-    }
-
-    /// Takes a `request_name` and a function yielding a fallible future
-    /// and handles certain classes of error
-    async fn maybe_retry<R, F, T>(&self, request_name: &str, f: R) -> Result<T>
-    where
-        R: (Fn() -> F) + Send + Sync,
-        F: std::future::Future<Output = Result<T>> + Send,
-    {
-        let mut backoff = Backoff::new(&self.backoff_config);
-
-        backoff
-            .retry_with_backoff(request_name, || async {
-                let error = match f().await {
-                    Ok(v) => return ControlFlow::Break(Ok(v)),
-                    Err(e) => e,
-                };
-
-                match error {
-                    // broken connection
-                    Error::Request(RequestError::Poisoned(_) | RequestError::IO(_))
-                    | Error::Connection(_) => self.invalidate().await,
-
-                    // our broker is actually not the controller
-                    Error::ServerError(ProtocolError::NotController, _) => {
-                        self.invalidate().await;
-                    }
-
-                    // fatal
-                    _ => {
-                        error!(
-                            e=%error,
-                            request_name,
-                            "request encountered fatal error",
-                        );
-                        return ControlFlow::Break(Err(error));
-                    }
-                }
-                ControlFlow::Continue(request_name)
-            })
-            .await
-            .map_err(|e| Error::RetryFailed(e))?
     }
 
     /// Retrieve the broker ID of the controller
@@ -163,4 +121,52 @@ impl BrokerCache for &ControllerClient {
         debug!("Invalidating cached controller broker");
         self.current_broker.lock().await.take();
     }
+}
+
+/// Takes a `request_name` and a function yielding a fallible future
+/// and handles certain classes of error
+async fn maybe_retry<B, R, F, T>(
+    backoff_config: &BackoffConfig,
+    broker_cache: B,
+    request_name: &str,
+    f: R,
+) -> Result<T>
+where
+    B: BrokerCache,
+    R: (Fn() -> F) + Send + Sync,
+    F: std::future::Future<Output = Result<T>> + Send,
+{
+    let mut backoff = Backoff::new(backoff_config);
+
+    backoff
+        .retry_with_backoff(request_name, || async {
+            let error = match f().await {
+                Ok(v) => return ControlFlow::Break(Ok(v)),
+                Err(e) => e,
+            };
+
+            match error {
+                // broken connection
+                Error::Request(RequestError::Poisoned(_) | RequestError::IO(_))
+                | Error::Connection(_) => broker_cache.invalidate().await,
+
+                // our broker is actually not the controller
+                Error::ServerError(ProtocolError::NotController, _) => {
+                    broker_cache.invalidate().await;
+                }
+
+                // fatal
+                _ => {
+                    error!(
+                        e=%error,
+                        request_name,
+                        "request encountered fatal error",
+                    );
+                    return ControlFlow::Break(Err(error));
+                }
+            }
+            ControlFlow::Continue(request_name)
+        })
+        .await
+        .map_err(|e| Error::RetryFailed(e))?
 }
