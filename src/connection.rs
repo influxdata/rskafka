@@ -339,7 +339,7 @@ where
             ControlFlow::Continue("Failed to connect to any broker, backing off")
         })
         .await
-        .map_err(|e| Error::RetryFailed(e))
+        .map_err(Error::RetryFailed)
 }
 
 async fn metadata_request_with_retry<A>(
@@ -382,7 +382,7 @@ where
             }
         })
         .await
-        .map_err(|e| Error::RetryFailed(e))?
+        .map_err(Error::RetryFailed)?
 }
 
 #[cfg(test)]

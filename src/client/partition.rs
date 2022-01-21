@@ -528,5 +528,5 @@ where
             ControlFlow::Continue(request_name)
         })
         .await
-        .map_err(|e| Error::RetryFailed(e))?
+        .map_err(Error::RetryFailed)?
 }
