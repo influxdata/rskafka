@@ -33,6 +33,9 @@ pub use produce::*;
 #[cfg(test)]
 mod test_utils;
 
+/// The `replica_id` to use to signify the request is being made by a normal consumer.
+pub const NORMAL_CONSUMER: Int32 = Int32(-1);
+
 #[derive(Error, Debug)]
 pub enum ReadVersionedError {
     #[error("Read error: {0}")]

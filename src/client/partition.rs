@@ -1,23 +1,21 @@
-use crate::backoff::{Backoff, BackoffConfig};
-use crate::messenger::RequestError;
-use crate::protocol::messages::{
-    FetchRequest, FetchRequestPartition, FetchRequestTopic, FetchResponse, FetchResponsePartition,
-};
-use crate::record::RecordAndOffset;
 use crate::{
+    backoff::{Backoff, BackoffConfig},
     client::error::{Error, Result},
     connection::{BrokerCache, BrokerConnection, BrokerConnector, MessengerTransport},
+    messenger::RequestError,
     protocol::{
         error::Error as ProtocolError,
         messages::{
-            ListOffsetsRequest, ListOffsetsRequestPartition, ListOffsetsRequestTopic,
-            ListOffsetsResponse, ListOffsetsResponsePartition, ProduceRequest,
-            ProduceRequestPartitionData, ProduceRequestTopicData, ProduceResponse,
+            FetchRequest, FetchRequestPartition, FetchRequestTopic, FetchResponse,
+            FetchResponsePartition, ListOffsetsRequest, ListOffsetsRequestPartition,
+            ListOffsetsRequestTopic, ListOffsetsResponse, ListOffsetsResponsePartition,
+            ProduceRequest, ProduceRequestPartitionData, ProduceRequestTopicData, ProduceResponse,
+            NORMAL_CONSUMER,
         },
         primitives::*,
         record::{Record as ProtocolRecord, *},
     },
-    record::Record,
+    record::{Record, RecordAndOffset},
     validation::ExactlyOne,
 };
 use async_trait::async_trait;
@@ -410,8 +408,7 @@ fn build_fetch_request(
     topic: &str,
 ) -> FetchRequest {
     FetchRequest {
-        // normal consumer
-        replica_id: Int32(-1),
+        replica_id: NORMAL_CONSUMER,
         max_wait_ms: Int32(max_wait_ms),
         min_bytes: Int32(bytes.start),
         max_bytes: Some(Int32(bytes.end.saturating_sub(1))),
@@ -506,8 +503,7 @@ fn extract_records(partition_records: Vec<RecordBatch>) -> Result<Vec<RecordAndO
 
 fn build_list_offsets_request(partition: i32, topic: &str) -> ListOffsetsRequest {
     ListOffsetsRequest {
-        // `-1` because we're a normal consumer
-        replica_id: Int32(-1),
+        replica_id: NORMAL_CONSUMER,
         // `READ_COMMITTED`
         isolation_level: Some(Int8(1)),
         topics: vec![ListOffsetsRequestTopic {
