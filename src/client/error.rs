@@ -21,6 +21,12 @@ impl Error {
     pub(crate) fn exactly_one_topic(len: usize) -> Self {
         Self::InvalidResponse(format!("Expected a single topic in response, got {len}"))
     }
+
+    pub(crate) fn exactly_one_partition(len: usize) -> Self {
+        Self::InvalidResponse(format!(
+            "Expected a single partition in response, got {len}"
+        ))
+    }
 }
 
 pub type Result<T, E = Error> = std::result::Result<T, E>;

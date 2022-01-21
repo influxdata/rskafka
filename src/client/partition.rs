@@ -142,14 +142,11 @@ impl PartitionClient {
                 )));
             }
 
-            if response.partition_responses.len() != 1 {
-                return Err(Error::InvalidResponse(format!(
-                    "Expected one partition got: {}",
-                    response.partition_responses.len()
-                )));
-            }
+            let response = response
+                .partition_responses
+                .exactly_one()
+                .map_err(Error::exactly_one_partition)?;
 
-            let response = response.partition_responses.into_iter().next().unwrap();
             if response.index.0 != self.partition {
                 return Err(Error::InvalidResponse(format!(
                     "Expected partition {} for topic \"{}\" got {}",
@@ -210,17 +207,10 @@ impl PartitionClient {
                     )));
                 }
 
-                if topic.partitions.len() != 1 {
-                    return Err(Error::InvalidResponse(format!(
-                        "Expected 1 partition to be returned but got {}",
-                        topic.partitions.len()
-                    )));
-                }
                 let partition = topic
                     .partitions
-                    .into_iter()
-                    .next()
-                    .expect("just checked length");
+                    .exactly_one()
+                    .map_err(Error::exactly_one_partition)?;
 
                 if partition.partition_index.0 != self.partition {
                     return Err(Error::InvalidResponse(format!(
@@ -312,13 +302,10 @@ impl PartitionClient {
                     )));
                 }
 
-                if topic.partitions.len() != 1 {
-                    return Err(Error::InvalidResponse(format!(
-                        "Expected 1 partition to be returned but got {}",
-                        topic.partitions.len()
-                    )));
-                }
-                let partition = topic.partitions.into_iter().next().unwrap();
+                let partition = topic
+                    .partitions
+                    .exactly_one()
+                    .map_err(Error::exactly_one_partition)?;
 
                 if partition.partition_index.0 != self.partition {
                     return Err(Error::InvalidResponse(format!(
