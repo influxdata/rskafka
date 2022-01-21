@@ -9,7 +9,7 @@ use crate::{
         error::Error as ProtocolError,
         messages::{
             ListOffsetsRequest, ListOffsetsRequestPartition, ListOffsetsRequestTopic,
-            ProduceRequest, ProduceRequestPartitionData, ProduceRequestTopicData,
+            ProduceRequest, ProduceRequestPartitionData, ProduceRequestTopicData, ProduceResponse,
         },
         primitives::*,
         record::{Record as ProtocolRecord, *},
@@ -70,41 +70,12 @@ impl PartitionClient {
         }
 
         let n = records.len() as i64;
-
         let request = &build_produce_request(self.partition, &self.topic, records);
 
         maybe_retry(&self.backoff_config, self, "produce", || async move {
             let broker = self.get().await?;
             let response = broker.request(&request).await?;
-
-            let response = response
-                .responses
-                .exactly_one()
-                .map_err(Error::exactly_one_topic)?;
-
-            if response.name.0 != self.topic {
-                return Err(Error::InvalidResponse(format!(
-                    "Expected write for topic \"{}\" got \"{}\"",
-                    self.topic, response.name.0,
-                )));
-            }
-
-            let response = response
-                .partition_responses
-                .exactly_one()
-                .map_err(Error::exactly_one_partition)?;
-
-            if response.index.0 != self.partition {
-                return Err(Error::InvalidResponse(format!(
-                    "Expected partition {} for topic \"{}\" got {}",
-                    self.partition, self.topic, response.index.0,
-                )));
-            }
-
-            match response.error {
-                Some(e) => Err(Error::ServerError(e, Default::default())),
-                None => Ok((0..n).map(|x| x + response.base_offset.0).collect()),
-            }
+            process_produce_response(self.partition, &self.topic, n, response)
         })
         .await
     }
@@ -532,5 +503,43 @@ fn build_produce_request(partition: i32, topic: &str, records: Vec<Record>) -> P
             name: String_(topic.to_string()),
             partition_data: vec![record_batch],
         }],
+    }
+}
+
+fn process_produce_response(
+    partition: i32,
+    topic: &str,
+    num_records: i64,
+    response: ProduceResponse,
+) -> Result<Vec<i64>> {
+    let response = response
+        .responses
+        .exactly_one()
+        .map_err(Error::exactly_one_topic)?;
+
+    if response.name.0 != topic {
+        return Err(Error::InvalidResponse(format!(
+            "Expected write for topic \"{}\" got \"{}\"",
+            topic, response.name.0,
+        )));
+    }
+
+    let response = response
+        .partition_responses
+        .exactly_one()
+        .map_err(Error::exactly_one_partition)?;
+
+    if response.index.0 != partition {
+        return Err(Error::InvalidResponse(format!(
+            "Expected partition {} for topic \"{}\" got {}",
+            partition, topic, response.index.0,
+        )));
+    }
+
+    match response.error {
+        Some(e) => Err(Error::ServerError(e, Default::default())),
+        None => Ok((0..num_records)
+            .map(|x| x + response.base_offset.0)
+            .collect()),
     }
 }
