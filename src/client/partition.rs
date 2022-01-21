@@ -11,7 +11,8 @@ use crate::{
         error::Error as ProtocolError,
         messages::{
             ListOffsetsRequest, ListOffsetsRequestPartition, ListOffsetsRequestTopic,
-            ProduceRequest, ProduceRequestPartitionData, ProduceRequestTopicData, ProduceResponse,
+            ListOffsetsResponse, ListOffsetsResponsePartition, ProduceRequest,
+            ProduceRequestPartitionData, ProduceRequestTopicData, ProduceResponse,
         },
         primitives::*,
         record::{Record as ProtocolRecord, *},
@@ -106,84 +107,20 @@ impl PartitionClient {
 
     /// Get high watermark for this partition.
     pub async fn get_high_watermark(&self) -> Result<i64> {
+        let request = &build_list_offsets_request(self.partition, &self.topic);
+
         let partition = maybe_retry(
             &self.backoff_config,
             self,
             "get_high_watermark",
             || async move {
-                let response = self
-                    .get()
-                    .await?
-                    .request(ListOffsetsRequest {
-                        // `-1` because we're a normal consumer
-                        replica_id: Int32(-1),
-                        // `READ_COMMITTED`
-                        isolation_level: Some(Int8(1)),
-                        topics: vec![ListOffsetsRequestTopic {
-                            name: String_(self.topic.to_owned()),
-                            partitions: vec![ListOffsetsRequestPartition {
-                                partition_index: Int32(self.partition),
-                                // latest offset
-                                timestamp: Int64(-1),
-                                max_num_offsets: Some(Int32(1)),
-                            }],
-                        }],
-                    })
-                    .await?;
-
-                let topic = response
-                    .topics
-                    .exactly_one()
-                    .map_err(Error::exactly_one_topic)?;
-
-                if topic.name.0 != self.topic {
-                    return Err(Error::InvalidResponse(format!(
-                        "Expected data for topic '{}' but got data for topic '{}'",
-                        self.topic, topic.name.0
-                    )));
-                }
-
-                let partition = topic
-                    .partitions
-                    .exactly_one()
-                    .map_err(Error::exactly_one_partition)?;
-
-                if partition.partition_index.0 != self.partition {
-                    return Err(Error::InvalidResponse(format!(
-                        "Expected data for partition {} but got data for partition {}",
-                        self.partition, partition.partition_index.0
-                    )));
-                }
-
-                match partition.error_code {
-                    Some(err) => Err(Error::ServerError(err, String::new())),
-                    None => Ok(partition),
-                }
+                let response = self.get().await?.request(&request).await?;
+                process_list_offsets_response(self.partition, &self.topic, response)
             },
         )
         .await?;
 
-        match (
-            partition.old_style_offsets.as_ref(),
-            partition.offset.as_ref(),
-        ) {
-            // old style
-            (Some(offsets), None) => match offsets.0.as_ref() {
-                Some(offsets) => match offsets.len() {
-                    1 => Ok(offsets[0].0),
-                    n => Err(Error::InvalidResponse(format!(
-                        "Expected 1 offset to be returned but got {}",
-                        n
-                    ))),
-                },
-                None => Err(Error::InvalidResponse(
-                    "Got NULL as offset array".to_owned(),
-                )),
-            },
-            // new style
-            (None, Some(offset)) => Ok(offset.0),
-            _ => unreachable!(),
-        }
+        extract_high_watermark(partition)
     }
 
     /// Retrieve the broker ID of the partition leader
@@ -565,4 +502,81 @@ fn extract_records(partition_records: Vec<RecordBatch>) -> Result<Vec<RecordAndO
     }
 
     Ok(records)
+}
+
+fn build_list_offsets_request(partition: i32, topic: &str) -> ListOffsetsRequest {
+    ListOffsetsRequest {
+        // `-1` because we're a normal consumer
+        replica_id: Int32(-1),
+        // `READ_COMMITTED`
+        isolation_level: Some(Int8(1)),
+        topics: vec![ListOffsetsRequestTopic {
+            name: String_(topic.to_owned()),
+            partitions: vec![ListOffsetsRequestPartition {
+                partition_index: Int32(partition),
+                // latest offset
+                timestamp: Int64(-1),
+                max_num_offsets: Some(Int32(1)),
+            }],
+        }],
+    }
+}
+
+fn process_list_offsets_response(
+    partition: i32,
+    topic: &str,
+    response: ListOffsetsResponse,
+) -> Result<ListOffsetsResponsePartition> {
+    let response_topic = response
+        .topics
+        .exactly_one()
+        .map_err(Error::exactly_one_topic)?;
+
+    if response_topic.name.0 != topic {
+        return Err(Error::InvalidResponse(format!(
+            "Expected data for topic '{}' but got data for topic '{}'",
+            topic, response_topic.name.0
+        )));
+    }
+
+    let response_partition = response_topic
+        .partitions
+        .exactly_one()
+        .map_err(Error::exactly_one_partition)?;
+
+    if response_partition.partition_index.0 != partition {
+        return Err(Error::InvalidResponse(format!(
+            "Expected data for partition {} but got data for partition {}",
+            partition, response_partition.partition_index.0
+        )));
+    }
+
+    match response_partition.error_code {
+        Some(err) => Err(Error::ServerError(err, String::new())),
+        None => Ok(response_partition),
+    }
+}
+
+fn extract_high_watermark(partition: ListOffsetsResponsePartition) -> Result<i64> {
+    match (
+        partition.old_style_offsets.as_ref(),
+        partition.offset.as_ref(),
+    ) {
+        // old style
+        (Some(offsets), None) => match offsets.0.as_ref() {
+            Some(offsets) => match offsets.len() {
+                1 => Ok(offsets[0].0),
+                n => Err(Error::InvalidResponse(format!(
+                    "Expected 1 offset to be returned but got {}",
+                    n
+                ))),
+            },
+            None => Err(Error::InvalidResponse(
+                "Got NULL as offset array".to_owned(),
+            )),
+        },
+        // new style
+        (None, Some(offset)) => Ok(offset.0),
+        _ => unreachable!(),
+    }
 }
