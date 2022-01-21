@@ -4,7 +4,7 @@ use crate::protocol::messages::{FetchRequest, FetchRequestPartition, FetchReques
 use crate::record::RecordAndOffset;
 use crate::{
     client::error::{Error, Result},
-    connection::{BrokerConnection, BrokerConnector},
+    connection::{BrokerCache, BrokerConnection, BrokerConnector, MessengerTransport},
     protocol::{
         error::Error as ProtocolError,
         messages::{
@@ -17,6 +17,7 @@ use crate::{
     record::Record,
     validation::ExactlyOne,
 };
+use async_trait::async_trait;
 use std::ops::{ControlFlow, Deref, Range};
 use std::sync::Arc;
 use time::OffsetDateTime;
@@ -127,7 +128,7 @@ impl PartitionClient {
         };
 
         self.maybe_retry("produce", || async move {
-            let broker = self.get_cached_leader().await?;
+            let broker = self.get().await?;
             let response = broker.request(&request).await?;
 
             let response = response
@@ -174,7 +175,7 @@ impl PartitionClient {
         let partition = self
             .maybe_retry("fetch_records", || async move {
                 let response = self
-                    .get_cached_leader()
+                    .get()
                     .await?
                     .request(FetchRequest {
                         // normal consumer
@@ -271,7 +272,7 @@ impl PartitionClient {
         let partition = self
             .maybe_retry("get_high_watermark", || async move {
                 let response = self
-                    .get_cached_leader()
+                    .get()
                     .await?
                     .request(ListOffsetsRequest {
                         // `-1` because we're a normal consumer
@@ -362,11 +363,11 @@ impl PartitionClient {
 
                 match error {
                     Error::Request(RequestError::Poisoned(_) | RequestError::IO(_))
-                    | Error::Connection(_) => self.invalidate_cached_leader_broker().await,
+                    | Error::Connection(_) => self.invalidate().await,
                     Error::ServerError(ProtocolError::LeaderNotAvailable, _) => {}
                     Error::ServerError(ProtocolError::OffsetNotAvailable, _) => {}
                     Error::ServerError(ProtocolError::NotLeaderOrFollower, _) => {
-                        self.invalidate_cached_leader_broker().await;
+                        self.invalidate().await;
                     }
                     _ => {
                         error!(
@@ -382,71 +383,6 @@ impl PartitionClient {
             })
             .await
             .map_err(|e| Error::RetryFailed(e))?
-    }
-
-    /// Invalidate the cached broker connection
-    async fn invalidate_cached_leader_broker(&self) {
-        info!(
-            topic = self.topic.deref(),
-            partition = self.partition,
-            "Invaliding cached leader",
-        );
-        *self.current_broker.lock().await = None
-    }
-
-    /// Get the raw broker connection
-    ///
-    /// TODO: Make this private
-    pub async fn get_cached_leader(&self) -> Result<BrokerConnection> {
-        let mut current_broker = self.current_broker.lock().await;
-        if let Some(broker) = &*current_broker {
-            return Ok(Arc::clone(broker));
-        }
-
-        info!(
-            topic=%self.topic,
-            partition=%self.partition,
-            "Creating new partition-specific broker connection",
-        );
-
-        let leader = self.get_leader(None).await?;
-        let broker = self.brokers.connect(leader).await?.ok_or_else(|| {
-            Error::InvalidResponse(format!(
-                "Partition leader {} not found in metadata response",
-                leader
-            ))
-        })?;
-
-        // Check if the chosen leader also thinks it is the leader.
-        //
-        // For Kafka (+ Zookeeper) this seems to be required if we don't want to blindly retry
-        // `UnknownTopicOrPartition` that happen after we connect to a leader (as advised by another broker) which
-        // doesn't know about its assigned partition yet. The metadata query below seems to result in an
-        // LeaderNotAvailable in this case and is retried by the layer above.
-        //
-        // This does not seem to be required for redpanda.
-        let leader_self = self.get_leader(Some(Arc::clone(&broker))).await?;
-        if leader != leader_self {
-            // this might happen if the leader changed after we got the hint from a arbitrary broker and this specific
-            // metadata call.
-            return Err(Error::ServerError(
-                ProtocolError::NotLeaderOrFollower,
-                format!(
-                    "Broker {} which we determined as leader thinks there is another leader {}",
-                    leader, leader_self
-                ),
-            ));
-        }
-
-        *current_broker = Some(Arc::clone(&broker));
-
-        info!(
-            topic=%self.topic,
-            partition=%self.partition,
-            leader,
-            "Created new partition-specific broker connection",
-        );
-        Ok(broker)
     }
 
     /// Retrieve the broker ID of the partition leader
@@ -515,5 +451,73 @@ impl PartitionClient {
             "Detected leader",
         );
         Ok(partition.leader_id.0)
+    }
+}
+
+/// Caches the partition leader broker.
+#[async_trait]
+impl BrokerCache for &PartitionClient {
+    type R = MessengerTransport;
+    type E = Error;
+
+    async fn get(&self) -> Result<Arc<Self::R>> {
+        let mut current_broker = self.current_broker.lock().await;
+        if let Some(broker) = &*current_broker {
+            return Ok(Arc::clone(broker));
+        }
+
+        info!(
+            topic=%self.topic,
+            partition=%self.partition,
+            "Creating new partition-specific broker connection",
+        );
+
+        let leader = self.get_leader(None).await?;
+        let broker = self.brokers.connect(leader).await?.ok_or_else(|| {
+            Error::InvalidResponse(format!(
+                "Partition leader {} not found in metadata response",
+                leader
+            ))
+        })?;
+
+        // Check if the chosen leader also thinks it is the leader.
+        //
+        // For Kafka (+ Zookeeper) this seems to be required if we don't want to blindly retry
+        // `UnknownTopicOrPartition` that happen after we connect to a leader (as advised by another broker) which
+        // doesn't know about its assigned partition yet. The metadata query below seems to result in an
+        // LeaderNotAvailable in this case and is retried by the layer above.
+        //
+        // This does not seem to be required for redpanda.
+        let leader_self = self.get_leader(Some(Arc::clone(&broker))).await?;
+        if leader != leader_self {
+            // this might happen if the leader changed after we got the hint from a arbitrary broker and this specific
+            // metadata call.
+            return Err(Error::ServerError(
+                ProtocolError::NotLeaderOrFollower,
+                format!(
+                    "Broker {} which we determined as leader thinks there is another leader {}",
+                    leader, leader_self
+                ),
+            ));
+        }
+
+        *current_broker = Some(Arc::clone(&broker));
+
+        info!(
+            topic=%self.topic,
+            partition=%self.partition,
+            leader,
+            "Created new partition-specific broker connection",
+        );
+        Ok(broker)
+    }
+
+    async fn invalidate(&self) {
+        info!(
+            topic = self.topic.deref(),
+            partition = self.partition,
+            "Invaliding cached leader",
+        );
+        *self.current_broker.lock().await = None
     }
 }

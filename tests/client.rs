@@ -24,35 +24,6 @@ async fn test_plain() {
 }
 
 #[tokio::test]
-async fn test_partition_leader() {
-    maybe_start_logging();
-
-    let connection = maybe_skip_kafka_integration!();
-    let client = ClientBuilder::new(vec![connection]).build().await.unwrap();
-    let controller_client = client.controller_client().await.unwrap();
-    let topic_name = random_topic_name();
-
-    controller_client
-        .create_topic(&topic_name, 2, 1, 5_000)
-        .await
-        .unwrap();
-    let client = client.partition_client(&topic_name, 0).await.unwrap();
-    tokio::time::timeout(Duration::from_secs(10), async move {
-        loop {
-            match client.get_cached_leader().await {
-                Ok(_) => break,
-                Err(e) => {
-                    println!("Cannot get cached leader: {}", e);
-                    tokio::time::sleep(Duration::from_millis(100)).await;
-                }
-            }
-        }
-    })
-    .await
-    .unwrap();
-}
-
-#[tokio::test]
 async fn test_topic_crud() {
     maybe_start_logging();
 
