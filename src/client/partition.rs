@@ -1,6 +1,8 @@
 use crate::backoff::{Backoff, BackoffConfig};
 use crate::messenger::RequestError;
-use crate::protocol::messages::{FetchRequest, FetchRequestPartition, FetchRequestTopic};
+use crate::protocol::messages::{
+    FetchRequest, FetchRequestPartition, FetchRequestTopic, FetchResponse, FetchResponsePartition,
+};
 use crate::record::RecordAndOffset;
 use crate::{
     client::error::{Error, Result},
@@ -89,96 +91,15 @@ impl PartitionClient {
         bytes: Range<i32>,
         max_wait_ms: i32,
     ) -> Result<(Vec<RecordAndOffset>, i64)> {
+        let request = &build_fetch_request(offset, bytes, max_wait_ms, self.partition, &self.topic);
+
         let partition = maybe_retry(&self.backoff_config, self, "fetch_records", || async move {
-            let response = self
-                .get()
-                .await?
-                .request(FetchRequest {
-                    // normal consumer
-                    replica_id: Int32(-1),
-                    max_wait_ms: Int32(max_wait_ms),
-                    min_bytes: Int32(bytes.start),
-                    max_bytes: Some(Int32(bytes.end.saturating_sub(1))),
-                    // `READ_COMMITTED`
-                    isolation_level: Some(Int8(1)),
-                    topics: vec![FetchRequestTopic {
-                        topic: String_(self.topic.clone()),
-                        partitions: vec![FetchRequestPartition {
-                            partition: Int32(self.partition),
-                            fetch_offset: Int64(offset),
-                            partition_max_bytes: Int32(bytes.end.saturating_sub(1)),
-                        }],
-                    }],
-                })
-                .await?;
-
-            let topic = response
-                .responses
-                .exactly_one()
-                .map_err(Error::exactly_one_topic)?;
-
-            if topic.topic.0 != self.topic {
-                return Err(Error::InvalidResponse(format!(
-                    "Expected data for topic '{}' but got data for topic '{}'",
-                    self.topic, topic.topic.0
-                )));
-            }
-
-            let partition = topic
-                .partitions
-                .exactly_one()
-                .map_err(Error::exactly_one_partition)?;
-
-            if partition.partition_index.0 != self.partition {
-                return Err(Error::InvalidResponse(format!(
-                    "Expected data for partition {} but got data for partition {}",
-                    self.partition, partition.partition_index.0
-                )));
-            }
-
-            if let Some(err) = partition.error_code {
-                return Err(Error::ServerError(err, String::new()));
-            }
-
-            Ok(partition)
+            let response = self.get().await?.request(&request).await?;
+            process_fetch_response(self.partition, &self.topic, response)
         })
         .await?;
 
-        // extract records
-        let mut records = vec![];
-        for batch in partition.records.0 {
-            match batch.records {
-                ControlBatchOrRecords::ControlBatch(_) => {
-                    // ignore
-                }
-                ControlBatchOrRecords::Records(protocol_records) => {
-                    records.reserve(protocol_records.len());
-
-                    for record in protocol_records {
-                        let timestamp = OffsetDateTime::from_unix_timestamp_nanos(
-                            (batch.first_timestamp + record.timestamp_delta) as i128 * 1_000_000,
-                        )
-                        .map_err(|e| {
-                            Error::InvalidResponse(format!("Cannot parse timestamp: {}", e))
-                        })?;
-
-                        records.push(RecordAndOffset {
-                            record: Record {
-                                key: record.key,
-                                value: record.value,
-                                headers: record
-                                    .headers
-                                    .into_iter()
-                                    .map(|header| (header.key, header.value))
-                                    .collect(),
-                                timestamp,
-                            },
-                            offset: batch.base_offset + record.offset_delta as i64,
-                        })
-                    }
-                }
-            }
-        }
+        let records = extract_records(partition.records.0)?;
 
         Ok((records, partition.high_watermark.0))
     }
@@ -542,4 +463,106 @@ fn process_produce_response(
             .map(|x| x + response.base_offset.0)
             .collect()),
     }
+}
+
+fn build_fetch_request(
+    offset: i64,
+    bytes: Range<i32>,
+    max_wait_ms: i32,
+    partition: i32,
+    topic: &str,
+) -> FetchRequest {
+    FetchRequest {
+        // normal consumer
+        replica_id: Int32(-1),
+        max_wait_ms: Int32(max_wait_ms),
+        min_bytes: Int32(bytes.start),
+        max_bytes: Some(Int32(bytes.end.saturating_sub(1))),
+        // `READ_COMMITTED`
+        isolation_level: Some(Int8(1)),
+        topics: vec![FetchRequestTopic {
+            topic: String_(topic.to_string()),
+            partitions: vec![FetchRequestPartition {
+                partition: Int32(partition),
+                fetch_offset: Int64(offset),
+                partition_max_bytes: Int32(bytes.end.saturating_sub(1)),
+            }],
+        }],
+    }
+}
+
+fn process_fetch_response(
+    partition: i32,
+    topic: &str,
+    response: FetchResponse,
+) -> Result<FetchResponsePartition> {
+    let response_topic = response
+        .responses
+        .exactly_one()
+        .map_err(Error::exactly_one_topic)?;
+
+    if response_topic.topic.0 != topic {
+        return Err(Error::InvalidResponse(format!(
+            "Expected data for topic '{}' but got data for topic '{}'",
+            topic, response_topic.topic.0
+        )));
+    }
+
+    let response_partition = response_topic
+        .partitions
+        .exactly_one()
+        .map_err(Error::exactly_one_partition)?;
+
+    if response_partition.partition_index.0 != partition {
+        return Err(Error::InvalidResponse(format!(
+            "Expected data for partition {} but got data for partition {}",
+            partition, response_partition.partition_index.0
+        )));
+    }
+
+    if let Some(err) = response_partition.error_code {
+        return Err(Error::ServerError(err, String::new()));
+    }
+
+    Ok(response_partition)
+}
+
+fn extract_records(partition_records: Vec<RecordBatch>) -> Result<Vec<RecordAndOffset>> {
+    let mut records = vec![];
+
+    for batch in partition_records {
+        match batch.records {
+            ControlBatchOrRecords::ControlBatch(_) => {
+                // ignore
+            }
+            ControlBatchOrRecords::Records(protocol_records) => {
+                records.reserve(protocol_records.len());
+
+                for record in protocol_records {
+                    let timestamp = OffsetDateTime::from_unix_timestamp_nanos(
+                        (batch.first_timestamp + record.timestamp_delta) as i128 * 1_000_000,
+                    )
+                    .map_err(|e| {
+                        Error::InvalidResponse(format!("Cannot parse timestamp: {}", e))
+                    })?;
+
+                    records.push(RecordAndOffset {
+                        record: Record {
+                            key: record.key,
+                            value: record.value,
+                            headers: record
+                                .headers
+                                .into_iter()
+                                .map(|header| (header.key, header.value))
+                                .collect(),
+                            timestamp,
+                        },
+                        offset: batch.base_offset + record.offset_delta as i64,
+                    })
+                }
+            }
+        }
+    }
+
+    Ok(records)
 }
