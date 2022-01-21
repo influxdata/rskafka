@@ -18,7 +18,10 @@ async fn test_batch_producer() {
     let controller_client = client.controller_client().await.unwrap();
 
     let topic = random_topic_name();
-    controller_client.create_topic(&topic, 1, 1).await.unwrap();
+    controller_client
+        .create_topic(&topic, 1, 1, 5_000)
+        .await
+        .unwrap();
 
     let record = record();
 

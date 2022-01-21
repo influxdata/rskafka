@@ -33,7 +33,7 @@ async fn test_partition_leader() {
     let topic_name = random_topic_name();
 
     controller_client
-        .create_topic(&topic_name, 2, 1)
+        .create_topic(&topic_name, 2, 1, 5_000)
         .await
         .unwrap();
     let client = client.partition_client(&topic_name, 0).await.unwrap();
@@ -73,7 +73,7 @@ async fn test_topic_crud() {
     }
     let new_topic = format!("{}{}", prefix, max_id + 1);
     controller_client
-        .create_topic(&new_topic, 2, 1)
+        .create_topic(&new_topic, 2, 1, 5_000)
         .await
         .unwrap();
 
@@ -93,7 +93,7 @@ async fn test_topic_crud() {
     .unwrap();
 
     let err = controller_client
-        .create_topic(&new_topic, 1, 1)
+        .create_topic(&new_topic, 1, 1, 5_000)
         .await
         .unwrap_err();
     match err {
@@ -177,7 +177,7 @@ async fn test_produce_empty() {
     let client = ClientBuilder::new(vec![connection]).build().await.unwrap();
     let controller_client = client.controller_client().await.unwrap();
     controller_client
-        .create_topic(&topic_name, n_partitions, 1)
+        .create_topic(&topic_name, n_partitions, 1, 5_000)
         .await
         .unwrap();
 
@@ -219,7 +219,7 @@ async fn test_get_high_watermark() {
         .unwrap();
     let controller_client = client.controller_client().await.unwrap();
     controller_client
-        .create_topic(&topic_name, n_partitions, 1)
+        .create_topic(&topic_name, n_partitions, 1, 5_000)
         .await
         .unwrap();
 
@@ -274,7 +274,7 @@ where
         .unwrap();
     let controller_client = client.controller_client().await.unwrap();
     controller_client
-        .create_topic(&topic_name, n_partitions, 1)
+        .create_topic(&topic_name, n_partitions, 1, 5_000)
         .await
         .unwrap();
     let partition_client = Arc::new(
@@ -401,7 +401,7 @@ async fn test_produce_consume_size_cutoff() {
     let client = ClientBuilder::new(vec![connection]).build().await.unwrap();
     let controller_client = client.controller_client().await.unwrap();
     controller_client
-        .create_topic(&topic_name, 1, 1)
+        .create_topic(&topic_name, 1, 1, 5_000)
         .await
         .unwrap();
 

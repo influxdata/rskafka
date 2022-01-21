@@ -40,8 +40,9 @@ let topic = "my_topic";
 let controller_client = client.controller_client().await.unwrap();
 controller_client.create_topic(
     topic,
-    2,  // partitions
-    1,  // replication factor
+    2,      // partitions
+    1,      // replication factor
+    5_000,  // timeout (ms)
 ).await.unwrap();
 
 // get a partition-bound client
