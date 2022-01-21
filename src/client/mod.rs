@@ -37,8 +37,9 @@ pub enum ProduceError {
 /// Builder for [`Client`].
 pub struct ClientBuilder {
     bootstrap_brokers: Vec<String>,
-    tls_config: TlsConfig,
+    max_message_size: usize,
     socks5_proxy: Option<String>,
+    tls_config: TlsConfig,
 }
 
 impl ClientBuilder {
@@ -46,15 +47,19 @@ impl ClientBuilder {
     pub fn new(bootstrap_brokers: Vec<String>) -> Self {
         Self {
             bootstrap_brokers,
-            tls_config: TlsConfig::default(),
+            max_message_size: 100 * 1024 * 1024, // 100MB
             socks5_proxy: None,
+            tls_config: TlsConfig::default(),
         }
     }
 
-    /// Setup TLS.
-    #[cfg(feature = "transport-tls")]
-    pub fn tls_config(mut self, tls_config: Arc<rustls::ClientConfig>) -> Self {
-        self.tls_config = Some(tls_config);
+    /// Set maximum size (in bytes) of message frames that can be received from a broker.
+    ///
+    /// Setting this to larger sizes allows you to specify larger size limits in [`PartitionClient::fetch_records`],
+    /// however it increases maximum memory consumption per broker connection. Settings this too small will result in
+    /// failures all over the place since metadata requests cannot be handled any longer.
+    pub fn max_message_size(mut self, max_message_size: usize) -> Self {
+        self.max_message_size = max_message_size;
         self
     }
 
@@ -65,13 +70,20 @@ impl ClientBuilder {
         self
     }
 
+    /// Setup TLS.
+    #[cfg(feature = "transport-tls")]
+    pub fn tls_config(mut self, tls_config: Arc<rustls::ClientConfig>) -> Self {
+        self.tls_config = Some(tls_config);
+        self
+    }
+
     /// Build [`Client`].
     pub async fn build(self) -> Result<Client> {
         let brokers = Arc::new(BrokerConnector::new(
             self.bootstrap_brokers,
             self.tls_config,
             self.socks5_proxy,
-            1024 * 1024 * 1024,
+            self.max_message_size,
         ));
         brokers.refresh_metadata().await?;
 
@@ -85,6 +97,12 @@ impl std::fmt::Debug for ClientBuilder {
     }
 }
 
+/// Top-level cluster-wide client.
+///
+/// This client can be used to query some cluster-wide metadata and construct task-specific sub-clients like
+/// [`ControllerClient`] and [`PartitionClient`].
+///
+/// Must be constructed using [`ClientBuilder`].
 #[derive(Debug)]
 pub struct Client {
     brokers: Arc<BrokerConnector>,
