@@ -7,10 +7,10 @@ use crate::{
         error::Error as ProtocolError,
         messages::{
             FetchRequest, FetchRequestPartition, FetchRequestTopic, FetchResponse,
-            FetchResponsePartition, ListOffsetsRequest, ListOffsetsRequestPartition,
-            ListOffsetsRequestTopic, ListOffsetsResponse, ListOffsetsResponsePartition,
-            ProduceRequest, ProduceRequestPartitionData, ProduceRequestTopicData, ProduceResponse,
-            NORMAL_CONSUMER,
+            FetchResponsePartition, IsolationLevel, ListOffsetsRequest,
+            ListOffsetsRequestPartition, ListOffsetsRequestTopic, ListOffsetsResponse,
+            ListOffsetsResponsePartition, ProduceRequest, ProduceRequestPartitionData,
+            ProduceRequestTopicData, ProduceResponse, NORMAL_CONSUMER,
         },
         primitives::*,
         record::{Record as ProtocolRecord, *},
@@ -412,8 +412,7 @@ fn build_fetch_request(
         max_wait_ms: Int32(max_wait_ms),
         min_bytes: Int32(bytes.start),
         max_bytes: Some(Int32(bytes.end.saturating_sub(1))),
-        // `READ_COMMITTED`
-        isolation_level: Some(Int8(1)),
+        isolation_level: Some(IsolationLevel::ReadCommitted),
         topics: vec![FetchRequestTopic {
             topic: String_(topic.to_string()),
             partitions: vec![FetchRequestPartition {
@@ -504,8 +503,7 @@ fn extract_records(partition_records: Vec<RecordBatch>) -> Result<Vec<RecordAndO
 fn build_list_offsets_request(partition: i32, topic: &str) -> ListOffsetsRequest {
     ListOffsetsRequest {
         replica_id: NORMAL_CONSUMER,
-        // `READ_COMMITTED`
-        isolation_level: Some(Int8(1)),
+        isolation_level: Some(IsolationLevel::ReadCommitted),
         topics: vec![ListOffsetsRequestTopic {
             name: String_(topic.to_owned()),
             partitions: vec![ListOffsetsRequestPartition {
