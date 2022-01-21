@@ -13,6 +13,7 @@ use crate::{
         messages::{CreateTopicRequest, CreateTopicsRequest},
         primitives::{Int16, Int32, NullableString, String_},
     },
+    ExactlyOne,
 };
 
 #[derive(Debug)]
@@ -60,14 +61,10 @@ impl ControllerClient {
             let broker = self.get_cached_controller_broker().await?;
             let response = broker.request(request).await?;
 
-            if response.topics.len() != 1 {
-                return Err(Error::InvalidResponse(format!(
-                    "Expected a single topic in response, got {}",
-                    response.topics.len()
-                )));
-            }
-
-            let topic = response.topics.into_iter().next().unwrap();
+            let topic = response
+                .topics
+                .exactly_one()
+                .map_err(Error::exactly_one_topic)?;
 
             match topic.error {
                 None => Ok(()),

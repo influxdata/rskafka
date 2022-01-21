@@ -2,6 +2,7 @@ use crate::backoff::{Backoff, BackoffConfig};
 use crate::messenger::RequestError;
 use crate::protocol::messages::{FetchRequest, FetchRequestPartition, FetchRequestTopic};
 use crate::record::RecordAndOffset;
+use crate::ExactlyOne;
 use crate::{
     client::error::{Error, Result},
     connection::{BrokerConnection, BrokerConnector},
@@ -129,14 +130,11 @@ impl PartitionClient {
             let broker = self.get_cached_leader().await?;
             let response = broker.request(&request).await?;
 
-            if response.responses.len() != 1 {
-                return Err(Error::InvalidResponse(format!(
-                    "Expected one topic in response got: {}",
-                    response.responses.len()
-                )));
-            }
+            let response = response
+                .responses
+                .exactly_one()
+                .map_err(Error::exactly_one_topic)?;
 
-            let response = response.responses.into_iter().next().unwrap();
             if response.name.0 != self.topic {
                 return Err(Error::InvalidResponse(format!(
                     "Expected write for topic \"{}\" got \"{}\"",
@@ -200,17 +198,10 @@ impl PartitionClient {
                     })
                     .await?;
 
-                if response.responses.len() != 1 {
-                    return Err(Error::InvalidResponse(format!(
-                        "Expected 1 topic to be returned but got {}",
-                        response.responses.len()
-                    )));
-                }
                 let topic = response
                     .responses
-                    .into_iter()
-                    .next()
-                    .expect("just checked the length");
+                    .exactly_one()
+                    .map_err(Error::exactly_one_topic)?;
 
                 if topic.topic.0 != self.topic {
                     return Err(Error::InvalidResponse(format!(
@@ -309,13 +300,10 @@ impl PartitionClient {
                     })
                     .await?;
 
-                if response.topics.len() != 1 {
-                    return Err(Error::InvalidResponse(format!(
-                        "Expected 1 topic to be returned but got {}",
-                        response.topics.len()
-                    )));
-                }
-                let topic = response.topics.into_iter().next().unwrap();
+                let topic = response
+                    .topics
+                    .exactly_one()
+                    .map_err(Error::exactly_one_topic)?;
 
                 if topic.name.0 != self.topic {
                     return Err(Error::InvalidResponse(format!(
@@ -480,14 +468,10 @@ impl PartitionClient {
             .request_metadata(broker_override, Some(vec![self.topic.clone()]))
             .await?;
 
-        if metadata.topics.len() != 1 {
-            return Err(Error::InvalidResponse(format!(
-                "Expected one topic in response, got {}",
-                metadata.topics.len()
-            )));
-        }
-
-        let topic = metadata.topics.into_iter().next().unwrap();
+        let topic = metadata
+            .topics
+            .exactly_one()
+            .map_err(Error::exactly_one_topic)?;
 
         if topic.name.0 != self.topic {
             return Err(Error::InvalidResponse(format!(

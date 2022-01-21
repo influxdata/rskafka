@@ -17,4 +17,10 @@ pub enum Error {
     ServerError(ProtocolError, String),
 }
 
+impl Error {
+    pub(crate) fn exactly_one_topic(len: usize) -> Self {
+        Self::InvalidResponse(format!("Expected a single topic in response, got {len}"))
+    }
+}
+
 pub type Result<T, E = Error> = std::result::Result<T, E>;
