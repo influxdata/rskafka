@@ -71,61 +71,7 @@ impl PartitionClient {
 
         let n = records.len() as i64;
 
-        // TODO: Retry on failure
-
-        // TODO: Verify this is the first timestamp in the batch and not the min
-        let first_timestamp = records.first().unwrap().timestamp;
-        let mut max_timestamp = first_timestamp;
-
-        let records = records
-            .into_iter()
-            .enumerate()
-            .map(|(offset_delta, record)| {
-                max_timestamp = max_timestamp.max(record.timestamp);
-
-                ProtocolRecord {
-                    key: record.key,
-                    value: record.value,
-                    timestamp_delta: (record.timestamp - first_timestamp).whole_milliseconds()
-                        as i64,
-                    offset_delta: offset_delta as i32,
-                    headers: record
-                        .headers
-                        .into_iter()
-                        .map(|(key, value)| RecordHeader { key, value })
-                        .collect(),
-                }
-            })
-            .collect();
-
-        let record_batch = ProduceRequestPartitionData {
-            index: Int32(self.partition),
-            records: Records(vec![RecordBatch {
-                base_offset: 0,
-                partition_leader_epoch: 0,
-                last_offset_delta: n as i32 - 1,
-                is_transactional: false,
-                base_sequence: -1,
-                compression: RecordBatchCompression::NoCompression,
-                timestamp_type: RecordBatchTimestampType::CreateTime,
-                producer_id: -1,
-                producer_epoch: -1,
-                first_timestamp: (first_timestamp.unix_timestamp_nanos() / 1_000_000) as i64,
-                max_timestamp: (max_timestamp.unix_timestamp_nanos() / 1_000_000) as i64,
-                records: ControlBatchOrRecords::Records(records),
-            }]),
-        };
-
-        // build request
-        let request = &ProduceRequest {
-            transactional_id: crate::protocol::primitives::NullableString(None),
-            acks: Int16(-1),
-            timeout_ms: Int32(30_000),
-            topic_data: vec![ProduceRequestTopicData {
-                name: String_(self.topic.clone()),
-                partition_data: vec![record_batch],
-            }],
-        };
+        let request = &build_produce_request(self.partition, &self.topic, records);
 
         maybe_retry(&self.backoff_config, self, "produce", || async move {
             let broker = self.get().await?;
@@ -529,4 +475,62 @@ where
         })
         .await
         .map_err(Error::RetryFailed)?
+}
+
+fn build_produce_request(partition: i32, topic: &str, records: Vec<Record>) -> ProduceRequest {
+    let n = records.len() as i32;
+
+    // TODO: Retry on failure
+
+    // TODO: Verify this is the first timestamp in the batch and not the min
+    let first_timestamp = records.first().unwrap().timestamp;
+    let mut max_timestamp = first_timestamp;
+
+    let records = records
+        .into_iter()
+        .enumerate()
+        .map(|(offset_delta, record)| {
+            max_timestamp = max_timestamp.max(record.timestamp);
+
+            ProtocolRecord {
+                key: record.key,
+                value: record.value,
+                timestamp_delta: (record.timestamp - first_timestamp).whole_milliseconds() as i64,
+                offset_delta: offset_delta as i32,
+                headers: record
+                    .headers
+                    .into_iter()
+                    .map(|(key, value)| RecordHeader { key, value })
+                    .collect(),
+            }
+        })
+        .collect();
+
+    let record_batch = ProduceRequestPartitionData {
+        index: Int32(partition),
+        records: Records(vec![RecordBatch {
+            base_offset: 0,
+            partition_leader_epoch: 0,
+            last_offset_delta: n - 1,
+            is_transactional: false,
+            base_sequence: -1,
+            compression: RecordBatchCompression::NoCompression,
+            timestamp_type: RecordBatchTimestampType::CreateTime,
+            producer_id: -1,
+            producer_epoch: -1,
+            first_timestamp: (first_timestamp.unix_timestamp_nanos() / 1_000_000) as i64,
+            max_timestamp: (max_timestamp.unix_timestamp_nanos() / 1_000_000) as i64,
+            records: ControlBatchOrRecords::Records(records),
+        }]),
+    };
+
+    ProduceRequest {
+        transactional_id: crate::protocol::primitives::NullableString(None),
+        acks: Int16(-1),
+        timeout_ms: Int32(30_000),
+        topic_data: vec![ProduceRequestTopicData {
+            name: String_(topic.to_string()),
+            partition_data: vec![record_batch],
+        }],
+    }
 }
