@@ -213,7 +213,7 @@ mod broadcast;
 #[derive(Debug, Error, Clone)]
 pub enum Error {
     #[error("Aggregator error: {0}")]
-    Aggregator(#[from] Arc<aggregator::Error>),
+    Aggregator(Arc<dyn std::error::Error + Send + Sync>),
 
     #[error("Client error: {0}")]
     Client(#[from] Arc<ClientError>),
@@ -324,7 +324,7 @@ where
             .deaggregate(&status.aggregated_status, tag)
         {
             Ok(status) => Ok(status),
-            Err(e) => Err(Error::Aggregator(Arc::new(e))),
+            Err(e) => Err(Error::Aggregator(e.into())),
         },
         Err(e) => Err(e.clone()),
     }
@@ -361,13 +361,21 @@ where
             // Try to add the record to the aggregator
             let mut inner = self.inner.lock().await;
 
-            let tag = match inner.aggregator.try_push(data).map_err(Arc::new)? {
+            let tag = match inner
+                .aggregator
+                .try_push(data)
+                .map_err(|e| Error::Aggregator(e.into()))?
+            {
                 TryPush::Aggregated(tag) => tag,
                 TryPush::NoCapacity(data) => {
                     debug!("Insufficient capacity in aggregator - flushing");
 
                     Self::flush(&mut inner, self.client.as_ref()).await;
-                    match inner.aggregator.try_push(data).map_err(Arc::new)? {
+                    match inner
+                        .aggregator
+                        .try_push(data)
+                        .map_err(|e| Error::Aggregator(e.into()))?
+                    {
                         TryPush::Aggregated(tag) => tag,
                         TryPush::NoCapacity(_) => {
                             error!("Record too large for aggregator");
@@ -421,7 +429,7 @@ where
                 // Reset result slot
                 let slot = std::mem::take(&mut inner.result_slot);
 
-                slot.broadcast(Err(Error::Aggregator(Arc::new(e))));
+                slot.broadcast(Err(Error::Aggregator(e.into())));
                 return;
             }
         };
