@@ -169,9 +169,7 @@ impl PartitionClient {
 
     /// Fetch `bytes` bytes of record data starting at sequence number `offset`
     ///
-    /// Returns the records, and the current high watermark
-    ///
-    /// TODO: this should probably also return the offsets so we can issue the next request correctly
+    /// Returns the records, and the current high watermark.
     pub async fn fetch_records(
         &self,
         offset: i64,

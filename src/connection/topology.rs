@@ -12,7 +12,9 @@ pub struct BrokerTopology {
 }
 
 #[derive(Debug, Clone)]
-struct Broker {
+pub struct Broker {
+    /// broker ID from the topology metadata
+    pub id: i32,
     host: String,
     port: i32,
 }
@@ -26,6 +28,7 @@ impl Display for Broker {
 impl<'a> From<&'a MetadataResponseBroker> for Broker {
     fn from(b: &'a MetadataResponseBroker) -> Self {
         Self {
+            id: b.node_id.0,
             host: b.host.0.clone(),
             port: b.port.0,
         }
@@ -37,21 +40,14 @@ impl BrokerTopology {
         self.topology.read().is_empty()
     }
 
-    /// Returns the broker URL for the provided broker
-    pub async fn get_broker_url(&self, broker_id: i32) -> Option<String> {
-        self.topology
-            .read()
-            .get(&broker_id)
-            .map(ToString::to_string)
+    /// Returns the broker for the provided broker ID
+    pub async fn get_broker(&self, broker_id: i32) -> Option<Broker> {
+        self.topology.read().get(&broker_id).cloned()
     }
 
-    /// Returns a list of all broker URLs
-    pub fn get_broker_urls(&self) -> Vec<String> {
-        self.topology
-            .read()
-            .values()
-            .map(ToString::to_string)
-            .collect()
+    /// Returns a list of all brokers
+    pub fn get_brokers(&self) -> Vec<Broker> {
+        self.topology.read().values().cloned().collect()
     }
 
     /// Updates with the provided broker metadata

@@ -40,6 +40,7 @@ impl ControllerClient {
         name: impl Into<String> + Send,
         num_partitions: i32,
         replication_factor: i16,
+        timeout_ms: i32,
     ) -> Result<()> {
         let request = &CreateTopicsRequest {
             topics: vec![CreateTopicRequest {
@@ -50,8 +51,7 @@ impl ControllerClient {
                 configs: vec![],
                 tagged_fields: None,
             }],
-            // TODO: Expose as configuration parameter
-            timeout_ms: Int32(5_000),
+            timeout_ms: Int32(timeout_ms),
             validate_only: None,
             tagged_fields: None,
         };
