@@ -307,45 +307,28 @@ where
     status_deagg: <A as aggregator::Aggregator>::StatusDeaggregator,
 }
 
-#[derive(Debug)]
-struct AggregatedResult<A>
+type AggregatedResult<A> = Result<Arc<AggregatedStatus<A>>, Error>;
+
+fn extract<A>(
+    result: &AggregatedResult<A>,
+    tag: A::Tag,
+) -> Result<<A as aggregator::AggregatorStatus>::Status, Error>
 where
     A: aggregator::Aggregator,
 {
-    inner: Result<Arc<AggregatedStatus<A>>, Error>,
-}
+    use self::aggregator::StatusDeaggregator;
 
-impl<A> AggregatedResult<A>
-where
-    A: aggregator::Aggregator,
-{
-    fn extract(&self, tag: A::Tag) -> Result<<A as aggregator::AggregatorStatus>::Status, Error> {
-        use self::aggregator::StatusDeaggregator;
-
-        match &self.inner {
-            Ok(status) => match status
-                .status_deagg
-                .deaggregate(&status.aggregated_status, tag)
-            {
-                Ok(status) => Ok(status),
-                Err(e) => Err(Error::Aggregator(Arc::new(e))),
-            },
-            Err(e) => Err(e.clone()),
-        }
+    match result {
+        Ok(status) => match status
+            .status_deagg
+            .deaggregate(&status.aggregated_status, tag)
+        {
+            Ok(status) => Ok(status),
+            Err(e) => Err(Error::Aggregator(Arc::new(e))),
+        },
+        Err(e) => Err(e.clone()),
     }
 }
-
-impl<A> Clone for AggregatedResult<A>
-where
-    A: aggregator::Aggregator,
-{
-    fn clone(&self) -> Self {
-        Self {
-            inner: self.inner.clone(),
-        }
-    }
-}
-
 #[derive(Debug)]
 struct ProducerInner<A>
 where
@@ -403,7 +386,7 @@ where
         pin_mut!(result_slot);
 
         futures::select! {
-            r = result_slot => return r.extract(tag),
+            r = result_slot => return extract(&r, tag),
             _ = linger => {}
         }
 
@@ -416,7 +399,7 @@ where
         // - the linger expired "simultaneously" with the publish
         // - the linger expired but another thread triggered the flush
         if let Some(r) = result_slot.peek() {
-            return r.extract(tag);
+            return extract(r, tag);
         }
 
         debug!("Linger expired - flushing");
@@ -424,10 +407,7 @@ where
         // Flush data
         Self::flush(&mut inner, self.client.as_ref()).await;
 
-        result_slot
-            .now_or_never()
-            .expect("just flushed")
-            .extract(tag)
+        extract(&result_slot.now_or_never().expect("just flushed"), tag)
     }
 
     /// Flushes out the data from the aggregator, publishes the result to the result slot,
@@ -441,9 +421,7 @@ where
                 // Reset result slot
                 let slot = std::mem::take(&mut inner.result_slot);
 
-                slot.broadcast(AggregatedResult {
-                    inner: Err(Error::Aggregator(Arc::new(e))),
-                });
+                slot.broadcast(Err(Error::Aggregator(Arc::new(e))));
                 return;
             }
         };
@@ -467,7 +445,7 @@ where
             Err(e) => Err(Error::Client(Arc::new(e))),
         };
 
-        slot.broadcast(AggregatedResult { inner })
+        slot.broadcast(inner)
     }
 }
 
