@@ -16,6 +16,8 @@ use crc::{Crc, CRC_32_ISCSI};
 #[cfg(test)]
 use proptest::prelude::*;
 
+use crate::validation::ExactlyOne;
+
 use super::{
     primitives::{Array, ArrayRef, Int16, Int32, Int64, Int8, Varint, Varlong},
     traits::{ReadError, ReadType, WriteError, WriteType},
@@ -539,15 +541,14 @@ where
             ));
         }
         let records = if is_control {
-            let mut records = Array::<ControlBatchRecord>::read(reader)?
+            let records = Array::<ControlBatchRecord>::read(reader)?
                 .0
                 .unwrap_or_default();
-            if records.len() != 1 {
-                return Err(ReadError::Malformed(
-                    format!("Expected 1 control record but got {}", records.len()).into(),
-                ));
-            }
-            ControlBatchOrRecords::ControlBatch(records.pop().expect("Just checked the size"))
+            let record = records.exactly_one().map_err(|len| {
+                ReadError::Malformed(format!("Expected 1 control record but got {}", len).into())
+            })?;
+
+            ControlBatchOrRecords::ControlBatch(record)
         } else {
             let records = Array::<Record>::read(reader)?.0.unwrap_or_default();
             ControlBatchOrRecords::Records(records)

@@ -15,6 +15,7 @@ use crate::{
         record::{Record as ProtocolRecord, *},
     },
     record::Record,
+    validation::ExactlyOne,
 };
 use std::ops::{ControlFlow, Deref, Range};
 use std::sync::Arc;
@@ -129,14 +130,11 @@ impl PartitionClient {
             let broker = self.get_cached_leader().await?;
             let response = broker.request(&request).await?;
 
-            if response.responses.len() != 1 {
-                return Err(Error::InvalidResponse(format!(
-                    "Expected one topic in response got: {}",
-                    response.responses.len()
-                )));
-            }
+            let response = response
+                .responses
+                .exactly_one()
+                .map_err(Error::exactly_one_topic)?;
 
-            let response = response.responses.into_iter().next().unwrap();
             if response.name.0 != self.topic {
                 return Err(Error::InvalidResponse(format!(
                     "Expected write for topic \"{}\" got \"{}\"",
@@ -144,14 +142,11 @@ impl PartitionClient {
                 )));
             }
 
-            if response.partition_responses.len() != 1 {
-                return Err(Error::InvalidResponse(format!(
-                    "Expected one partition got: {}",
-                    response.partition_responses.len()
-                )));
-            }
+            let response = response
+                .partition_responses
+                .exactly_one()
+                .map_err(Error::exactly_one_partition)?;
 
-            let response = response.partition_responses.into_iter().next().unwrap();
             if response.index.0 != self.partition {
                 return Err(Error::InvalidResponse(format!(
                     "Expected partition {} for topic \"{}\" got {}",
@@ -200,17 +195,10 @@ impl PartitionClient {
                     })
                     .await?;
 
-                if response.responses.len() != 1 {
-                    return Err(Error::InvalidResponse(format!(
-                        "Expected 1 topic to be returned but got {}",
-                        response.responses.len()
-                    )));
-                }
                 let topic = response
                     .responses
-                    .into_iter()
-                    .next()
-                    .expect("just checked the length");
+                    .exactly_one()
+                    .map_err(Error::exactly_one_topic)?;
 
                 if topic.topic.0 != self.topic {
                     return Err(Error::InvalidResponse(format!(
@@ -219,17 +207,10 @@ impl PartitionClient {
                     )));
                 }
 
-                if topic.partitions.len() != 1 {
-                    return Err(Error::InvalidResponse(format!(
-                        "Expected 1 partition to be returned but got {}",
-                        topic.partitions.len()
-                    )));
-                }
                 let partition = topic
                     .partitions
-                    .into_iter()
-                    .next()
-                    .expect("just checked length");
+                    .exactly_one()
+                    .map_err(Error::exactly_one_partition)?;
 
                 if partition.partition_index.0 != self.partition {
                     return Err(Error::InvalidResponse(format!(
@@ -309,13 +290,10 @@ impl PartitionClient {
                     })
                     .await?;
 
-                if response.topics.len() != 1 {
-                    return Err(Error::InvalidResponse(format!(
-                        "Expected 1 topic to be returned but got {}",
-                        response.topics.len()
-                    )));
-                }
-                let topic = response.topics.into_iter().next().unwrap();
+                let topic = response
+                    .topics
+                    .exactly_one()
+                    .map_err(Error::exactly_one_topic)?;
 
                 if topic.name.0 != self.topic {
                     return Err(Error::InvalidResponse(format!(
@@ -324,13 +302,10 @@ impl PartitionClient {
                     )));
                 }
 
-                if topic.partitions.len() != 1 {
-                    return Err(Error::InvalidResponse(format!(
-                        "Expected 1 partition to be returned but got {}",
-                        topic.partitions.len()
-                    )));
-                }
-                let partition = topic.partitions.into_iter().next().unwrap();
+                let partition = topic
+                    .partitions
+                    .exactly_one()
+                    .map_err(Error::exactly_one_partition)?;
 
                 if partition.partition_index.0 != self.partition {
                     return Err(Error::InvalidResponse(format!(
@@ -480,14 +455,10 @@ impl PartitionClient {
             .request_metadata(broker_override, Some(vec![self.topic.clone()]))
             .await?;
 
-        if metadata.topics.len() != 1 {
-            return Err(Error::InvalidResponse(format!(
-                "Expected one topic in response, got {}",
-                metadata.topics.len()
-            )));
-        }
-
-        let topic = metadata.topics.into_iter().next().unwrap();
+        let topic = metadata
+            .topics
+            .exactly_one()
+            .map_err(Error::exactly_one_topic)?;
 
         if topic.name.0 != self.topic {
             return Err(Error::InvalidResponse(format!(
