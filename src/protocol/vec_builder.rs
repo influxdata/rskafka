@@ -71,10 +71,13 @@ impl<T> VecBuilder<T> {
 
 impl VecBuilder<u8> {
     /// Read as many bytes as there are left.
-    pub fn read_exact<R>(&mut self, reader: &mut R) -> Result<(), std::io::Error>
+    pub fn read_exact<R>(mut self, reader: &mut R) -> Result<Self, std::io::Error>
     where
         R: std::io::Read,
     {
+        // Note: We can modify `self` here and still return an error because there is no way the taken/moved `self` will
+        //       be accessible in the error case.
+
         while self.remaining_elements > 0 {
             let mut buf = self.blocks.last_mut().expect("Has always at least 1 block");
             if buf.len() >= self.elements_per_block {
@@ -95,7 +98,7 @@ impl VecBuilder<u8> {
             self.remaining_elements -= to_read;
         }
 
-        Ok(())
+        Ok(self)
     }
 }
 
@@ -166,7 +169,7 @@ mod tests {
         let mut reader = Cursor::new(data.clone());
 
         let mut builder = VecBuilder::<u8>::new_with_block_size(data.len(), 2);
-        builder.read_exact(&mut reader).unwrap();
+        builder = builder.read_exact(&mut reader).unwrap();
 
         let blocks = vec![b"ab".to_vec(), b"c".to_vec()];
         assert_eq!(builder.blocks, blocks);
@@ -182,7 +185,7 @@ mod tests {
 
         let mut builder = VecBuilder::<u8>::new_with_block_size(data.len() + 1, 2);
         builder.push(b'a');
-        builder.read_exact(&mut reader).unwrap();
+        builder = builder.read_exact(&mut reader).unwrap();
 
         let blocks = vec![b"ab".to_vec(), b"c".to_vec()];
         assert_eq!(builder.blocks, blocks);

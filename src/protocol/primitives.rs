@@ -6,10 +6,10 @@
 
 use std::io::{Cursor, Read, Write};
 
+use integer_encoding::{VarIntReader, VarIntWriter};
+
 #[cfg(test)]
 use proptest::prelude::*;
-
-use varint_rs::{VarintReader, VarintWriter};
 
 use super::{
     record::RecordBatch,
@@ -174,7 +174,10 @@ where
     R: Read,
 {
     fn read(reader: &mut R) -> Result<Self, ReadError> {
-        Ok(Self(reader.read_i32_varint()?))
+        // workaround for https://github.com/dermesser/integer-encoding-rs/issues/21
+        // read 64bit and use a checked downcast instead
+        let i: i64 = reader.read_varint()?;
+        Ok(Self(i32::try_from(i)?))
     }
 }
 
@@ -183,7 +186,7 @@ where
     W: Write,
 {
     fn write(&self, writer: &mut W) -> Result<(), WriteError> {
-        writer.write_i32_varint(self.0)?;
+        writer.write_varint(self.0)?;
         Ok(())
     }
 }
@@ -200,7 +203,7 @@ where
     R: Read,
 {
     fn read(reader: &mut R) -> Result<Self, ReadError> {
-        Ok(Self(reader.read_i64_varint()?))
+        Ok(Self(reader.read_varint()?))
     }
 }
 
@@ -209,7 +212,7 @@ where
     W: Write,
 {
     fn write(&self, writer: &mut W) -> Result<(), WriteError> {
-        writer.write_i64_varint(self.0)?;
+        writer.write_varint(self.0)?;
         Ok(())
     }
 }
@@ -294,9 +297,11 @@ where
             )),
             -1 => Ok(Self(None)),
             l => {
-                let mut buf = vec![0; l as usize];
-                reader.read_exact(&mut buf)?;
-                let s = String::from_utf8(buf).map_err(|e| ReadError::Malformed(Box::new(e)))?;
+                let len = usize::try_from(l)?;
+                let mut buf = VecBuilder::new(len);
+                buf = buf.read_exact(reader)?;
+                let s =
+                    String::from_utf8(buf.into()).map_err(|e| ReadError::Malformed(Box::new(e)))?;
                 Ok(Self(Some(s)))
             }
         }
@@ -335,9 +340,9 @@ where
     fn read(reader: &mut R) -> Result<Self, ReadError> {
         let len = Int16::read(reader)?;
         let len = usize::try_from(len.0).map_err(|e| ReadError::Malformed(Box::new(e)))?;
-        let mut buf = vec![0; len];
-        reader.read_exact(&mut buf)?;
-        let s = String::from_utf8(buf).map_err(|e| ReadError::Malformed(Box::new(e)))?;
+        let mut buf = VecBuilder::new(len);
+        buf = buf.read_exact(reader)?;
+        let s = String::from_utf8(buf.into()).map_err(|e| ReadError::Malformed(Box::new(e)))?;
         Ok(Self(s))
     }
 }
@@ -374,7 +379,7 @@ where
                 let len = len - 1;
 
                 let mut buf = VecBuilder::new(len);
-                buf.read_exact(reader)?;
+                buf = buf.read_exact(reader)?;
 
                 let s =
                     String::from_utf8(buf.into()).map_err(|e| ReadError::Malformed(Box::new(e)))?;
@@ -428,7 +433,7 @@ where
                 let len = len - 1;
 
                 let mut buf = VecBuilder::new(len);
-                buf.read_exact(reader)?;
+                buf = buf.read_exact(reader)?;
 
                 let s =
                     String::from_utf8(buf.into()).map_err(|e| ReadError::Malformed(Box::new(e)))?;
@@ -491,9 +496,10 @@ where
             )),
             -1 => Ok(Self(None)),
             l => {
-                let mut buf = vec![0; l as usize];
-                reader.read_exact(&mut buf)?;
-                Ok(Self(Some(buf)))
+                let len = usize::try_from(l)?;
+                let mut buf = VecBuilder::new(len);
+                buf = buf.read_exact(reader)?;
+                Ok(Self(Some(buf.into())))
             }
         }
     }
@@ -533,7 +539,7 @@ where
 
             let data_len = UnsignedVarint::read(reader)?;
             let mut data_builder = VecBuilder::new(data_len.0 as usize);
-            data_builder.read_exact(reader)?;
+            data_builder = data_builder.read_exact(reader)?;
 
             res.push((tag, data_builder.into()));
         }
@@ -578,11 +584,11 @@ where
             Ok(Self(None))
         } else {
             let len = usize::try_from(len.0)?;
-            let mut res = Vec::with_capacity(len);
+            let mut res = VecBuilder::new(len);
             for _ in 0..len {
                 res.push(T::read(reader)?);
             }
-            Ok(Self(Some(res)))
+            Ok(Self(Some(res.into())))
         }
     }
 }
@@ -739,6 +745,31 @@ mod tests {
         }
     }
 
+    #[test]
+    fn test_varint_read_read_overflow() {
+        // this should overflow a 64bit bytes varint
+        let mut buf = Cursor::new(vec![0xffu8; 11]);
+
+        let err = Varint::read(&mut buf).unwrap_err();
+        assert_matches!(err, ReadError::IO(_));
+        assert_eq!(err.to_string(), "Cannot read data: Unterminated varint",);
+    }
+
+    #[test]
+    fn test_varint_read_downcast_overflow() {
+        // this should overflow when reading a 64bit varint and casting it down to 32bit
+        let mut data = vec![0xffu8; 9];
+        data.push(0x00);
+        let mut buf = Cursor::new(data);
+
+        let err = Varint::read(&mut buf).unwrap_err();
+        assert_matches!(err, ReadError::Overflow(_));
+        assert_eq!(
+            err.to_string(),
+            "Overflow converting integer: out of range integral type conversion attempted",
+        );
+    }
+
     test_roundtrip!(Varlong, test_varlong_roundtrip);
 
     #[test]
@@ -751,6 +782,15 @@ mod tests {
             let restored = Varlong::read(&mut Cursor::new(data)).unwrap();
             assert_eq!(restored.0, v);
         }
+    }
+
+    #[test]
+    fn test_varlong_read_overflow() {
+        let mut buf = Cursor::new(vec![0xffu8; 11]);
+
+        let err = Varlong::read(&mut buf).unwrap_err();
+        assert_matches!(err, ReadError::IO(_));
+        assert_eq!(err.to_string(), "Cannot read data: Unterminated varint",);
     }
 
     test_roundtrip!(UnsignedVarint, test_unsigned_varint_roundtrip);
@@ -769,6 +809,16 @@ mod tests {
 
     test_roundtrip!(String_, test_string_roundtrip);
 
+    #[test]
+    fn test_string_blowup_memory() {
+        let mut buf = Cursor::new(Vec::<u8>::new());
+        Int16(i16::MAX).write(&mut buf).unwrap();
+        buf.set_position(0);
+
+        let err = String_::read(&mut buf).unwrap_err();
+        assert_matches!(err, ReadError::IO(_));
+    }
+
     test_roundtrip!(NullableString, test_nullable_string_roundtrip);
 
     #[test]
@@ -783,6 +833,16 @@ mod tests {
             err.to_string(),
             "Malformed data: Invalid negative length for nullable string: -2",
         );
+    }
+
+    #[test]
+    fn test_nullable_string_blowup_memory() {
+        let mut buf = Cursor::new(Vec::<u8>::new());
+        Int16(i16::MAX).write(&mut buf).unwrap();
+        buf.set_position(0);
+
+        let err = NullableString::read(&mut buf).unwrap_err();
+        assert_matches!(err, ReadError::IO(_));
     }
 
     test_roundtrip!(CompactString, test_compact_string_roundtrip);
@@ -828,6 +888,16 @@ mod tests {
         );
     }
 
+    #[test]
+    fn test_nullable_bytes_blowup_memory() {
+        let mut buf = Cursor::new(Vec::<u8>::new());
+        Int32(i32::MAX).write(&mut buf).unwrap();
+        buf.set_position(0);
+
+        let err = NullableBytes::read(&mut buf).unwrap_err();
+        assert_matches!(err, ReadError::IO(_));
+    }
+
     test_roundtrip!(TaggedFields, test_tagged_fields_roundtrip);
 
     #[test]
@@ -850,6 +920,32 @@ mod tests {
     }
 
     test_roundtrip!(Array<Int32>, test_array_roundtrip);
+
+    #[test]
+    fn test_array_blowup_memory() {
+        let mut buf = Cursor::new(Vec::<u8>::new());
+        Int32(i32::MAX).write(&mut buf).unwrap();
+        buf.set_position(0);
+
+        // Use a rather large struct here to trigger OOM
+        #[derive(Debug)]
+        struct Large {
+            _inner: [u8; 1024],
+        }
+
+        impl<R> ReadType<R> for Large
+        where
+            R: Read,
+        {
+            fn read(reader: &mut R) -> Result<Self, ReadError> {
+                Int32::read(reader)?;
+                unreachable!()
+            }
+        }
+
+        let err = Array::<Large>::read(&mut buf).unwrap_err();
+        assert_matches!(err, ReadError::IO(_));
+    }
 
     test_roundtrip!(Records, test_records_roundtrip);
 

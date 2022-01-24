@@ -10,10 +10,10 @@ use rskafka::{
         api_version::{ApiVersion, ApiVersionRange},
         frame::AsyncMessageWrite,
         messages::{
-            ApiVersionsRequest, CreateTopicsRequest, ReadVersionedType, RequestBody,
-            WriteVersionedType,
+            ApiVersionsRequest, CreateTopicsRequest, FetchRequest, ListOffsetsRequest,
+            MetadataRequest, ProduceRequest, ReadVersionedType, RequestBody, WriteVersionedType,
         },
-        primitives::{CompactString, Int16, Int32, TaggedFields},
+        primitives::{CompactString, Int16, Int32, NullableString, TaggedFields},
         traits::ReadType,
     },
 };
@@ -48,6 +48,49 @@ fn driver(data: &[u8]) -> Result<(), Error> {
                 timeout_ms: Int32(0),
                 validate_only: None,
                 tagged_fields: None,
+            },
+            cursor,
+            api_key,
+            api_version,
+        ),
+        ApiKey::Fetch => send_recv(
+            FetchRequest {
+                replica_id: Int32(0),
+                max_wait_ms: Int32(0),
+                min_bytes: Int32(0),
+                max_bytes: None,
+                isolation_level: None,
+                topics: vec![],
+            },
+            cursor,
+            api_key,
+            api_version,
+        ),
+        ApiKey::ListOffsets => send_recv(
+            ListOffsetsRequest {
+                replica_id: Int32(0),
+                isolation_level: None,
+                topics: vec![],
+            },
+            cursor,
+            api_key,
+            api_version,
+        ),
+        ApiKey::Metadata => send_recv(
+            MetadataRequest {
+                topics: None,
+                allow_auto_topic_creation: None,
+            },
+            cursor,
+            api_key,
+            api_version,
+        ),
+        ApiKey::Produce => send_recv(
+            ProduceRequest {
+                transactional_id: NullableString(None),
+                acks: Int16(0),
+                timeout_ms: Int32(0),
+                topic_data: vec![],
             },
             cursor,
             api_key,
