@@ -16,7 +16,7 @@ use crc::{Crc, CRC_32_ISCSI};
 #[cfg(test)]
 use proptest::prelude::*;
 
-use crate::ExactlyOne;
+use crate::validation::ExactlyOne;
 
 use super::{
     primitives::{Array, ArrayRef, Int16, Int32, Int64, Int8, Varint, Varlong},

@@ -13,7 +13,7 @@ use crate::{
         messages::{CreateTopicRequest, CreateTopicsRequest},
         primitives::{Int16, Int32, NullableString, String_},
     },
-    ExactlyOne,
+    validation::ExactlyOne,
 };
 
 #[derive(Debug)]

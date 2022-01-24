@@ -2,7 +2,6 @@ use crate::backoff::{Backoff, BackoffConfig};
 use crate::messenger::RequestError;
 use crate::protocol::messages::{FetchRequest, FetchRequestPartition, FetchRequestTopic};
 use crate::record::RecordAndOffset;
-use crate::ExactlyOne;
 use crate::{
     client::error::{Error, Result},
     connection::{BrokerConnection, BrokerConnector},
@@ -16,6 +15,7 @@ use crate::{
         record::{Record as ProtocolRecord, *},
     },
     record::Record,
+    validation::ExactlyOne,
 };
 use std::ops::{ControlFlow, Deref, Range};
 use std::sync::Arc;
