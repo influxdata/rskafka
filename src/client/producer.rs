@@ -210,7 +210,7 @@ use crate::record::Record;
 pub mod aggregator;
 mod broadcast;
 
-#[derive(Debug, Error)]
+#[derive(Debug, Error, Clone)]
 pub enum Error {
     #[error("Aggregator error: {0}")]
     Aggregator(#[from] Arc<aggregator::Error>),
@@ -307,18 +307,12 @@ where
     status_deagg: <A as aggregator::Aggregator>::StatusDeaggregator,
 }
 
-#[derive(Debug, Clone)]
-enum AggregatedError {
-    Aggregator(Arc<aggregator::Error>),
-    Client(Arc<ClientError>),
-}
-
 #[derive(Debug)]
 struct AggregatedResult<A>
 where
     A: aggregator::Aggregator,
 {
-    inner: Result<Arc<AggregatedStatus<A>>, AggregatedError>,
+    inner: Result<Arc<AggregatedStatus<A>>, Error>,
 }
 
 impl<A> AggregatedResult<A>
@@ -336,12 +330,7 @@ where
                 Ok(status) => Ok(status),
                 Err(e) => Err(Error::Aggregator(Arc::new(e))),
             },
-            Err(AggregatedError::Aggregator(agg_error)) => {
-                Err(Error::Aggregator(Arc::clone(agg_error)))
-            }
-            Err(AggregatedError::Client(client_error)) => {
-                Err(Error::Client(Arc::clone(client_error)))
-            }
+            Err(e) => Err(e.clone()),
         }
     }
 }
@@ -453,7 +442,7 @@ where
                 let slot = std::mem::take(&mut inner.result_slot);
 
                 slot.broadcast(AggregatedResult {
-                    inner: Err(AggregatedError::Aggregator(Arc::new(e))),
+                    inner: Err(Error::Aggregator(Arc::new(e))),
                 });
                 return;
             }
@@ -475,7 +464,7 @@ where
                 };
                 Ok(Arc::new(aggregated_status))
             }
-            Err(e) => Err(AggregatedError::Client(Arc::new(e))),
+            Err(e) => Err(Error::Client(Arc::new(e))),
         };
 
         slot.broadcast(AggregatedResult { inner })
