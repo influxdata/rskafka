@@ -55,7 +55,7 @@ pub trait Aggregator: Send {
     fn try_push(&mut self, record: Self::Input) -> Result<TryPush<Self::Input, Self::Tag>, Error>;
 
     /// Flush the contents of this aggregator to Kafka
-    fn flush(&mut self) -> (Vec<Record>, Self::StatusDeaggregator);
+    fn flush(&mut self) -> Result<(Vec<Record>, Self::StatusDeaggregator), Error>;
 }
 
 /// De-aggregate status for successful `produce` operations.
@@ -114,9 +114,9 @@ impl Aggregator for RecordAggregator {
         Ok(TryPush::Aggregated(tag))
     }
 
-    fn flush(&mut self) -> (Vec<Record>, Self::StatusDeaggregator) {
+    fn flush(&mut self) -> Result<(Vec<Record>, Self::StatusDeaggregator), Error> {
         let state = std::mem::take(&mut self.state);
-        (state.records, RecordAggregatorStatusDeaggregator::default())
+        Ok((state.records, RecordAggregatorStatusDeaggregator::default()))
     }
 }
 
@@ -172,14 +172,14 @@ mod tests {
         aggregator.try_push(r1.clone()).unwrap().unwrap_input();
 
         // flush two records
-        let (records, deagg) = aggregator.flush();
+        let (records, deagg) = aggregator.flush().unwrap();
         assert_eq!(records.len(), 2);
         assert_eq!(deagg.deaggregate(&[10, 20], t1).unwrap(), 10);
         assert_eq!(deagg.deaggregate(&[10, 20], t2).unwrap(), 20);
 
         // Test early flush
         let t1 = aggregator.try_push(r1.clone()).unwrap().unwrap_tag();
-        let (records, deagg) = aggregator.flush();
+        let (records, deagg) = aggregator.flush().unwrap();
         assert_eq!(records.len(), 1);
         assert_eq!(deagg.deaggregate(&[10], t1).unwrap(), 10);
 
@@ -187,19 +187,19 @@ mod tests {
         let t1 = aggregator.try_push(r1.clone()).unwrap().unwrap_tag();
         let t2 = aggregator.try_push(r1.clone()).unwrap().unwrap_tag();
 
-        let (records, deagg) = aggregator.flush();
+        let (records, deagg) = aggregator.flush().unwrap();
         assert_eq!(records.len(), 2);
         assert_eq!(deagg.deaggregate(&[10, 20], t1).unwrap(), 10);
         assert_eq!(deagg.deaggregate(&[10, 20], t2).unwrap(), 20);
 
         // Test empty flush
-        let (records, _deagg) = aggregator.flush();
+        let (records, _deagg) = aggregator.flush().unwrap();
         assert_eq!(records.len(), 0);
 
         // Test flush to make space for larger record
         aggregator.try_push(r1.clone()).unwrap().unwrap_tag();
         aggregator.try_push(r2.clone()).unwrap().unwrap_input();
-        assert_eq!(aggregator.flush().0.len(), 1);
+        assert_eq!(aggregator.flush().unwrap().0.len(), 1);
         aggregator.try_push(r2.clone()).unwrap().unwrap_tag();
 
         // Test too large record

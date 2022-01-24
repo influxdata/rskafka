@@ -141,7 +141,7 @@
 //!         Ok(TryPush::Aggregated(()))
 //!     }
 //!
-//!     fn flush(&mut self) -> (Vec<Record>, Self::StatusDeaggregator) {
+//!     fn flush(&mut self) -> Result<(Vec<Record>, Self::StatusDeaggregator), AggError> {
 //!         let data = std::mem::take(&mut self.data);
 //!         let records = vec![
 //!             Record {
@@ -153,10 +153,10 @@
 //!                 timestamp: OffsetDateTime::now_utc(),
 //!             },
 //!         ];
-//!         (
+//!         Ok((
 //!             records,
 //!             MyStatusDeagg {}
-//!         )
+//!         ))
 //!     }
 //! }
 //!
@@ -210,10 +210,10 @@ use crate::record::Record;
 pub mod aggregator;
 mod broadcast;
 
-#[derive(Debug, Error)]
+#[derive(Debug, Error, Clone)]
 pub enum Error {
     #[error("Aggregator error: {0}")]
-    Aggregator(#[from] aggregator::Error),
+    Aggregator(Arc<dyn std::error::Error + Send + Sync>),
 
     #[error("Client error: {0}")]
     Client(#[from] Arc<ClientError>),
@@ -307,45 +307,28 @@ where
     status_deagg: <A as aggregator::Aggregator>::StatusDeaggregator,
 }
 
-#[derive(Debug)]
-struct AggregatedResult<A>
+type AggregatedResult<A> = Result<Arc<AggregatedStatus<A>>, Error>;
+
+fn extract<A>(
+    result: &AggregatedResult<A>,
+    tag: A::Tag,
+) -> Result<<A as aggregator::AggregatorStatus>::Status, Error>
 where
     A: aggregator::Aggregator,
 {
-    inner: Result<Arc<AggregatedStatus<A>>, Arc<ClientError>>,
-}
+    use self::aggregator::StatusDeaggregator;
 
-impl<A> AggregatedResult<A>
-where
-    A: aggregator::Aggregator,
-{
-    fn extract(&self, tag: A::Tag) -> Result<<A as aggregator::AggregatorStatus>::Status, Error> {
-        use self::aggregator::StatusDeaggregator;
-
-        match &self.inner {
-            Ok(status) => match status
-                .status_deagg
-                .deaggregate(&status.aggregated_status, tag)
-            {
-                Ok(status) => Ok(status),
-                Err(e) => Err(Error::Aggregator(e)),
-            },
-            Err(client_error) => Err(Error::Client(Arc::clone(client_error))),
-        }
+    match result {
+        Ok(status) => match status
+            .status_deagg
+            .deaggregate(&status.aggregated_status, tag)
+        {
+            Ok(status) => Ok(status),
+            Err(e) => Err(Error::Aggregator(e.into())),
+        },
+        Err(e) => Err(e.clone()),
     }
 }
-
-impl<A> Clone for AggregatedResult<A>
-where
-    A: aggregator::Aggregator,
-{
-    fn clone(&self) -> Self {
-        Self {
-            inner: self.inner.clone(),
-        }
-    }
-}
-
 #[derive(Debug)]
 struct ProducerInner<A>
 where
@@ -378,13 +361,21 @@ where
             // Try to add the record to the aggregator
             let mut inner = self.inner.lock().await;
 
-            let tag = match inner.aggregator.try_push(data)? {
+            let tag = match inner
+                .aggregator
+                .try_push(data)
+                .map_err(|e| Error::Aggregator(e.into()))?
+            {
                 TryPush::Aggregated(tag) => tag,
                 TryPush::NoCapacity(data) => {
                     debug!("Insufficient capacity in aggregator - flushing");
 
                     Self::flush(&mut inner, self.client.as_ref()).await;
-                    match inner.aggregator.try_push(data)? {
+                    match inner
+                        .aggregator
+                        .try_push(data)
+                        .map_err(|e| Error::Aggregator(e.into()))?
+                    {
                         TryPush::Aggregated(tag) => tag,
                         TryPush::NoCapacity(_) => {
                             error!("Record too large for aggregator");
@@ -403,7 +394,7 @@ where
         pin_mut!(result_slot);
 
         futures::select! {
-            r = result_slot => return r.extract(tag),
+            r = result_slot => return extract(&r, tag),
             _ = linger => {}
         }
 
@@ -416,7 +407,7 @@ where
         // - the linger expired "simultaneously" with the publish
         // - the linger expired but another thread triggered the flush
         if let Some(r) = result_slot.peek() {
-            return r.extract(tag);
+            return extract(r, tag);
         }
 
         debug!("Linger expired - flushing");
@@ -424,10 +415,7 @@ where
         // Flush data
         Self::flush(&mut inner, self.client.as_ref()).await;
 
-        result_slot
-            .now_or_never()
-            .expect("just flushed")
-            .extract(tag)
+        extract(&result_slot.now_or_never().expect("just flushed"), tag)
     }
 
     /// Flushes out the data from the aggregator, publishes the result to the result slot,
@@ -435,7 +423,16 @@ where
     async fn flush(inner: &mut ProducerInner<A>, client: &dyn ProducerClient) {
         trace!("Flushing batch producer");
 
-        let (output, status_deagg) = inner.aggregator.flush();
+        let (output, status_deagg) = match inner.aggregator.flush() {
+            Ok(x) => x,
+            Err(e) => {
+                // Reset result slot
+                let slot = std::mem::take(&mut inner.result_slot);
+
+                slot.broadcast(Err(Error::Aggregator(e.into())));
+                return;
+            }
+        };
         if output.is_empty() {
             return;
         }
@@ -453,15 +450,16 @@ where
                 };
                 Ok(Arc::new(aggregated_status))
             }
-            Err(e) => Err(Arc::new(e)),
+            Err(e) => Err(Error::Client(Arc::new(e))),
         };
 
-        slot.broadcast(AggregatedResult { inner })
+        slot.broadcast(inner)
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use super::aggregator::{Aggregator, RecordAggregatorStatusDeaggregator, StatusDeaggregator};
     use super::*;
     use crate::{
         client::producer::aggregator::RecordAggregator, protocol::error::Error as ProtocolError,
@@ -561,7 +559,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_producer_error() {
+    async fn test_producer_client_error() {
         let record = record();
         let linger = Duration::from_millis(5);
         let client = Arc::new(MockClient {
@@ -581,5 +579,165 @@ mod tests {
 
         futures.next().await.unwrap().unwrap_err();
         futures.next().await.unwrap().unwrap_err();
+    }
+
+    #[tokio::test]
+    async fn test_producer_aggregator_error_push() {
+        let record = record();
+        let linger = Duration::from_millis(5);
+        let client = Arc::new(MockClient {
+            error: None,
+            delay: Duration::from_millis(1),
+            batch_sizes: Default::default(),
+        });
+
+        let aggregator = MockAggregator {
+            inner: RecordAggregator::new(record.approximate_size() * 2),
+            push_errors: vec!["test".to_owned().into()],
+            flush_errors: vec![],
+            deagg_errors: vec![],
+        };
+        let producer = BatchProducerBuilder::new_with_client(Arc::<MockClient>::clone(&client))
+            .with_linger(linger)
+            .build(aggregator);
+
+        let mut futures = FuturesUnordered::new();
+        futures.push(producer.produce(record.clone()));
+        futures.push(producer.produce(record.clone()));
+        futures.push(producer.produce(record.clone()));
+
+        futures.next().await.unwrap().unwrap_err();
+        futures.next().await.unwrap().unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_producer_aggregator_error_flush() {
+        let record = record();
+        let linger = Duration::from_millis(5);
+        let client = Arc::new(MockClient {
+            error: None,
+            delay: Duration::from_millis(1),
+            batch_sizes: Default::default(),
+        });
+
+        let aggregator = MockAggregator {
+            inner: RecordAggregator::new(record.approximate_size() * 2),
+            push_errors: vec![],
+            flush_errors: vec!["test".to_owned().into()],
+            deagg_errors: vec![],
+        };
+        let producer = BatchProducerBuilder::new_with_client(Arc::<MockClient>::clone(&client))
+            .with_linger(linger)
+            .build(aggregator);
+
+        let mut futures = FuturesUnordered::new();
+        futures.push(producer.produce(record.clone()));
+        futures.push(producer.produce(record.clone()));
+
+        futures.next().await.unwrap().unwrap_err();
+        futures.next().await.unwrap().unwrap_err();
+    }
+
+    #[tokio::test]
+    async fn test_producer_aggregator_error_deagg() {
+        let record = record();
+        let linger = Duration::from_millis(5);
+        let client = Arc::new(MockClient {
+            error: None,
+            delay: Duration::from_millis(1),
+            batch_sizes: Default::default(),
+        });
+
+        let aggregator = MockAggregator {
+            inner: RecordAggregator::new(record.approximate_size() * 2),
+            push_errors: vec![],
+            flush_errors: vec![],
+            deagg_errors: vec![vec![Some("test".to_owned().into()), None]],
+        };
+        let producer = BatchProducerBuilder::new_with_client(Arc::<MockClient>::clone(&client))
+            .with_linger(linger)
+            .build(aggregator);
+
+        let mut futures = FuturesUnordered::new();
+        futures.push(producer.produce(record.clone()));
+        futures.push(producer.produce(record.clone()));
+
+        futures.next().await.unwrap().unwrap_err();
+        futures.next().await.unwrap().unwrap();
+    }
+
+    #[derive(Debug)]
+    struct MockAggregator {
+        inner: RecordAggregator,
+        push_errors: Vec<aggregator::Error>,
+        flush_errors: Vec<aggregator::Error>,
+        deagg_errors: Vec<Vec<Option<aggregator::Error>>>,
+    }
+
+    impl Aggregator for MockAggregator {
+        type Input = Record;
+
+        type Tag = usize;
+
+        type StatusDeaggregator = MockDeaggregator;
+
+        fn try_push(
+            &mut self,
+            record: Self::Input,
+        ) -> Result<TryPush<Self::Input, Self::Tag>, aggregator::Error> {
+            if !self.push_errors.is_empty() {
+                return Err(self.push_errors.remove(0));
+            }
+
+            Ok(self.inner.try_push(record).unwrap())
+        }
+
+        fn flush(&mut self) -> Result<(Vec<Record>, Self::StatusDeaggregator), aggregator::Error> {
+            if !self.flush_errors.is_empty() {
+                return Err(self.flush_errors.remove(0));
+            }
+
+            let deagg_errors = if self.deagg_errors.is_empty() {
+                vec![]
+            } else {
+                self.deagg_errors.remove(0)
+            };
+            let (records, deagg) = self.inner.flush().unwrap();
+
+            Ok((
+                records,
+                MockDeaggregator {
+                    inner: deagg,
+                    errors: std::sync::Mutex::new(deagg_errors),
+                },
+            ))
+        }
+    }
+
+    #[derive(Debug)]
+    struct MockDeaggregator {
+        inner: RecordAggregatorStatusDeaggregator,
+        errors: std::sync::Mutex<Vec<Option<aggregator::Error>>>,
+    }
+
+    impl StatusDeaggregator for MockDeaggregator {
+        type Status = i64;
+
+        type Tag = usize;
+
+        fn deaggregate(
+            &self,
+            input: &[i64],
+            tag: Self::Tag,
+        ) -> Result<Self::Status, aggregator::Error> {
+            let mut errors = self.errors.lock().unwrap();
+            if let Some(e) = errors.get_mut(tag) {
+                if let Some(e) = std::mem::take(e) {
+                    return Err(e);
+                }
+            }
+
+            Ok(self.inner.deaggregate(input, tag).unwrap())
+        }
     }
 }
