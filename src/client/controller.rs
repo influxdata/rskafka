@@ -165,7 +165,7 @@ where
                     return ControlFlow::Break(Err(error));
                 }
             }
-            ControlFlow::Continue(request_name)
+            ControlFlow::Continue(error)
         })
         .await
         .map_err(Error::RetryFailed)?

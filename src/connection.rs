@@ -336,7 +336,12 @@ where
 
                 return ControlFlow::Break(connection);
             }
-            ControlFlow::Continue("Failed to connect to any broker, backing off")
+
+            let err = Box::<dyn std::error::Error + Send + Sync>::from(
+                "Failed to connect to any broker, backing off".to_string(),
+            );
+            let err: Arc<dyn std::error::Error + Send + Sync> = err.into();
+            ControlFlow::Continue(err)
         })
         .await
         .map_err(Error::RetryFailed)

@@ -92,15 +92,15 @@ impl Backoff {
     // TODO: Currently, this can't fail, but there should be a global maximum timeout that
     // causes an error if the total time retrying exceeds that amount.
     // See https://github.com/influxdata/rskafka/issues/65
-    pub async fn retry_with_backoff<F, F1, B, C>(
+    pub async fn retry_with_backoff<F, F1, B, E>(
         &mut self,
         request_name: &str,
         do_stuff: F,
     ) -> BackoffResult<B>
     where
         F: (Fn() -> F1) + Send + Sync,
-        F1: std::future::Future<Output = ControlFlow<B, C>> + Send,
-        C: core::fmt::Display + Send,
+        F1: std::future::Future<Output = ControlFlow<B, E>> + Send,
+        E: std::error::Error + Send,
     {
         loop {
             let e = match do_stuff().await {
