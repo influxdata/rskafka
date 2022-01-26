@@ -370,7 +370,7 @@ where
                 TryPush::NoCapacity(data) => {
                     debug!("Insufficient capacity in aggregator - flushing");
 
-                    Self::flush(&mut inner, self.client.as_ref()).await;
+                    Self::flush_impl(&mut inner, self.client.as_ref()).await;
                     match inner
                         .aggregator
                         .try_push(data)
@@ -413,14 +413,21 @@ where
         debug!("Linger expired - flushing");
 
         // Flush data
-        Self::flush(&mut inner, self.client.as_ref()).await;
+        Self::flush_impl(&mut inner, self.client.as_ref()).await;
 
         extract(&result_slot.now_or_never().expect("just flushed"), tag)
     }
 
+    /// Flushed out data from aggregator.
+    pub async fn flush(&self) {
+        let mut inner = self.inner.lock().await;
+        debug!("Manual flush");
+        Self::flush_impl(&mut inner, self.client.as_ref()).await;
+    }
+
     /// Flushes out the data from the aggregator, publishes the result to the result slot,
     /// and creates a fresh result slot for future writes to use
-    async fn flush(inner: &mut ProducerInner<A>, client: &dyn ProducerClient) {
+    async fn flush_impl(inner: &mut ProducerInner<A>, client: &dyn ProducerClient) {
         trace!("Flushing batch producer");
 
         let (output, status_deagg) = match inner.aggregator.flush() {
@@ -556,6 +563,47 @@ mod tests {
             assert_ok(tokio::time::timeout(linger * 2, futures.next()).await, 2);
             assert_eq!(client.batch_sizes.lock().as_slice(), &[2, 1]);
         }
+    }
+
+    #[tokio::test]
+    async fn test_manual_flush() {
+        let record = record();
+        let linger = Duration::from_secs(3600);
+
+        let client = Arc::new(MockClient {
+            error: None,
+            delay: Duration::from_millis(1),
+            batch_sizes: Default::default(),
+        });
+
+        let aggregator = RecordAggregator::new(usize::MAX);
+        let producer = BatchProducerBuilder::new_with_client(Arc::<MockClient>::clone(&client))
+            .with_linger(linger)
+            .build(aggregator);
+
+        let a = producer.produce(record.clone()).fuse();
+        pin_mut!(a);
+
+        let b = producer.produce(record).fuse();
+        pin_mut!(b);
+
+        futures::select! {
+            _ = a => panic!("a finished!"),
+            _ = b => panic!("b finished!"),
+            _ = tokio::time::sleep(Duration::from_millis(100)).fuse() => {}
+        };
+
+        producer.flush().await;
+
+        let offset_a = tokio::time::timeout(Duration::from_millis(10), a)
+            .await
+            .unwrap()
+            .unwrap();
+        let offset_b = tokio::time::timeout(Duration::from_millis(10), b)
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(((offset_a == 0) && (offset_b == 1)) || ((offset_a == 1) && (offset_b == 0)));
     }
 
     #[tokio::test]
