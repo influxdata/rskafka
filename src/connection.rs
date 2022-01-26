@@ -6,7 +6,7 @@ use thiserror::Error;
 use tokio::{io::BufStream, sync::Mutex};
 use tracing::{debug, error, info, warn};
 
-use crate::backoff::{Backoff, BackoffConfig};
+use crate::backoff::{Backoff, BackoffConfig, BackoffError};
 use crate::connection::topology::{Broker, BrokerTopology};
 use crate::connection::transport::Transport;
 use crate::messenger::{Messenger, RequestError};
@@ -20,12 +20,12 @@ mod transport;
 
 /// A connection to a broker
 pub type BrokerConnection = Arc<MessengerTransport>;
-type MessengerTransport = Messenger<BufStream<transport::Transport>>;
+pub type MessengerTransport = Messenger<BufStream<transport::Transport>>;
 
 #[derive(Debug, Error)]
 pub enum Error {
     #[error("error getting cluster metadata: {0}")]
-    Metadata(RequestError),
+    Metadata(#[from] RequestError),
 
     #[error("error connecting to broker \"{broker}\": {error}")]
     Transport {
@@ -35,6 +35,9 @@ pub enum Error {
 
     #[error("cannot sync versions: {0}")]
     SyncVersions(#[from] crate::messenger::SyncVersionsError),
+
+    #[error("all retries failed: {0}")]
+    RetryFailed(BackoffError),
 }
 
 pub type Result<T, E = Error> = std::result::Result<T, E>;
@@ -262,19 +265,22 @@ impl RequestHandler for MessengerTransport {
 }
 
 #[async_trait]
-trait ArbitraryBrokerCache: Send + Sync {
-    type R: RequestHandler + Send + Sync;
+pub trait BrokerCache: Send + Sync {
+    type R: Send + Sync;
+    type E: std::error::Error + Send + Sync;
 
-    async fn get(&self) -> Result<Arc<Self::R>>;
+    async fn get(&self) -> Result<Arc<Self::R>, Self::E>;
 
     async fn invalidate(&self);
 }
 
+/// BrokerConnector caches an arbitrary broker that can successfully connect.
 #[async_trait]
-impl ArbitraryBrokerCache for &BrokerConnector {
+impl BrokerCache for &BrokerConnector {
     type R = MessengerTransport;
+    type E = Error;
 
-    async fn get(&self) -> Result<Arc<Self::R>> {
+    async fn get(&self) -> Result<Arc<Self::R>, Self::E> {
         let mut current_broker = self.cached_arbitrary_broker.lock().await;
         if let Some(broker) = &*current_broker {
             return Ok(Arc::clone(broker));
@@ -287,7 +293,7 @@ impl ArbitraryBrokerCache for &BrokerConnector {
             self.socks5_proxy.clone(),
             self.max_message_size,
         )
-        .await;
+        .await?;
 
         *current_broker = Some(Arc::clone(&connection));
         Ok(connection)
@@ -305,7 +311,7 @@ async fn connect_to_a_broker_with_retry<B>(
     tls_config: TlsConfig,
     socks5_proxy: Option<String>,
     max_message_size: usize,
-) -> Arc<B::R>
+) -> Result<Arc<B::R>>
 where
     B: ConnectionHandler + Send + Sync,
 {
@@ -333,6 +339,7 @@ where
             ControlFlow::Continue("Failed to connect to any broker, backing off")
         })
         .await
+        .map_err(Error::RetryFailed)
 }
 
 async fn metadata_request_with_retry<A>(
@@ -342,7 +349,9 @@ async fn metadata_request_with_retry<A>(
     arbitrary_broker_cache: A,
 ) -> Result<MetadataResponse>
 where
-    A: ArbitraryBrokerCache,
+    A: BrokerCache,
+    A::R: RequestHandler,
+    Error: From<A::E>,
 {
     backoff
         .retry_with_backoff("metadata", || async {
@@ -351,7 +360,7 @@ where
                 Some(b) => Arc::clone(b),
                 None => match arbitrary_broker_cache.get().await {
                     Ok(inner) => inner,
-                    Err(e) => return ControlFlow::Break(Err(e)),
+                    Err(e) => return ControlFlow::Break(Err(e.into())),
                 },
             };
 
@@ -368,11 +377,12 @@ where
                         e=%error,
                         "metadata request encountered fatal error",
                     );
-                    ControlFlow::Break(Err(Error::Metadata(error)))
+                    ControlFlow::Break(Err(error.into()))
                 }
             }
         })
         .await
+        .map_err(Error::RetryFailed)?
 }
 
 #[cfg(test)]
@@ -413,8 +423,9 @@ mod tests {
     }
 
     #[async_trait]
-    impl ArbitraryBrokerCache for FakeBrokerCache {
+    impl BrokerCache for FakeBrokerCache {
         type R = FakeBroker;
+        type E = Error;
 
         async fn get(&self) -> Result<Arc<Self::R>> {
             (self.get)()
@@ -634,7 +645,8 @@ mod tests {
             Default::default(),
             Default::default(),
         )
-        .await;
+        .await
+        .unwrap();
 
         assert_eq!(*conn, FakeConn);
     }

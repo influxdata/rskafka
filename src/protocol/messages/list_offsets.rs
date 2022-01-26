@@ -9,7 +9,7 @@ use crate::protocol::{
     api_key::ApiKey,
     api_version::{ApiVersion, ApiVersionRange},
     error::Error as ApiError,
-    messages::{read_versioned_array, write_versioned_array},
+    messages::{read_versioned_array, write_versioned_array, IsolationLevel},
     primitives::{Array, Int16, Int32, Int64, Int8, String_},
     traits::{ReadType, WriteType},
 };
@@ -112,12 +112,12 @@ pub struct ListOffsetsRequest {
     /// enables the inclusion of the list of aborted transactions in the result, which allows consumers to discard
     /// `ABORTED` transactional records.
     ///
-    /// As per [KIP-98] the default is default is `READ_UNCOMMITTED`.
+    /// As per [KIP-98] the default is `READ_UNCOMMITTED`.
     ///
     /// Added in version 2.
     ///
     /// [KIP-98]: https://cwiki.apache.org/confluence/display/KAFKA/KIP-98+-+Exactly+Once+Delivery+and+Transactional+Messaging
-    pub isolation_level: Option<Int8>,
+    pub isolation_level: Option<IsolationLevel>,
 
     /// Each topic in the request.
     pub topics: Vec<ListOffsetsRequestTopic>,
@@ -138,8 +138,9 @@ where
         self.replica_id.write(writer)?;
 
         if v >= 2 {
-            // The default is default is `READ_UNCOMMITTED`.
-            self.isolation_level.unwrap_or(Int8(0)).write(writer)?;
+            // The default is `READ_UNCOMMITTED`.
+            let level: Int8 = self.isolation_level.unwrap_or_default().into();
+            level.write(writer)?;
         }
 
         write_versioned_array(writer, version, Some(&self.topics))?;

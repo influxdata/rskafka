@@ -499,7 +499,9 @@ mod tests {
 
     use crate::protocol::{
         error::Error as ApiError,
-        messages::{ApiVersionsResponse, ApiVersionsResponseApiKey, ListOffsetsRequest},
+        messages::{
+            ApiVersionsResponse, ApiVersionsResponseApiKey, ListOffsetsRequest, NORMAL_CONSUMER,
+        },
         traits::WriteType,
     };
 
@@ -838,7 +840,7 @@ mod tests {
 
         let err = messenger
             .request(ListOffsetsRequest {
-                replica_id: Int32(-1),
+                replica_id: NORMAL_CONSUMER,
                 isolation_level: None,
                 topics: vec![],
             })
@@ -860,7 +862,7 @@ mod tests {
 
         let err = messenger
             .request(ListOffsetsRequest {
-                replica_id: Int32(-1),
+                replica_id: NORMAL_CONSUMER,
                 isolation_level: None,
                 topics: vec![],
             })
@@ -871,7 +873,7 @@ mod tests {
         // follow-up message is broken as well
         let err = messenger
             .request(ListOffsetsRequest {
-                replica_id: Int32(-1),
+                replica_id: NORMAL_CONSUMER,
                 isolation_level: None,
                 topics: vec![],
             })

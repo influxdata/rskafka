@@ -15,6 +15,9 @@ pub enum Error {
 
     #[error("Server error {0:?} with message \"{1}\"")]
     ServerError(ProtocolError, String),
+
+    #[error("All retries failed: {0}")]
+    RetryFailed(#[from] crate::backoff::BackoffError),
 }
 
 impl Error {

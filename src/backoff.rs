@@ -23,6 +23,12 @@ impl Default for BackoffConfig {
     }
 }
 
+// TODO: Currently, retrying can't fail, but there should be a global maximum timeout that
+// causes an error if the total time retrying exceeds that amount.
+// See https://github.com/influxdata/rskafka/issues/65
+pub type BackoffError = std::convert::Infallible;
+pub type BackoffResult<T> = Result<T, BackoffError>;
+
 /// [`Backoff`] can be created from a [`BackoffConfig`]
 ///
 /// Consecutive calls to [`Backoff::next`] will return the next backoff interval
@@ -83,7 +89,14 @@ impl Backoff {
     }
 
     /// Perform an async operation that retries with a backoff
-    pub async fn retry_with_backoff<F, F1, B, C>(&mut self, request_name: &str, do_stuff: F) -> B
+    // TODO: Currently, this can't fail, but there should be a global maximum timeout that
+    // causes an error if the total time retrying exceeds that amount.
+    // See https://github.com/influxdata/rskafka/issues/65
+    pub async fn retry_with_backoff<F, F1, B, C>(
+        &mut self,
+        request_name: &str,
+        do_stuff: F,
+    ) -> BackoffResult<B>
     where
         F: (Fn() -> F1) + Send + Sync,
         F1: std::future::Future<Output = ControlFlow<B, C>> + Send,
@@ -91,7 +104,7 @@ impl Backoff {
     {
         loop {
             let e = match do_stuff().await {
-                ControlFlow::Break(r) => break r,
+                ControlFlow::Break(r) => break Ok(r),
                 ControlFlow::Continue(e) => e,
             };
 
