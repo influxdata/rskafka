@@ -63,5 +63,8 @@ members = [
     "fuzz",
 ]
 
+[profile.bench]
+debug = true
+
 [package.metadata.docs.rs]
 all-features = true

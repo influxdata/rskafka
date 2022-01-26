@@ -211,7 +211,7 @@ If you find a benchmark that is too slow, you can may want to profile it. Get [c
 for the `parallel/rskafka` benchmark):
 
 ```console
-$ TEST_INTEGRATION=1 KAFKA_CONNECT=localhost:9093 cargo with 'perf record {bin}' -- \
+$ TEST_INTEGRATION=1 KAFKA_CONNECT=localhost:9093 cargo with 'perf record --call-graph dwarf -- {bin}' -- \
     bench --all-features --bench write_throughput -- \
     --bench --noplot parallel/rskafka
 ```
