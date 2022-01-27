@@ -443,6 +443,10 @@ where
 
         let r = if output.is_empty() {
             debug!("No data aggregated, skipping client request");
+
+            // A custom aggregator might have produced no records, but the the calls to `.produce` are still waiting for
+            // their slot values, so we need to provide them some result, otherwise we might flush twice or panic with
+            // "just flushed" because no data is available right after flushing.
             Ok(vec![])
         } else {
             client.produce(output).await
