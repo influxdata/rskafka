@@ -440,11 +440,17 @@ where
                 return;
             }
         };
-        if output.is_empty() {
-            return;
-        }
 
-        let r = client.produce(output).await;
+        let r = if output.is_empty() {
+            debug!("No data aggregated, skipping client request");
+
+            // A custom aggregator might have produced no records, but the the calls to `.produce` are still waiting for
+            // their slot values, so we need to provide them some result, otherwise we might flush twice or panic with
+            // "just flushed" because no data is available right after flushing.
+            Ok(vec![])
+        } else {
+            client.produce(output).await
+        };
 
         // Reset result slot
         let slot = std::mem::take(&mut inner.result_slot);
@@ -604,6 +610,70 @@ mod tests {
             .unwrap()
             .unwrap();
         assert!(((offset_a == 0) && (offset_b == 1)) || ((offset_a == 1) && (offset_b == 0)));
+    }
+
+    #[tokio::test]
+    async fn test_producer_empty_aggregator_with_linger() {
+        // this setting used to result in a panic
+        let record = record();
+        let linger = Duration::from_millis(2);
+
+        let client = Arc::new(MockClient {
+            error: None,
+            delay: Duration::from_millis(0),
+            batch_sizes: Default::default(),
+        });
+
+        struct EmptyAgg {}
+
+        impl Aggregator for EmptyAgg {
+            type Input = Record;
+
+            type Tag = ();
+
+            type StatusDeaggregator = EmptyDeagg;
+
+            fn try_push(
+                &mut self,
+                _record: Self::Input,
+            ) -> Result<TryPush<Self::Input, Self::Tag>, aggregator::Error> {
+                Ok(TryPush::Aggregated(()))
+            }
+
+            fn flush(
+                &mut self,
+            ) -> Result<(Vec<Record>, Self::StatusDeaggregator), aggregator::Error> {
+                Ok((vec![], EmptyDeagg {}))
+            }
+        }
+
+        #[derive(Debug)]
+        struct EmptyDeagg {}
+
+        impl StatusDeaggregator for EmptyDeagg {
+            type Status = ();
+
+            type Tag = ();
+
+            fn deaggregate(
+                &self,
+                _input: &[i64],
+                _tag: Self::Tag,
+            ) -> Result<Self::Status, aggregator::Error> {
+                Ok(())
+            }
+        }
+
+        let producer = BatchProducerBuilder::new_with_client(Arc::<MockClient>::clone(&client))
+            .with_linger(linger)
+            .build(EmptyAgg {});
+
+        let mut futures: FuturesUnordered<_> = (0..10)
+            .map(|_| async {
+                producer.produce(record.clone()).await.unwrap();
+            })
+            .collect();
+        while futures.next().await.is_some() {}
     }
 
     #[tokio::test]
