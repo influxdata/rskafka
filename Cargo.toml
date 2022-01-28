@@ -3,6 +3,17 @@ name = "rskafka"
 version = "0.1.0"
 edition = "2021"
 license = "MIT/Apache-2.0"
+readme = "README.md"
+keywords = [
+    "api",
+    "async",
+    "kafka",
+    "protocol",
+]
+categories = ["api-bindings"]
+description = " A minimal Rust client for Apache Kafka "
+repository = "https://github.com/influxdata/rskafka/"
+documentation = "https://docs.rs/rskafka/"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
