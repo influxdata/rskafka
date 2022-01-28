@@ -1,5 +1,10 @@
 # RSKafka
 
+[![CircleCI](https://circleci.com/gh/influxdata/rskafka/tree/main.svg?style=shield&circle-token=531ba1f38035a10da6dbf7cc71e6f55eff496c70)](https://circleci.com/gh/influxdata/rskafka/tree/main)
+[![Crates.io](https://img.shields.io/crates/v/rskafka)](https://crates.io/crates/rskafka)
+[![Documentation](https://img.shields.io/docsrs/rskafka)](https://docs.rs/crate/rskafka/latest)
+[![License](https://img.shields.io/crates/l/rskafka)](#license)
+
 This crate aims to be a minimal Kafka implementation for simple workloads that wish to use Kafka as a distributed
 write-ahead log.
 
