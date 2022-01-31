@@ -6,6 +6,7 @@ use tokio::time::timeout;
 
 use rskafka::client::{
     consumer::{StreamConsumer, StreamConsumerBuilder},
+    partition::Compression,
     ClientBuilder,
 };
 use test_helpers::{maybe_start_logging, random_topic_name, record};
@@ -30,7 +31,7 @@ async fn test_stream_consumer() {
 
     let partition_client = Arc::new(client.partition_client(&topic, 0).await.unwrap());
     partition_client
-        .produce(vec![record.clone()])
+        .produce(vec![record.clone()], Compression::NoCompression)
         .await
         .unwrap();
 
@@ -52,7 +53,10 @@ async fn test_stream_consumer() {
         .expect_err("timeout");
 
     partition_client
-        .produce(vec![record.clone(), record.clone()])
+        .produce(
+            vec![record.clone(), record.clone()],
+            Compression::NoCompression,
+        )
         .await
         .unwrap();
 

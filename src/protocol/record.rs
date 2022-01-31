@@ -24,10 +24,8 @@ use std::io::{Cursor, Read, Write};
 #[cfg(test)]
 use proptest::prelude::*;
 
-use crate::validation::ExactlyOne;
-
 use super::{
-    primitives::{Array, ArrayRef, Int16, Int32, Int64, Int8, Varint, Varlong},
+    primitives::{Int16, Int32, Int64, Int8, Varint, Varlong},
     traits::{ReadError, ReadType, WriteError, WriteType},
     vec_builder::VecBuilder,
 };
@@ -488,6 +486,34 @@ pub struct RecordBatchBody {
     pub timestamp_type: RecordBatchTimestampType,
 }
 
+impl RecordBatchBody {
+    fn read_records<R>(
+        reader: &mut R,
+        is_control: bool,
+        n_records: usize,
+    ) -> Result<ControlBatchOrRecords, ReadError>
+    where
+        R: Read,
+    {
+        if is_control {
+            if n_records != 1 {
+                return Err(ReadError::Malformed(
+                    format!("Expected 1 control record but got {}", n_records).into(),
+                ));
+            }
+
+            let record = ControlBatchRecord::read(reader)?;
+            Ok(ControlBatchOrRecords::ControlBatch(record))
+        } else {
+            let mut records = VecBuilder::new(n_records);
+            for _ in 0..n_records {
+                records.push(Record::read(reader)?);
+            }
+            Ok(ControlBatchOrRecords::Records(records.into()))
+        }
+    }
+}
+
 impl<R> ReadType<R> for RecordBatchBody
 where
     R: Read,
@@ -534,24 +560,25 @@ where
         let base_sequence = Int32::read(reader)?.0;
 
         // records
-        if !matches!(compression, RecordBatchCompression::NoCompression) {
-            // TODO: implement compression
-            return Err(ReadError::Malformed(
-                format!("Unimplemented compression: {:?}", compression).into(),
-            ));
-        }
-        let records = if is_control {
-            let records = Array::<ControlBatchRecord>::read(reader)?
-                .0
-                .unwrap_or_default();
-            let record = records.exactly_one().map_err(|len| {
-                ReadError::Malformed(format!("Expected 1 control record but got {}", len).into())
-            })?;
-
-            ControlBatchOrRecords::ControlBatch(record)
-        } else {
-            let records = Array::<Record>::read(reader)?.0.unwrap_or_default();
-            ControlBatchOrRecords::Records(records)
+        let n_records = match Int32::read(reader)?.0 {
+            -1 => 0,
+            n => usize::try_from(n)?,
+        };
+        let records = match compression {
+            RecordBatchCompression::NoCompression => {
+                Self::read_records(reader, is_control, n_records)?
+            }
+            #[cfg(feature = "compression-gzip")]
+            RecordBatchCompression::Gzip => {
+                use flate2::read::GzDecoder;
+                Self::read_records(&mut GzDecoder::new(reader), is_control, n_records)?
+            }
+            #[allow(unreachable_patterns)]
+            _ => {
+                return Err(ReadError::Malformed(
+                    format!("Unimplemented compression: {:?}", compression).into(),
+                ));
+            }
         };
 
         Ok(Self {
@@ -607,6 +634,23 @@ struct RecordBatchBodyRef<'a> {
     pub timestamp_type: RecordBatchTimestampType,
 }
 
+impl<'a> RecordBatchBodyRef<'a> {
+    fn write_records<W>(writer: &mut W, records: &ControlBatchOrRecords) -> Result<(), WriteError>
+    where
+        W: Write,
+    {
+        match records {
+            ControlBatchOrRecords::ControlBatch(control_batch) => control_batch.write(writer),
+            ControlBatchOrRecords::Records(records) => {
+                for record in records {
+                    record.write(writer)?;
+                }
+                Ok(())
+            }
+        }
+    }
+}
+
 impl<'a, W> WriteType<W> for RecordBatchBodyRef<'a>
 where
     W: Write,
@@ -653,19 +697,28 @@ where
         Int32(self.base_sequence).write(writer)?;
 
         // records
-        if !matches!(self.compression, RecordBatchCompression::NoCompression) {
-            // TODO: implement compression
-            return Err(WriteError::Malformed(
-                format!("Unimplemented compression: {:?}", self.compression).into(),
-            ));
-        }
-        match &self.records {
-            ControlBatchOrRecords::ControlBatch(control_batch) => {
-                let records = vec![*control_batch];
-                Array::<ControlBatchRecord>(Some(records)).write(writer)?;
+        let n_records = match &self.records {
+            ControlBatchOrRecords::ControlBatch(_) => 1,
+            ControlBatchOrRecords::Records(records) => records.len(),
+        };
+        Int32(i32::try_from(n_records)?).write(writer)?;
+        match self.compression {
+            RecordBatchCompression::NoCompression => {
+                Self::write_records(writer, self.records)?;
             }
-            ControlBatchOrRecords::Records(records) => {
-                ArrayRef::<Record>(Some(records)).write(writer)?;
+            #[cfg(feature = "compression-gzip")]
+            RecordBatchCompression::Gzip => {
+                use flate2::{write::GzEncoder, Compression};
+                Self::write_records(
+                    &mut GzEncoder::new(writer, Compression::default()),
+                    self.records,
+                )?;
+            }
+            #[allow(unreachable_patterns)]
+            _ => {
+                return Err(WriteError::Malformed(
+                    format!("Unimplemented compression: {:?}", self.compression).into(),
+                ));
             }
         }
 
@@ -724,7 +777,7 @@ mod tests {
     test_roundtrip!(RecordBatch, test_record_batch_roundtrip);
 
     #[test]
-    fn test_decode_fixture() {
+    fn test_decode_fixture_nocompression() {
         // This data was obtained by watching rdkafka.
         let data = [
             b"\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x4b\x00\x00\x00\x00".to_vec(),
@@ -765,5 +818,55 @@ mod tests {
         let mut data2 = vec![];
         actual.write(&mut data2).unwrap();
         assert_eq!(data, data2);
+    }
+
+    #[cfg(feature = "compression-gzip")]
+    #[test]
+    fn test_decode_fixture_gzip() {
+        // This data was obtained by watching rdkafka.
+        let data = [
+            b"\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x64\x00\x00\x00\x00".to_vec(),
+            b"\x02\xba\x41\x46\x65\x00\x01\x00\x00\x00\x00\x00\x00\x01\x7e\x90".to_vec(),
+            b"\xb3\x34\x67\x00\x00\x01\x7e\x90\xb3\x34\x67\xff\xff\xff\xff\xff".to_vec(),
+            b"\xff\xff\xff\xff\xff\xff\xff\xff\xff\x00\x00\x00\x01\x1f\x8b\x08".to_vec(),
+            b"\x00\x00\x00\x00\x00\x00\x03\xfb\xc3\xc8\xc0\xc0\x70\x82\xb1\x82".to_vec(),
+            b"\x0e\x40\x2c\x23\x35\x27\x27\x5f\x21\x3b\x31\x2d\x3b\x91\x89\x2d".to_vec(),
+            b"\x2d\x3f\x9f\x2d\x29\xb1\x08\x00\xe4\xcd\xba\x1f\x80\x00\x00\x00".to_vec(),
+        ]
+        .concat();
+
+        let actual = RecordBatch::read(&mut Cursor::new(data)).unwrap();
+        let expected = RecordBatch {
+            base_offset: 0,
+            partition_leader_epoch: 0,
+            last_offset_delta: 0,
+            first_timestamp: 1643105170535,
+            max_timestamp: 1643105170535,
+            producer_id: -1,
+            producer_epoch: -1,
+            base_sequence: -1,
+            records: ControlBatchOrRecords::Records(vec![Record {
+                timestamp_delta: 0,
+                offset_delta: 0,
+                key: vec![b'x'; 100],
+                value: b"hello kafka".to_vec(),
+                headers: vec![RecordHeader {
+                    key: "foo".to_owned(),
+                    value: b"bar".to_vec(),
+                }],
+            }]),
+            compression: RecordBatchCompression::Gzip,
+            is_transactional: false,
+            timestamp_type: RecordBatchTimestampType::CreateTime,
+        };
+        assert_eq!(actual, expected);
+
+        let mut data2 = vec![];
+        actual.write(&mut data2).unwrap();
+
+        // don't compare if the data is equal because compression encoder might work slightly differently, use another
+        // roundtrip instead
+        let actual2 = RecordBatch::read(&mut Cursor::new(data2)).unwrap();
+        assert_eq!(actual2, expected);
     }
 }

@@ -11,7 +11,7 @@ use futures::{stream::FuturesUnordered, StreamExt};
 use rdkafka::producer::FutureProducer;
 use rskafka::{
     client::{
-        partition::PartitionClient,
+        partition::{Compression, PartitionClient},
         producer::{aggregator::RecordAggregator, BatchProducerBuilder},
         ClientBuilder,
     },
@@ -81,7 +81,10 @@ pub fn criterion_benchmark(c: &mut Criterion) {
                     let start = Instant::now();
 
                     for _ in 0..iters {
-                        client.produce(vec![record.clone()]).await.unwrap();
+                        client
+                            .produce(vec![record.clone()], Compression::NoCompression)
+                            .await
+                            .unwrap();
                     }
 
                     start.elapsed()

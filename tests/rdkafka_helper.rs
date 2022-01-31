@@ -8,15 +8,28 @@ use rdkafka::{
     util::Timeout,
     ClientConfig, Message, TopicPartitionList,
 };
-use rskafka::record::{Record, RecordAndOffset};
+use rskafka::{
+    client::partition::Compression,
+    record::{Record, RecordAndOffset},
+};
 use time::OffsetDateTime;
 
 /// Produce.
-pub async fn produce(connection: &str, records: Vec<(String, i32, Record)>) -> Vec<i64> {
+pub async fn produce(
+    connection: &str,
+    records: Vec<(String, i32, Record)>,
+    compression: Compression,
+) -> Vec<i64> {
     // create client
     let mut cfg = ClientConfig::new();
     cfg.set("bootstrap.servers", connection);
-    cfg.set("message.timeout.ms", "5000");
+    match compression {
+        Compression::NoCompression => {}
+        #[cfg(feature = "compression-gzip")]
+        Compression::Gzip => {
+            cfg.set("compression.codec", "gzip");
+        }
+    }
     let client: FutureProducer<_> = cfg.create().unwrap();
 
     // create record

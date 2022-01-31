@@ -25,6 +25,19 @@ use time::OffsetDateTime;
 use tokio::sync::Mutex;
 use tracing::{error, info};
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Compression {
+    NoCompression,
+    #[cfg(feature = "compression-gzip")]
+    Gzip,
+}
+
+impl Default for Compression {
+    fn default() -> Self {
+        Self::NoCompression
+    }
+}
+
 /// Many operations must be performed on the leader for a partition
 ///
 /// Additionally a partition is the unit of concurrency within Kafka
@@ -64,14 +77,18 @@ impl PartitionClient {
     }
 
     /// Produce a batch of records to the partition
-    pub async fn produce(&self, records: Vec<Record>) -> Result<Vec<i64>> {
+    pub async fn produce(
+        &self,
+        records: Vec<Record>,
+        compression: Compression,
+    ) -> Result<Vec<i64>> {
         // skip request entirely if `records` is empty
         if records.is_empty() {
             return Ok(vec![]);
         }
 
         let n = records.len() as i64;
-        let request = &build_produce_request(self.partition, &self.topic, records);
+        let request = &build_produce_request(self.partition, &self.topic, records, compression);
 
         maybe_retry(&self.backoff_config, self, "produce", || async move {
             let broker = self.get().await?;
@@ -304,7 +321,12 @@ where
         .map_err(Error::RetryFailed)?
 }
 
-fn build_produce_request(partition: i32, topic: &str, records: Vec<Record>) -> ProduceRequest {
+fn build_produce_request(
+    partition: i32,
+    topic: &str,
+    records: Vec<Record>,
+    compression: Compression,
+) -> ProduceRequest {
     let n = records.len() as i32;
 
     // TODO: Retry on failure
@@ -341,7 +363,11 @@ fn build_produce_request(partition: i32, topic: &str, records: Vec<Record>) -> P
             last_offset_delta: n - 1,
             is_transactional: false,
             base_sequence: -1,
-            compression: RecordBatchCompression::NoCompression,
+            compression: match compression {
+                Compression::NoCompression => RecordBatchCompression::NoCompression,
+                #[cfg(feature = "compression-gzip")]
+                Compression::Gzip => RecordBatchCompression::Gzip,
+            },
             timestamp_type: RecordBatchTimestampType::CreateTime,
             producer_id: -1,
             producer_epoch: -1,
