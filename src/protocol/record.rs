@@ -1,17 +1,25 @@
 //! The actual payload message which is also the on-disk format for Kafka.
 //!
-/// The format evolved twice in [KIP-32] and [KIP-98]. We only support the latest generation (message version 2).
-///
-/// # References
-/// - [KIP-32]
-/// - [KIP-98]
-/// - <https://kafka.apache.org/documentation/#messageformat>
-///
-/// [KIP-32]: https://cwiki.apache.org/confluence/display/KAFKA/KIP-32+-+Add+timestamps+to+Kafka+message
-/// [KIP-98]: https://cwiki.apache.org/confluence/display/KAFKA/KIP-98+-+Exactly+Once+Delivery+and+Transactional+Messaging
+//! The format evolved twice in [KIP-32] and [KIP-98]. We only support the latest generation (message version 2).
+//!
+//!
+//! # CRC
+//! The CRC used to check payload data is `CRC-32C` / iSCSI as documented by the following sources:
+//!
+//! - <https://kafka.apache.org/documentation/#recordbatch>
+//! - <https://docs.oracle.com/javase/9/docs/api/java/util/zip/CRC32C.html>
+//! - <https://reveng.sourceforge.io/crc-catalogue/all.htm>
+//!
+//!
+//! # References
+//! - [KIP-32]
+//! - [KIP-98]
+//! - <https://kafka.apache.org/documentation/#messageformat>
+//!
+//!
+//! [KIP-32]: https://cwiki.apache.org/confluence/display/KAFKA/KIP-32+-+Add+timestamps+to+Kafka+message
+//! [KIP-98]: https://cwiki.apache.org/confluence/display/KAFKA/KIP-98+-+Exactly+Once+Delivery+and+Transactional+Messaging
 use std::io::{Cursor, Read, Write};
-
-use crc::{Crc, CRC_32_ISCSI};
 
 #[cfg(test)]
 use proptest::prelude::*;
@@ -23,14 +31,6 @@ use super::{
     traits::{ReadError, ReadType, WriteError, WriteType},
     vec_builder::VecBuilder,
 };
-
-/// CRC used to check payload data.
-///
-/// # References
-/// - <https://kafka.apache.org/documentation/#recordbatch>
-/// - <https://docs.oracle.com/javase/9/docs/api/java/util/zip/CRC32C.html>
-/// - <https://reveng.sourceforge.io/crc-catalogue/all.htm>
-const CASTAGNOLI: Crc<u32> = Crc::<u32>::new(&CRC_32_ISCSI);
 
 /// Record Header
 ///
@@ -364,7 +364,7 @@ where
         let mut data = VecBuilder::new(len);
         data = data.read_exact(reader)?;
         let data: Vec<u8> = data.into();
-        let actual_crc = CASTAGNOLI.checksum(&data);
+        let actual_crc = crc32c::crc32c(&data);
         if crc != actual_crc {
             return Err(ReadError::Malformed(
                 format!("CRC error, got 0x{:x}, expected 0x{:x}", actual_crc, crc).into(),
@@ -461,7 +461,7 @@ where
         // See
         // https://github.com/kafka-rust/kafka-rust/blob/a551b6231a7adc9b715552b635a69ac2856ec8a1/src/protocol/mod.rs#L161-L163
         // WARNING: the range in the code linked above is correct but the polynomial is wrong!
-        let crc = CASTAGNOLI.checksum(&data);
+        let crc = crc32c::crc32c(&data);
         let crc = i32::from_be_bytes(crc.to_be_bytes());
         Int32(crc).write(writer)?;
 

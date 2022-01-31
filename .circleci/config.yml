@@ -190,7 +190,7 @@ jobs:
       - cache_restore
       - run:
           name: Cargo test
-          command: cargo test --all-features --workspace
+          command: cargo test --all-features --all-targets
       - cache_save
       - store_artifacts:
           path: proptest-regressions
@@ -255,7 +255,7 @@ jobs:
       - cache_restore
       - run:
           name: Cargo test
-          command: cargo test --all-features --workspace
+          command: cargo test --all-features --all-targets
       - cache_save
       - store_artifacts:
           path: proptest-regressions
