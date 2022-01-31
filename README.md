@@ -200,6 +200,29 @@ execution that hooks right into the place where it is about to exit:
 (lldb) b fuzzer::PrintStackTrace()
 ```
 
+### Benchmarks
+Install [cargo-criterion], make sure you have some Kafka cluster running, and then you can run all benchmarks with:
+
+```console
+$ TEST_INTEGRATION=1 KAFKA_CONNECT=localhost:9093 cargo criterion --all-features
+```
+
+If you find a benchmark that is too slow, you can may want to profile it. Get [cargo-with], and [perf], then run (here
+for the `parallel/rskafka` benchmark):
+
+```console
+$ TEST_INTEGRATION=1 KAFKA_CONNECT=localhost:9093 cargo with 'perf record --call-graph dwarf -- {bin}' -- \
+    bench --all-features --bench write_throughput -- \
+    --bench --noplot parallel/rskafka
+```
+
+Have a look at the report:
+
+```console
+$ perf report
+```
+
+
 ## License
 
 Licensed under either of these:
@@ -219,8 +242,11 @@ e.g. by batching writes to multiple partitions in a single ProduceRequest
 
 
 [Apache Kafka]: https://kafka.apache.org/
+[cargo-criterion]: https://github.com/bheisler/cargo-criterion
 [cargo-fuzz]: https://github.com/rust-fuzz/cargo-fuzz
+[cargo-with]: https://github.com/cbourjau/cargo-with
 [IOx]: https://github.com/influxdata/influxdb_iox/
 [LLDB]: https://lldb.llvm.org/
+[perf]: https://perf.wiki.kernel.org/index.php/Main_Page
 [Redpanda]: https://vectorized.io/redpanda
 [rustls]: https://github.com/rustls/rustls
