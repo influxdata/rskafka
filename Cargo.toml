@@ -24,7 +24,7 @@ bytes = "1.1"
 crc = "2"
 futures = "0.3"
 integer-encoding = "3"
-parking_lot = "0.11"
+parking_lot = "0.12"
 pin-project-lite = "0.2"
 rand = "0.8"
 rustls = { version = "0.20", optional = true }
