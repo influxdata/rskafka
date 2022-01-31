@@ -30,7 +30,10 @@ It will be a good fit for workloads that:
 ```rust,no_run
 # async fn test() {
 use rskafka::{
-    client::ClientBuilder,
+    client::{
+        ClientBuilder,
+        partition::Compression,
+    },
     record::Record,
 };
 use time::OffsetDateTime;
@@ -68,7 +71,7 @@ let record = Record {
     ]),
     timestamp: OffsetDateTime::now_utc(),
 };
-partition_client.produce(vec![record]).await.unwrap();
+partition_client.produce(vec![record], Compression::default()).await.unwrap();
 
 // consume data
 let (records, high_watermark) = partition_client
@@ -87,10 +90,11 @@ For more advanced production and consumption, see [`crate::client::producer`] an
 
 ## Features
 
+- **`compression-gzip`:** Support compression and decompression of messages using [gzip].
 - **`fuzzing`:** Exposes some internal data structures so that they can be used by our fuzzers. This is NOT a stable
   feature / API!
-- **`transport-tls` (default):** Allows TLS transport via [rustls].
 - **`transport-socks5`:** Allow transport via SOCKS5 proxy.
+- **`transport-tls` (default):** Allows TLS transport via [rustls].
 
 ## Testing
 
@@ -245,6 +249,7 @@ e.g. by batching writes to multiple partitions in a single ProduceRequest
 [cargo-criterion]: https://github.com/bheisler/cargo-criterion
 [cargo-fuzz]: https://github.com/rust-fuzz/cargo-fuzz
 [cargo-with]: https://github.com/cbourjau/cargo-with
+[gzip]: https://en.wikipedia.org/wiki/Gzip
 [IOx]: https://github.com/influxdata/influxdb_iox/
 [LLDB]: https://lldb.llvm.org/
 [perf]: https://perf.wiki.kernel.org/index.php/Main_Page

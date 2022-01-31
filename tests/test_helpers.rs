@@ -78,12 +78,15 @@ pub fn maybe_start_logging() {
 
 /// Start logging.
 pub fn start_logging() {
+    use tracing_log::LogTracer;
     use tracing_subscriber::{filter::EnvFilter, FmtSubscriber};
 
     LOG_SETUP.call_once(|| {
+        LogTracer::init().unwrap();
+
         let subscriber = FmtSubscriber::builder()
             .with_env_filter(EnvFilter::from_default_env())
-            .with_writer(std::io::stderr)
+            .with_test_writer()
             .finish();
 
         tracing::subscriber::set_global_default(subscriber)

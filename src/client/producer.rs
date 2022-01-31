@@ -207,6 +207,8 @@ use crate::client::producer::aggregator::TryPush;
 use crate::client::{error::Error as ClientError, partition::PartitionClient};
 use crate::record::Record;
 
+use super::partition::Compression;
+
 pub mod aggregator;
 mod broadcast;
 
@@ -230,6 +232,8 @@ pub struct BatchProducerBuilder {
     client: Arc<dyn ProducerClient>,
 
     linger: Duration,
+
+    compression: Compression,
 }
 
 impl BatchProducerBuilder {
@@ -243,6 +247,7 @@ impl BatchProducerBuilder {
         Self {
             client,
             linger: Duration::from_millis(5),
+            compression: Compression::default(),
         }
     }
 
@@ -251,12 +256,21 @@ impl BatchProducerBuilder {
         Self { linger, ..self }
     }
 
+    /// Sets compression.
+    pub fn with_compression(self, compression: Compression) -> Self {
+        Self {
+            compression,
+            ..self
+        }
+    }
+
     pub fn build<A>(self, aggregator: A) -> BatchProducer<A>
     where
         A: aggregator::Aggregator,
     {
         BatchProducer {
             linger: self.linger,
+            compression: self.compression,
             client: self.client,
             inner: Mutex::new(ProducerInner {
                 aggregator,
@@ -268,12 +282,20 @@ impl BatchProducerBuilder {
 
 // A trait wrapper to allow mocking
 trait ProducerClient: std::fmt::Debug + Send + Sync {
-    fn produce(&self, records: Vec<Record>) -> BoxFuture<'_, Result<Vec<i64>, ClientError>>;
+    fn produce(
+        &self,
+        records: Vec<Record>,
+        compression: Compression,
+    ) -> BoxFuture<'_, Result<Vec<i64>, ClientError>>;
 }
 
 impl ProducerClient for PartitionClient {
-    fn produce(&self, records: Vec<Record>) -> BoxFuture<'_, Result<Vec<i64>, ClientError>> {
-        Box::pin(self.produce(records))
+    fn produce(
+        &self,
+        records: Vec<Record>,
+        compression: Compression,
+    ) -> BoxFuture<'_, Result<Vec<i64>, ClientError>> {
+        Box::pin(self.produce(records, compression))
     }
 }
 
@@ -292,6 +314,8 @@ where
     A: aggregator::Aggregator,
 {
     linger: Duration,
+
+    compression: Compression,
 
     client: Arc<dyn ProducerClient>,
 
@@ -370,7 +394,7 @@ where
                 TryPush::NoCapacity(data) => {
                     debug!("Insufficient capacity in aggregator - flushing");
 
-                    Self::flush_impl(&mut inner, self.client.as_ref()).await;
+                    Self::flush_impl(&mut inner, self.client.as_ref(), self.compression).await;
                     match inner
                         .aggregator
                         .try_push(data)
@@ -413,7 +437,7 @@ where
         debug!("Linger expired - flushing");
 
         // Flush data
-        Self::flush_impl(&mut inner, self.client.as_ref()).await;
+        Self::flush_impl(&mut inner, self.client.as_ref(), self.compression).await;
 
         extract(&result_slot.now_or_never().expect("just flushed"), tag)
     }
@@ -422,12 +446,16 @@ where
     pub async fn flush(&self) {
         let mut inner = self.inner.lock().await;
         debug!("Manual flush");
-        Self::flush_impl(&mut inner, self.client.as_ref()).await;
+        Self::flush_impl(&mut inner, self.client.as_ref(), self.compression).await;
     }
 
     /// Flushes out the data from the aggregator, publishes the result to the result slot,
     /// and creates a fresh result slot for future writes to use
-    async fn flush_impl(inner: &mut ProducerInner<A>, client: &dyn ProducerClient) {
+    async fn flush_impl(
+        inner: &mut ProducerInner<A>,
+        client: &dyn ProducerClient,
+        compression: Compression,
+    ) {
         trace!("Flushing batch producer");
 
         let (output, status_deagg) = match inner.aggregator.flush() {
@@ -449,7 +477,7 @@ where
             // "just flushed" because no data is available right after flushing.
             Ok(vec![])
         } else {
-            client.produce(output).await
+            client.produce(output, compression).await
         };
 
         // Reset result slot
@@ -489,7 +517,11 @@ mod tests {
     }
 
     impl ProducerClient for MockClient {
-        fn produce(&self, records: Vec<Record>) -> BoxFuture<'_, Result<Vec<i64>, ClientError>> {
+        fn produce(
+            &self,
+            records: Vec<Record>,
+            _compression: Compression,
+        ) -> BoxFuture<'_, Result<Vec<i64>, ClientError>> {
             Box::pin(async move {
                 tokio::time::sleep(self.delay).await;
 

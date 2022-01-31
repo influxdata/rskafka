@@ -31,6 +31,15 @@ commands:
             - /usr/local/cargo/registry
           key: cargo-cache-{{ arch }}-{{ .Branch }}-{{ checksum "Cargo.toml" }}
 
+  install_zlib_dev:
+    description: Install zlib-dev
+    steps:
+      - run:
+          name: Install zlib-dev
+          command: |
+            sudo apt-get update
+            sudo apt-get install -y zlib1g-dev
+
 jobs:
   fmt:
     docker:
@@ -188,6 +197,7 @@ jobs:
       - checkout
       - rust_components
       - cache_restore
+      - install_zlib_dev
       - run:
           name: Cargo test
           command: cargo test --all-features --all-targets
@@ -253,6 +263,7 @@ jobs:
       - checkout
       - rust_components
       - cache_restore
+      - install_zlib_dev
       - run:
           name: Cargo test
           command: cargo test --all-features --all-targets
