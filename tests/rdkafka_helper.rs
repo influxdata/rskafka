@@ -29,6 +29,10 @@ pub async fn produce(
         Compression::Gzip => {
             cfg.set("compression.codec", "gzip");
         }
+        #[cfg(feature = "compression-lz4")]
+        Compression::Lz4 => {
+            cfg.set("compression.codec", "lz4");
+        }
     }
     let client: FutureProducer<_> = cfg.create().unwrap();
 
