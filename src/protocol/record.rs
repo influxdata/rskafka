@@ -571,7 +571,26 @@ where
             #[cfg(feature = "compression-gzip")]
             RecordBatchCompression::Gzip => {
                 use flate2::read::GzDecoder;
-                Self::read_records(&mut GzDecoder::new(reader), is_control, n_records)?
+                let mut decoder = GzDecoder::new(reader);
+                let records = Self::read_records(&mut decoder, is_control, n_records)?;
+
+                ensure_eof(&mut decoder, "Data left in gzip block")?;
+
+                records
+            }
+            #[cfg(feature = "compression-lz4")]
+            RecordBatchCompression::Lz4 => {
+                use lz4::Decoder;
+                let mut decoder = Decoder::new(reader)?;
+                let records = Self::read_records(&mut decoder, is_control, n_records)?;
+
+                // the lz4 decoder requires us to consume the whole inner stream until we reach EOF
+                ensure_eof(&mut decoder, "Data left in LZ4 block")?;
+
+                let (_reader, res) = decoder.finish();
+                res?;
+
+                records
             }
             #[allow(unreachable_patterns)]
             _ => {
@@ -709,10 +728,22 @@ where
             #[cfg(feature = "compression-gzip")]
             RecordBatchCompression::Gzip => {
                 use flate2::{write::GzEncoder, Compression};
-                Self::write_records(
-                    &mut GzEncoder::new(writer, Compression::default()),
-                    self.records,
-                )?;
+                let mut encoder = GzEncoder::new(writer, Compression::default());
+                Self::write_records(&mut encoder, self.records)?;
+                encoder.finish()?;
+            }
+            #[cfg(feature = "compression-lz4")]
+            RecordBatchCompression::Lz4 => {
+                use lz4::{liblz4::BlockMode, EncoderBuilder};
+                let mut encoder = EncoderBuilder::new()
+                    .block_mode(
+                        // the only one supported by Kafka
+                        BlockMode::Independent,
+                    )
+                    .build(writer)?;
+                Self::write_records(&mut encoder, self.records)?;
+                let (_writer, res) = encoder.finish();
+                res?;
             }
             #[allow(unreachable_patterns)]
             _ => {
@@ -723,6 +754,21 @@ where
         }
 
         Ok(())
+    }
+}
+
+/// Ensure that given reader is at EOF.
+#[allow(dead_code)] // only use by some features
+fn ensure_eof<R>(reader: &mut R, msg: &str) -> Result<(), ReadError>
+where
+    R: Read,
+{
+    let mut buf = [0u8; 1];
+    match reader.read(&mut buf) {
+        Ok(0) => Ok(()),
+        Ok(_) => Err(ReadError::Malformed(msg.to_string().into())),
+        Err(e) if e.kind() == std::io::ErrorKind::UnexpectedEof => Ok(()),
+        Err(e) => Err(ReadError::IO(e)),
     }
 }
 
@@ -856,6 +902,56 @@ mod tests {
                 }],
             }]),
             compression: RecordBatchCompression::Gzip,
+            is_transactional: false,
+            timestamp_type: RecordBatchTimestampType::CreateTime,
+        };
+        assert_eq!(actual, expected);
+
+        let mut data2 = vec![];
+        actual.write(&mut data2).unwrap();
+
+        // don't compare if the data is equal because compression encoder might work slightly differently, use another
+        // roundtrip instead
+        let actual2 = RecordBatch::read(&mut Cursor::new(data2)).unwrap();
+        assert_eq!(actual2, expected);
+    }
+
+    #[cfg(feature = "compression-lz4")]
+    #[test]
+    fn test_decode_fixture_lz4() {
+        // This data was obtained by watching rdkafka.
+        let data = [
+            b"\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x63\x00\x00\x00\x00".to_vec(),
+            b"\x02\x1b\xa5\x92\x35\x00\x03\x00\x00\x00\x00\x00\x00\x01\x7e\xb1".to_vec(),
+            b"\x1f\xc7\x24\x00\x00\x01\x7e\xb1\x1f\xc7\x24\xff\xff\xff\xff\xff".to_vec(),
+            b"\xff\xff\xff\xff\xff\xff\xff\xff\xff\x00\x00\x00\x01\x04\x22\x4d".to_vec(),
+            b"\x18\x60\x40\x82\x23\x00\x00\x00\x8f\xfc\x01\x00\x00\x00\xc8\x01".to_vec(),
+            b"\x78\x01\x00\x50\xf0\x06\x16\x68\x65\x6c\x6c\x6f\x20\x6b\x61\x66".to_vec(),
+            b"\x6b\x61\x02\x06\x66\x6f\x6f\x06\x62\x61\x72\x00\x00\x00\x00".to_vec(),
+        ]
+        .concat();
+
+        let actual = RecordBatch::read(&mut Cursor::new(data)).unwrap();
+        let expected = RecordBatch {
+            base_offset: 0,
+            partition_leader_epoch: 0,
+            last_offset_delta: 0,
+            first_timestamp: 1643649156900,
+            max_timestamp: 1643649156900,
+            producer_id: -1,
+            producer_epoch: -1,
+            base_sequence: -1,
+            records: ControlBatchOrRecords::Records(vec![Record {
+                timestamp_delta: 0,
+                offset_delta: 0,
+                key: vec![b'x'; 100],
+                value: b"hello kafka".to_vec(),
+                headers: vec![RecordHeader {
+                    key: "foo".to_owned(),
+                    value: b"bar".to_vec(),
+                }],
+            }]),
+            compression: RecordBatchCompression::Lz4,
             is_transactional: false,
             timestamp_type: RecordBatchTimestampType::CreateTime,
         };

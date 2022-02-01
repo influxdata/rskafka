@@ -91,6 +91,7 @@ For more advanced production and consumption, see [`crate::client::producer`] an
 ## Features
 
 - **`compression-gzip`:** Support compression and decompression of messages using [gzip].
+- **`compression-lz4`:** Support compression and decompression of messages using [LZ4].
 - **`fuzzing`:** Exposes some internal data structures so that they can be used by our fuzzers. This is NOT a stable
   feature / API!
 - **`transport-socks5`:** Allow transport via SOCKS5 proxy.
@@ -252,6 +253,7 @@ e.g. by batching writes to multiple partitions in a single ProduceRequest
 [gzip]: https://en.wikipedia.org/wiki/Gzip
 [IOx]: https://github.com/influxdata/influxdb_iox/
 [LLDB]: https://lldb.llvm.org/
+[LZ4]: https://lz4.github.io/lz4/
 [perf]: https://perf.wiki.kernel.org/index.php/Main_Page
 [Redpanda]: https://vectorized.io/redpanda
 [rustls]: https://github.com/rustls/rustls

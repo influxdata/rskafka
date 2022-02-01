@@ -30,6 +30,8 @@ pub enum Compression {
     NoCompression,
     #[cfg(feature = "compression-gzip")]
     Gzip,
+    #[cfg(feature = "compression-lz4")]
+    Lz4,
 }
 
 impl Default for Compression {
@@ -367,6 +369,8 @@ fn build_produce_request(
                 Compression::NoCompression => RecordBatchCompression::NoCompression,
                 #[cfg(feature = "compression-gzip")]
                 Compression::Gzip => RecordBatchCompression::Gzip,
+                #[cfg(feature = "compression-lz4")]
+                Compression::Lz4 => RecordBatchCompression::Lz4,
             },
             timestamp_type: RecordBatchTimestampType::CreateTime,
             producer_id: -1,
