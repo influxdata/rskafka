@@ -33,6 +33,10 @@ pub async fn produce(
         Compression::Lz4 => {
             cfg.set("compression.codec", "lz4");
         }
+        #[cfg(feature = "compression-snappy")]
+        Compression::Snappy => {
+            cfg.set("compression.codec", "snappy");
+        }
     }
     let client: FutureProducer<_> = cfg.create().unwrap();
 

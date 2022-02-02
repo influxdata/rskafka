@@ -81,6 +81,30 @@ async fn test_produce_rskafka_consume_rskafka_lz4() {
     assert_produce_consume(produce_rskafka, consume_rskafka, Compression::Lz4).await;
 }
 
+#[cfg(feature = "compression-snappy")]
+#[tokio::test]
+async fn test_produce_rdkafka_consume_rdkafka_snappy() {
+    assert_produce_consume(produce_rdkafka, consume_rdkafka, Compression::Snappy).await;
+}
+
+#[cfg(feature = "compression-snappy")]
+#[tokio::test]
+async fn test_produce_rskafka_consume_rdkafka_snappy() {
+    assert_produce_consume(produce_rskafka, consume_rdkafka, Compression::Snappy).await;
+}
+
+#[cfg(feature = "compression-snappy")]
+#[tokio::test]
+async fn test_produce_rdkafka_consume_rskafka_snappy() {
+    assert_produce_consume(produce_rdkafka, consume_rskafka, Compression::Snappy).await;
+}
+
+#[cfg(feature = "compression-snappy")]
+#[tokio::test]
+async fn test_produce_rskafka_consume_rskafka_snappy() {
+    assert_produce_consume(produce_rskafka, consume_rskafka, Compression::Snappy).await;
+}
+
 async fn assert_produce_consume<F1, G1, F2, G2>(
     f_produce: F1,
     f_consume: F2,
