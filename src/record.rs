@@ -5,8 +5,8 @@ use time::OffsetDateTime;
 /// High-level record.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Record {
-    pub key: Vec<u8>,
-    pub value: Vec<u8>,
+    pub key: Option<Vec<u8>>,
+    pub value: Option<Vec<u8>>,
     pub headers: BTreeMap<String, Vec<u8>>,
     pub timestamp: OffsetDateTime,
 }
@@ -14,8 +14,8 @@ pub struct Record {
 impl Record {
     /// Returns the approximate uncompressed size of this [`Record`]
     pub fn approximate_size(&self) -> usize {
-        self.key.len()
-            + self.value.len()
+        self.key.as_ref().map(|k| k.len()).unwrap_or_default()
+            + self.value.as_ref().map(|v| v.len()).unwrap_or_default()
             + self
                 .headers
                 .iter()
@@ -38,8 +38,8 @@ mod tests {
     #[test]
     fn test_approximate_size() {
         let record = Record {
-            key: vec![0; 23],
-            value: vec![0; 45],
+            key: Some(vec![0; 23]),
+            value: Some(vec![0; 45]),
             headers: vec![("a".to_string(), vec![0; 5]), ("b".to_string(), vec![0; 7])]
                 .into_iter()
                 .collect(),
