@@ -93,6 +93,7 @@ For more advanced production and consumption, see [`crate::client::producer`] an
 - **`compression-gzip`:** Support compression and decompression of messages using [gzip].
 - **`compression-lz4`:** Support compression and decompression of messages using [LZ4].
 - **`compression-snappy`:** Support compression and decompression of messages using [Snappy].
+- **`compression-zstd`:** Support compression and decompression of messages using [zstd].
 - **`fuzzing`:** Exposes some internal data structures so that they can be used by our fuzzers. This is NOT a stable
   feature / API!
 - **`transport-socks5`:** Allow transport via SOCKS5 proxy.
@@ -260,3 +261,4 @@ e.g. by batching writes to multiple partitions in a single ProduceRequest
 [Redpanda]: https://vectorized.io/redpanda
 [rustls]: https://github.com/rustls/rustls
 [Snappy]: https://github.com/google/snappy
+[zstd]: https://github.com/facebook/zstd

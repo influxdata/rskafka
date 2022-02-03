@@ -673,6 +673,17 @@ where
 
                 records
             }
+            #[cfg(feature = "compression-zstd")]
+            RecordBatchCompression::Zstd => {
+                use zstd::Decoder;
+
+                let mut decoder = Decoder::new(reader)?;
+                let records = Self::read_records(&mut decoder, is_control, n_records)?;
+
+                ensure_eof(&mut decoder, "Data left in zstd block")?;
+
+                records
+            }
             #[allow(unreachable_patterns)]
             _ => {
                 return Err(ReadError::Malformed(
@@ -842,6 +853,14 @@ where
                     .map_err(|e| WriteError::Malformed(Box::new(e)))?;
 
                 writer.write_all(&output[..len])?;
+            }
+            #[cfg(feature = "compression-zstd")]
+            RecordBatchCompression::Zstd => {
+                use zstd::Encoder;
+
+                let mut encoder = Encoder::new(writer, 0)?;
+                Self::write_records(&mut encoder, self.records)?;
+                encoder.finish()?;
             }
             #[allow(unreachable_patterns)]
             _ => {
@@ -1100,6 +1119,56 @@ mod tests {
                 }],
             }]),
             compression: RecordBatchCompression::Snappy,
+            is_transactional: false,
+            timestamp_type: RecordBatchTimestampType::CreateTime,
+        };
+        assert_eq!(actual, expected);
+
+        let mut data2 = vec![];
+        actual.write(&mut data2).unwrap();
+
+        // don't compare if the data is equal because compression encoder might work slightly differently, use another
+        // roundtrip instead
+        let actual2 = RecordBatch::read(&mut Cursor::new(data2)).unwrap();
+        assert_eq!(actual2, expected);
+    }
+
+    #[cfg(feature = "compression-zstd")]
+    #[test]
+    fn test_decode_fixture_zstd() {
+        // This data was obtained by watching rdkafka.
+        let data = [
+            b"\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x5d\x00\x00\x00\x00".to_vec(),
+            b"\x02\xa1\x6e\x4e\x95\x00\x04\x00\x00\x00\x00\x00\x00\x01\x7e\xbf".to_vec(),
+            b"\x78\xf3\xad\x00\x00\x01\x7e\xbf\x78\xf3\xad\xff\xff\xff\xff\xff".to_vec(),
+            b"\xff\xff\xff\xff\xff\xff\xff\xff\xff\x00\x00\x00\x01\x28\xb5\x2f".to_vec(),
+            b"\xfd\x00\x58\x1d\x01\x00\xe8\xfc\x01\x00\x00\x00\xc8\x01\x78\x16".to_vec(),
+            b"\x68\x65\x6c\x6c\x6f\x20\x6b\x61\x66\x6b\x61\x02\x06\x66\x6f\x6f".to_vec(),
+            b"\x06\x62\x61\x72\x01\x00\x20\x05\x5c".to_vec(),
+        ]
+        .concat();
+
+        let actual = RecordBatch::read(&mut Cursor::new(data)).unwrap();
+        let expected = RecordBatch {
+            base_offset: 0,
+            partition_leader_epoch: 0,
+            last_offset_delta: 0,
+            first_timestamp: 1643889882029,
+            max_timestamp: 1643889882029,
+            producer_id: -1,
+            producer_epoch: -1,
+            base_sequence: -1,
+            records: ControlBatchOrRecords::Records(vec![Record {
+                timestamp_delta: 0,
+                offset_delta: 0,
+                key: Some(vec![b'x'; 100]),
+                value: Some(b"hello kafka".to_vec()),
+                headers: vec![RecordHeader {
+                    key: "foo".to_owned(),
+                    value: b"bar".to_vec(),
+                }],
+            }]),
+            compression: RecordBatchCompression::Zstd,
             is_transactional: false,
             timestamp_type: RecordBatchTimestampType::CreateTime,
         };
