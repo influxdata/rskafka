@@ -30,6 +30,7 @@ parking_lot = "0.12"
 pin-project-lite = "0.2"
 rand = "0.8"
 rustls = { version = "0.20", optional = true }
+snap = { version = "1", optional = true }
 thiserror = "1.0"
 time = "0.3"
 tokio = { version = "1.14", default-features = false, features = ["io-util", "net", "rt", "sync", "time"] }
@@ -55,6 +56,7 @@ default = ["transport-tls"]
 
 compression-gzip = ["flate2"]
 compression-lz4 = ["lz4"]
+compression-snappy = ["snap"]
 fuzzing = []
 transport-socks5 = ["async-socks5"]
 transport-tls = ["rustls", "tokio-rustls"]

@@ -32,6 +32,8 @@ pub enum Compression {
     Gzip,
     #[cfg(feature = "compression-lz4")]
     Lz4,
+    #[cfg(feature = "compression-snappy")]
+    Snappy,
 }
 
 impl Default for Compression {
@@ -371,6 +373,8 @@ fn build_produce_request(
                 Compression::Gzip => RecordBatchCompression::Gzip,
                 #[cfg(feature = "compression-lz4")]
                 Compression::Lz4 => RecordBatchCompression::Lz4,
+                #[cfg(feature = "compression-snappy")]
+                Compression::Snappy => RecordBatchCompression::Snappy,
             },
             timestamp_type: RecordBatchTimestampType::CreateTime,
             producer_id: -1,

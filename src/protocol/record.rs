@@ -24,6 +24,8 @@ use std::io::{Cursor, Read, Write};
 #[cfg(test)]
 use proptest::prelude::*;
 
+use crate::protocol::vec_builder::DEFAULT_BLOCK_SIZE;
+
 use super::{
     primitives::{Int16, Int32, Int64, Int8, Varint, Varlong},
     traits::{ReadError, ReadType, WriteError, WriteType},
@@ -571,6 +573,7 @@ where
             #[cfg(feature = "compression-gzip")]
             RecordBatchCompression::Gzip => {
                 use flate2::read::GzDecoder;
+
                 let mut decoder = GzDecoder::new(reader);
                 let records = Self::read_records(&mut decoder, is_control, n_records)?;
 
@@ -581,6 +584,7 @@ where
             #[cfg(feature = "compression-lz4")]
             RecordBatchCompression::Lz4 => {
                 use lz4::Decoder;
+
                 let mut decoder = Decoder::new(reader)?;
                 let records = Self::read_records(&mut decoder, is_control, n_records)?;
 
@@ -589,6 +593,61 @@ where
 
                 let (_reader, res) = decoder.finish();
                 res?;
+
+                records
+            }
+            #[cfg(feature = "compression-snappy")]
+            RecordBatchCompression::Snappy => {
+                use snap::raw::{decompress_len, Decoder};
+
+                // Construct the input for the raw decoder.
+                let mut input = vec![];
+                reader.read_to_end(&mut input)?;
+
+                // The snappy compression used here is unframed aka "raw". So we first need to figure out the
+                // uncompressed length. See
+                //
+                // - https://github.com/edenhill/librdkafka/blob/2b76b65212e5efda213961d5f84e565038036270/src/rdkafka_msgset_reader.c#L345-L348
+                // - https://github.com/edenhill/librdkafka/blob/747f77c98fbddf7dc6508f76398e0fc9ee91450f/src/snappy.c#L779
+                let uncompressed_size = decompress_len(&input).unwrap();
+
+                // Decode snappy payload.
+                // The uncompressed length is unchecked and can be up to 2^32-1 bytes. To avoid a DDoS vector we try to
+                // limit it to a small size and if that fails we double that size;
+                let mut max_uncompressed_size = DEFAULT_BLOCK_SIZE;
+                let output = loop {
+                    let try_uncompressed_size = uncompressed_size.min(max_uncompressed_size);
+
+                    let mut decoder = Decoder::new();
+                    let mut output = vec![0; try_uncompressed_size];
+                    let actual_uncompressed_size = match decoder.decompress(&input, &mut output) {
+                        Ok(size) => size,
+                        Err(snap::Error::BufferTooSmall { .. })
+                            if max_uncompressed_size < uncompressed_size =>
+                        {
+                            // try larger buffer
+                            max_uncompressed_size *= 2;
+                            continue;
+                        }
+                        Err(e) => {
+                            return Err(ReadError::Malformed(Box::new(e)));
+                        }
+                    };
+                    if actual_uncompressed_size != uncompressed_size {
+                        return Err(ReadError::Malformed(
+                            "broken snappy data".to_string().into(),
+                        ));
+                    }
+
+                    break output;
+                };
+
+                // Read uncompressed records.
+                let mut decoder = Cursor::new(output);
+                let records = Self::read_records(&mut decoder, is_control, n_records)?;
+
+                // Check that there's no data left within the uncompressed block.
+                ensure_eof(&mut decoder, "Data left in Snappy block")?;
 
                 records
             }
@@ -728,6 +787,7 @@ where
             #[cfg(feature = "compression-gzip")]
             RecordBatchCompression::Gzip => {
                 use flate2::{write::GzEncoder, Compression};
+
                 let mut encoder = GzEncoder::new(writer, Compression::default());
                 Self::write_records(&mut encoder, self.records)?;
                 encoder.finish()?;
@@ -735,6 +795,7 @@ where
             #[cfg(feature = "compression-lz4")]
             RecordBatchCompression::Lz4 => {
                 use lz4::{liblz4::BlockMode, EncoderBuilder};
+
                 let mut encoder = EncoderBuilder::new()
                     .block_mode(
                         // the only one supported by Kafka
@@ -744,6 +805,21 @@ where
                 Self::write_records(&mut encoder, self.records)?;
                 let (_writer, res) = encoder.finish();
                 res?;
+            }
+            #[cfg(feature = "compression-snappy")]
+            RecordBatchCompression::Snappy => {
+                use snap::raw::{max_compress_len, Encoder};
+
+                let mut input = vec![];
+                Self::write_records(&mut input, self.records)?;
+
+                let mut encoder = Encoder::new();
+                let mut output = vec![0; max_compress_len(input.len())];
+                let len = encoder
+                    .compress(&input, &mut output)
+                    .map_err(|e| WriteError::Malformed(Box::new(e)))?;
+
+                writer.write_all(&output[..len])?;
             }
             #[allow(unreachable_patterns)]
             _ => {
@@ -952,6 +1028,56 @@ mod tests {
                 }],
             }]),
             compression: RecordBatchCompression::Lz4,
+            is_transactional: false,
+            timestamp_type: RecordBatchTimestampType::CreateTime,
+        };
+        assert_eq!(actual, expected);
+
+        let mut data2 = vec![];
+        actual.write(&mut data2).unwrap();
+
+        // don't compare if the data is equal because compression encoder might work slightly differently, use another
+        // roundtrip instead
+        let actual2 = RecordBatch::read(&mut Cursor::new(data2)).unwrap();
+        assert_eq!(actual2, expected);
+    }
+
+    #[cfg(feature = "compression-snappy")]
+    #[test]
+    fn test_decode_fixture_snappy() {
+        // This data was obtained by watching rdkafka.
+        let data = [
+            b"\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x58\x00\x00\x00\x00".to_vec(),
+            b"\x02\xad\x86\xf4\xf4\x00\x02\x00\x00\x00\x00\x00\x00\x01\x7e\xb6".to_vec(),
+            b"\x45\x0e\x52\x00\x00\x01\x7e\xb6\x45\x0e\x52\xff\xff\xff\xff\xff".to_vec(),
+            b"\xff\xff\xff\xff\xff\xff\xff\xff\xff\x00\x00\x00\x01\x80\x01\x1c".to_vec(),
+            b"\xfc\x01\x00\x00\x00\xc8\x01\x78\xfe\x01\x00\x8a\x01\x00\x50\x16".to_vec(),
+            b"\x68\x65\x6c\x6c\x6f\x20\x6b\x61\x66\x6b\x61\x02\x06\x66\x6f\x6f".to_vec(),
+            b"\x06\x62\x61\x72".to_vec(),
+        ]
+        .concat();
+
+        let actual = RecordBatch::read(&mut Cursor::new(data)).unwrap();
+        let expected = RecordBatch {
+            base_offset: 0,
+            partition_leader_epoch: 0,
+            last_offset_delta: 0,
+            first_timestamp: 1643735486034,
+            max_timestamp: 1643735486034,
+            producer_id: -1,
+            producer_epoch: -1,
+            base_sequence: -1,
+            records: ControlBatchOrRecords::Records(vec![Record {
+                timestamp_delta: 0,
+                offset_delta: 0,
+                key: vec![b'x'; 100],
+                value: b"hello kafka".to_vec(),
+                headers: vec![RecordHeader {
+                    key: "foo".to_owned(),
+                    value: b"bar".to_vec(),
+                }],
+            }]),
+            compression: RecordBatchCompression::Snappy,
             is_transactional: false,
             timestamp_type: RecordBatchTimestampType::CreateTime,
         };
