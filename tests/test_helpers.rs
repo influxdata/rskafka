@@ -51,8 +51,8 @@ pub fn random_topic_name() -> String {
 
 pub fn record() -> Record {
     Record {
-        key: b"".to_vec(),
-        value: b"hello kafka".to_vec(),
+        key: Some(b"".to_vec()),
+        value: Some(b"hello kafka".to_vec()),
         headers: BTreeMap::from([("foo".to_owned(), b"bar".to_vec())]),
         timestamp: now(),
     }

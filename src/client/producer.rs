@@ -72,8 +72,8 @@
 //!
 //! // produce data
 //! let record = Record {
-//!     key: b"".to_vec(),
-//!     value: b"hello kafka".to_vec(),
+//!     key: None,
+//!     value: Some(b"hello kafka".to_vec()),
 //!     headers: BTreeMap::from([
 //!         ("foo".to_owned(), b"bar".to_vec()),
 //!     ]),
@@ -145,8 +145,8 @@
 //!         let data = std::mem::take(&mut self.data);
 //!         let records = vec![
 //!             Record {
-//!                 key: b"".to_vec(),
-//!                 value: data,
+//!                 key: None,
+//!                 value: Some(data),
 //!                 headers: BTreeMap::from([
 //!                     ("foo".to_owned(), b"bar".to_vec()),
 //!                 ]),
@@ -542,8 +542,8 @@ mod tests {
 
     fn record() -> Record {
         Record {
-            key: vec![0; 4],
-            value: vec![0; 6],
+            key: Some(vec![0; 4]),
+            value: Some(vec![0; 6]),
             headers: Default::default(),
             timestamp: OffsetDateTime::from_unix_timestamp(320).unwrap(),
         }

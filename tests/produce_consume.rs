@@ -146,19 +146,19 @@ async fn assert_produce_consume<F1, G1, F2, G2>(
                 // add a bit more data to encourage rdkafka to actually use compression, otherwise the compressed data
                 // is larger than the uncompressed version and rdkafka will not use compression at all
                 Record {
-                    key: vec![b'x'; 100],
+                    key: Some(vec![b'x'; 100]),
                     ..record
                 }
             }
         }
     };
     let record_2 = Record {
-        value: b"some value".to_vec(),
+        value: Some(b"some value".to_vec()),
         timestamp: now(),
         ..record_1.clone()
     };
     let record_3 = Record {
-        value: b"more value".to_vec(),
+        value: Some(b"more value".to_vec()),
         timestamp: now(),
         ..record_1.clone()
     };

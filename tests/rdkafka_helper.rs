@@ -48,12 +48,18 @@ pub async fn produce(
             headers = headers.add(&k, &v);
         }
 
-        let f_record = FutureRecord::to(&topic_name)
+        let mut f_record = FutureRecord::to(&topic_name)
             .partition(partition_index)
-            .key(&record.key)
-            .payload(&record.value)
             .headers(headers)
             .timestamp((record.timestamp.unix_timestamp_nanos() / 1_000_000) as i64);
+        let key_ref: Option<&Vec<u8>> = record.key.as_ref();
+        let value_ref: Option<&Vec<u8>> = record.value.as_ref();
+        if let Some(key) = key_ref {
+            f_record = f_record.key(key);
+        }
+        if let Some(value) = value_ref {
+            f_record = f_record.payload(value);
+        }
         let (_partition, offset) = client.send(f_record, Timeout::Never).await.unwrap();
         offsets.push(offset);
     }
@@ -87,8 +93,8 @@ pub async fn consume(
                 .take(n)
                 .map_ok(|msg| RecordAndOffset {
                     record: Record {
-                        key: msg.key().map(|k| k.to_vec()).unwrap_or_default(),
-                        value: msg.payload().map(|v| v.to_vec()).unwrap_or_default(),
+                        key: msg.key().map(|k| k.to_vec()),
+                        value: msg.payload().map(|v| v.to_vec()),
                         headers: msg
                             .headers()
                             .map(|headers| {

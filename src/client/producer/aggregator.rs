@@ -149,14 +149,14 @@ mod tests {
     #[test]
     fn test_record_aggregator() {
         let r1 = Record {
-            key: vec![0; 45],
-            value: vec![0; 2],
+            key: Some(vec![0; 45]),
+            value: Some(vec![0; 2]),
             headers: Default::default(),
             timestamp: OffsetDateTime::from_unix_timestamp(20).unwrap(),
         };
 
         let r2 = Record {
-            value: vec![0; 34],
+            value: Some(vec![0; 34]),
             ..r1.clone()
         };
 

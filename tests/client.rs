@@ -282,8 +282,8 @@ async fn test_produce_consume_size_cutoff() {
 
 pub fn large_record() -> Record {
     Record {
-        key: b"".to_vec(),
-        value: vec![b'x'; 1024],
+        key: Some(b"".to_vec()),
+        value: Some(vec![b'x'; 1024]),
         headers: BTreeMap::from([("foo".to_owned(), b"bar".to_vec())]),
         timestamp: now(),
     }
