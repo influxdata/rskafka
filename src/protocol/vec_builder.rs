@@ -1,7 +1,7 @@
 //! Helper to build a vector w/o blowing up memory.
 
 /// Default block size (10MB).
-const DEFAULT_BLOCK_SIZE: usize = 1024 * 1024 * 10;
+pub const DEFAULT_BLOCK_SIZE: usize = 1024 * 1024 * 10;
 
 /// Helper to build a vector w/ limited memory consumption.
 ///

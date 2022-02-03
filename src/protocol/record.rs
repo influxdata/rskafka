@@ -24,6 +24,8 @@ use std::io::{Cursor, Read, Write};
 #[cfg(test)]
 use proptest::prelude::*;
 
+use crate::protocol::vec_builder::DEFAULT_BLOCK_SIZE;
+
 use super::{
     primitives::{Int16, Int32, Int64, Int8, Varint, Varlong},
     traits::{ReadError, ReadType, WriteError, WriteType},
@@ -610,16 +612,35 @@ where
                 let uncompressed_size = decompress_len(&input).unwrap();
 
                 // Decode snappy payload.
-                let mut decoder = Decoder::new();
-                let mut output = vec![0; uncompressed_size];
-                let actual_uncompressed_size = decoder
-                    .decompress(&input, &mut output)
-                    .map_err(|e| ReadError::Malformed(Box::new(e)))?;
-                if actual_uncompressed_size != uncompressed_size {
-                    return Err(ReadError::Malformed(
-                        "broken snappy data".to_string().into(),
-                    ));
-                }
+                // The uncompressed length is unchecked and can be up to 2^32-1 bytes. To avoid a DDoS vector we try to
+                // limit it to a small size and if that fails we double that size;
+                let mut max_uncompressed_size = DEFAULT_BLOCK_SIZE;
+                let output = loop {
+                    let try_uncompressed_size = uncompressed_size.min(max_uncompressed_size);
+
+                    let mut decoder = Decoder::new();
+                    let mut output = vec![0; try_uncompressed_size];
+                    let actual_uncompressed_size = match decoder.decompress(&input, &mut output) {
+                        Ok(size) => size,
+                        Err(snap::Error::BufferTooSmall { .. })
+                            if max_uncompressed_size < uncompressed_size =>
+                        {
+                            // try larger buffer
+                            max_uncompressed_size *= 2;
+                            continue;
+                        }
+                        Err(e) => {
+                            return Err(ReadError::Malformed(Box::new(e)));
+                        }
+                    };
+                    if actual_uncompressed_size != uncompressed_size {
+                        return Err(ReadError::Malformed(
+                            "broken snappy data".to_string().into(),
+                        ));
+                    }
+
+                    break output;
+                };
 
                 // Read uncompressed records.
                 let mut decoder = Cursor::new(output);
