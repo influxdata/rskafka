@@ -111,6 +111,7 @@ impl StreamConsumerBuilder {
             min_batch_size: self.min_batch_size,
             max_batch_size: self.max_batch_size,
             next_offset: self.start_offset,
+            terminated: false,
             last_high_watermark: -1,
             buffer: Default::default(),
             fetch_fut: Fuse::terminated(),
@@ -122,6 +123,9 @@ type FetchResult = Result<(Vec<RecordAndOffset>, i64)>;
 
 /// A trait wrapper to allow mocking
 trait FetchClient: std::fmt::Debug + Send + Sync {
+    /// Fetch records.
+    ///
+    /// Arguments are identical to [`PartitionClient::fetch_records`].
     fn fetch_records(
         &self,
         offset: i64,
@@ -142,6 +146,11 @@ impl FetchClient for PartitionClient {
 }
 
 pin_project! {
+    /// Stream consuming data from start offset.
+    ///
+    /// # Error Handling
+    /// If an error is returned by [`fetch_records`](`FetchClient::fetch_records`) then the stream will emit this error
+    /// once and will terminate afterwards.
     pub struct StreamConsumer {
         client: Arc<dyn FetchClient>,
 
@@ -152,6 +161,8 @@ pin_project! {
         max_wait_ms: i32,
 
         next_offset: i64,
+
+        terminated: bool,
 
         last_high_watermark: i64,
 
@@ -167,6 +178,9 @@ impl Stream for StreamConsumer {
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         let this = self.project();
         loop {
+            if *this.terminated {
+                return Poll::Ready(None);
+            }
             if let Some(x) = this.buffer.pop_front() {
                 return Poll::Ready(Some(Ok((x, *this.last_high_watermark))));
             }
@@ -203,7 +217,12 @@ impl Stream for StreamConsumer {
                     }
                     continue;
                 }
-                Err(e) => return Poll::Ready(Some(Err(e))),
+                Err(e) => {
+                    *this.terminated = true;
+
+                    // report error once
+                    return Poll::Ready(Some(Err(e)));
+                }
             }
         }
     }
@@ -217,9 +236,10 @@ impl std::fmt::Debug for StreamConsumer {
             .field("max_batch_size", &self.max_batch_size)
             .field("max_wait_ms", &self.max_wait_ms)
             .field("next_offset", &self.next_offset)
+            .field("terminated", &self.terminated)
             .field("last_high_watermark", &self.last_high_watermark)
             .field("buffer", &self.buffer)
-            .finish()
+            .finish_non_exhaustive()
     }
 }
 
@@ -227,11 +247,15 @@ impl std::fmt::Debug for StreamConsumer {
 mod tests {
     use std::time::Duration;
 
+    use assert_matches::assert_matches;
     use futures::{pin_mut, StreamExt};
     use time::OffsetDateTime;
     use tokio::sync::{mpsc, Mutex};
 
-    use crate::record::Record;
+    use crate::{
+        client::error::{Error, ProtocolError},
+        record::Record,
+    };
 
     use super::*;
 
@@ -344,6 +368,36 @@ mod tests {
                 inner.batch_sizes.push(buffer.len());
 
                 Ok((buffer, inner.buffer.len() as i64 - 1))
+            })
+        }
+    }
+
+    #[derive(Debug)]
+    struct MockErrFetch {
+        inner: Arc<Mutex<Option<Error>>>,
+    }
+
+    impl MockErrFetch {
+        fn new(e: Error) -> Self {
+            Self {
+                inner: Arc::new(Mutex::new(Some(e))),
+            }
+        }
+    }
+
+    impl FetchClient for MockErrFetch {
+        fn fetch_records(
+            &self,
+            _offset: i64,
+            _bytes: Range<i32>,
+            _max_wait_ms: i32,
+        ) -> BoxFuture<'_, Result<(Vec<RecordAndOffset>, i64)>> {
+            let inner = Arc::clone(&self.inner);
+            Box::pin(async move {
+                match inner.lock().await.take() {
+                    Some(e) => Err(e),
+                    None => panic!("EOF"),
+                }
             })
         }
     }
@@ -470,5 +524,25 @@ mod tests {
             .unwrap()
             .unwrap()
             .unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_consumer_terminate() {
+        let e = Error::ServerError(
+            ProtocolError::OffsetOutOfRange,
+            String::from("offset out of range"),
+        );
+        let consumer = Arc::new(MockErrFetch::new(e));
+
+        let mut stream = StreamConsumerBuilder::new_with_client(consumer, 0).build();
+
+        let error = stream.next().await.expect("stream not empty").unwrap_err();
+        assert_matches!(
+            error,
+            Error::ServerError(ProtocolError::OffsetOutOfRange, _)
+        );
+
+        // stream ends
+        assert!(stream.next().await.is_none());
     }
 }

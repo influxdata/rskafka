@@ -1,3 +1,4 @@
+use assert_matches::assert_matches;
 use rskafka::{
     client::{
         error::{Error as ClientError, ProtocolError},
@@ -155,6 +156,63 @@ async fn test_produce_empty() {
         .produce(vec![], Compression::NoCompression)
         .await
         .unwrap();
+}
+
+#[tokio::test]
+async fn test_consume_empty() {
+    maybe_start_logging();
+
+    let connection = maybe_skip_kafka_integration!();
+    let topic_name = random_topic_name();
+    let n_partitions = 2;
+
+    let client = ClientBuilder::new(vec![connection]).build().await.unwrap();
+    let controller_client = client.controller_client().await.unwrap();
+    controller_client
+        .create_topic(&topic_name, n_partitions, 1, 5_000)
+        .await
+        .unwrap();
+
+    let partition_client = client.partition_client(&topic_name, 1).await.unwrap();
+    let (records, watermark) = partition_client
+        .fetch_records(0, 1..10_000, 1_000)
+        .await
+        .unwrap();
+    assert!(records.is_empty());
+    assert_eq!(watermark, 0);
+}
+
+#[tokio::test]
+async fn test_consume_offset_out_of_range() {
+    maybe_start_logging();
+
+    let connection = maybe_skip_kafka_integration!();
+    let topic_name = random_topic_name();
+    let n_partitions = 2;
+
+    let client = ClientBuilder::new(vec![connection]).build().await.unwrap();
+    let controller_client = client.controller_client().await.unwrap();
+    controller_client
+        .create_topic(&topic_name, n_partitions, 1, 5_000)
+        .await
+        .unwrap();
+
+    let partition_client = client.partition_client(&topic_name, 1).await.unwrap();
+    let record = record();
+    let offsets = partition_client
+        .produce(vec![record], Compression::NoCompression)
+        .await
+        .unwrap();
+    let offset = offsets[0];
+
+    let err = partition_client
+        .fetch_records(offset + 2, 1..10_000, 1_000)
+        .await
+        .unwrap_err();
+    assert_matches!(
+        err,
+        ClientError::ServerError(ProtocolError::OffsetOutOfRange, _)
+    );
 }
 
 #[tokio::test]
