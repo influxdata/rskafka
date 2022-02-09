@@ -23,7 +23,7 @@ use std::ops::{ControlFlow, Deref, Range};
 use std::sync::Arc;
 use time::OffsetDateTime;
 use tokio::sync::Mutex;
-use tracing::{error, info};
+use tracing::{error, info, warn};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Compression {
@@ -123,6 +123,18 @@ impl PartitionClient {
             process_fetch_response(self.partition, &self.topic, response)
         })
         .await?;
+
+        // Redpanda never sends OffsetOutOfRange even when it should. "Luckily" it does not support deletions so we can
+        // implement a simple heuristic.
+        if partition.high_watermark.0 < offset {
+            warn!(
+                "This message looks like Redpanda wants to report a OffsetOutOfRange but doesn't."
+            );
+            return Err(Error::ServerError(
+                ProtocolError::OffsetOutOfRange,
+                String::from("Offset out of range"),
+            ));
+        }
 
         let records = extract_records(partition.records.0)?;
 

@@ -37,7 +37,9 @@ async fn test_stream_consumer() {
         .await
         .unwrap();
 
-    let mut stream = StreamConsumerBuilder::new(Arc::clone(&partition_client), 0).build();
+    let mut stream = StreamConsumerBuilder::new(Arc::clone(&partition_client), 0)
+        .with_max_wait_ms(50)
+        .build();
 
     let assert_ok =
         |r: Result<Option<<StreamConsumer as Stream>::Item>, tokio::time::error::Elapsed>| {
@@ -50,7 +52,7 @@ async fn test_stream_consumer() {
     assert_ok(timeout(Duration::from_millis(100), stream.next()).await);
 
     // No further records
-    timeout(Duration::from_millis(100), stream.next())
+    timeout(Duration::from_millis(200), stream.next())
         .await
         .expect_err("timeout");
 
