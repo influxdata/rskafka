@@ -105,6 +105,11 @@ impl PartitionClient {
     /// Fetch `bytes` bytes of record data starting at sequence number `offset`
     ///
     /// Returns the records, and the current high watermark.
+    ///
+    ///
+    /// # Error Handling
+    /// Fetching records outside the range known the to broker (marked by low and high watermark) will lead to a
+    /// [`ServerError`](Error::ServerError) with [`OffsetOutOfRange`](ProtocolError::OffsetOutOfRange).
     pub async fn fetch_records(
         &self,
         offset: i64,
