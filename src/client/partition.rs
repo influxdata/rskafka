@@ -137,7 +137,7 @@ impl PartitionClient {
             ));
         }
 
-        let records = extract_records(partition.records.0)?;
+        let records = extract_records(partition.records.0, offset)?;
 
         Ok((records, partition.high_watermark.0))
     }
@@ -535,7 +535,10 @@ fn process_fetch_response(
     Ok(response_partition)
 }
 
-fn extract_records(partition_records: Vec<RecordBatch>) -> Result<Vec<RecordAndOffset>> {
+fn extract_records(
+    partition_records: Vec<RecordBatch>,
+    request_offset: i64,
+) -> Result<Vec<RecordAndOffset>> {
     let mut records = vec![];
 
     for batch in partition_records {
@@ -547,6 +550,13 @@ fn extract_records(partition_records: Vec<RecordBatch>) -> Result<Vec<RecordAndO
                 records.reserve(protocol_records.len());
 
                 for record in protocol_records {
+                    let offset = batch.base_offset + record.offset_delta as i64;
+                    if offset < request_offset {
+                        // Kafka does not split record batches on the server side, so we need to do this filtering on
+                        // the client side
+                        continue;
+                    }
+
                     let timestamp = OffsetDateTime::from_unix_timestamp_nanos(
                         (batch.first_timestamp + record.timestamp_delta) as i128 * 1_000_000,
                     )
@@ -565,7 +575,7 @@ fn extract_records(partition_records: Vec<RecordBatch>) -> Result<Vec<RecordAndO
                                 .collect(),
                             timestamp,
                         },
-                        offset: batch.base_offset + record.offset_delta as i64,
+                        offset,
                     })
                 }
             }
