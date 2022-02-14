@@ -43,6 +43,24 @@ impl Default for Compression {
     }
 }
 
+/// Which type of offset should be requested by [`PartitionClient::get_offset`].
+///
+/// # Timestamp-based Queries
+/// In theory the Kafka API would also support querying an offset based on a timestamp, but the behavior seems to be
+/// semi-defined, unintuitive (even within Apache Kafka) and inconsistent between Apache Kafka and Redpanda. So we
+/// decided to NOT expose this option.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum OffsetAt {
+    /// Earliest existing record.
+    ///
+    /// This is NOT the earliest produced record but the earliest record that is still kept, i.e. the offset might
+    /// change if records are pruned by Kafka (retention policy) or if the are deleted.
+    Earliest,
+
+    /// The latest existing record.
+    Latest,
+}
+
 /// Many operations must be performed on the leader for a partition
 ///
 /// Additionally a partition is the unit of concurrency within Kafka
@@ -110,7 +128,8 @@ impl PartitionClient {
     ///
     /// # Error Handling
     /// Fetching records outside the range known the to broker (marked by low and high watermark) will lead to a
-    /// [`ServerError`](Error::ServerError) with [`OffsetOutOfRange`](ProtocolError::OffsetOutOfRange).
+    /// [`ServerError`](Error::ServerError) with [`OffsetOutOfRange`](ProtocolError::OffsetOutOfRange). You may use
+    /// [`get_offset`](Self::get_offset) to determine the offset range.
     pub async fn fetch_records(
         &self,
         offset: i64,
@@ -142,22 +161,23 @@ impl PartitionClient {
         Ok((records, partition.high_watermark.0))
     }
 
-    /// Get high watermark for this partition.
-    pub async fn get_high_watermark(&self) -> Result<i64> {
-        let request = &build_list_offsets_request(self.partition, &self.topic);
+    /// Get offset for this partition.
+    ///
+    /// Note that the value returned by this method should be considered stale data, since:
+    ///
+    /// - **[`OffsetAt::Earliest`]:** Might be change at any time due to the Kafka retention policy or by
+    ///   [deleting records](Self::delete_records).
+    /// - **[`OffsetAt::Latest`]:** Might be change at any time by [producing records](Self::produce).
+    pub async fn get_offset(&self, at: OffsetAt) -> Result<i64> {
+        let request = &build_list_offsets_request(self.partition, &self.topic, at);
 
-        let partition = maybe_retry(
-            &self.backoff_config,
-            self,
-            "get_high_watermark",
-            || async move {
-                let response = self.get().await?.request(&request).await?;
-                process_list_offsets_response(self.partition, &self.topic, response)
-            },
-        )
+        let partition = maybe_retry(&self.backoff_config, self, "get_offset", || async move {
+            let response = self.get().await?.request(&request).await?;
+            process_list_offsets_response(self.partition, &self.topic, response)
+        })
         .await?;
 
-        extract_high_watermark(partition)
+        extract_offset(partition)
     }
 
     /// Delete records whose offset is smaller than the given offset.
@@ -585,7 +605,12 @@ fn extract_records(
     Ok(records)
 }
 
-fn build_list_offsets_request(partition: i32, topic: &str) -> ListOffsetsRequest {
+fn build_list_offsets_request(partition: i32, topic: &str, at: OffsetAt) -> ListOffsetsRequest {
+    let timestamp = match at {
+        OffsetAt::Earliest => -2,
+        OffsetAt::Latest => -1,
+    };
+
     ListOffsetsRequest {
         replica_id: NORMAL_CONSUMER,
         isolation_level: Some(IsolationLevel::ReadCommitted),
@@ -593,8 +618,7 @@ fn build_list_offsets_request(partition: i32, topic: &str) -> ListOffsetsRequest
             name: String_(topic.to_owned()),
             partitions: vec![ListOffsetsRequestPartition {
                 partition_index: Int32(partition),
-                // latest offset
-                timestamp: Int64(-1),
+                timestamp: Int64(timestamp),
                 max_num_offsets: Some(Int32(1)),
             }],
         }],
@@ -636,7 +660,7 @@ fn process_list_offsets_response(
     }
 }
 
-fn extract_high_watermark(partition: ListOffsetsResponsePartition) -> Result<i64> {
+fn extract_offset(partition: ListOffsetsResponsePartition) -> Result<i64> {
     match (
         partition.old_style_offsets.as_ref(),
         partition.offset.as_ref(),

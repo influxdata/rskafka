@@ -77,6 +77,8 @@ pub struct ListOffsetsRequestTopic {
     pub name: String_,
 
     /// Each partition in the request.
+    ///
+    /// Note: A partition may only appear once within the request.
     pub partitions: Vec<ListOffsetsRequestPartition>,
 }
 
@@ -120,6 +122,8 @@ pub struct ListOffsetsRequest {
     pub isolation_level: Option<IsolationLevel>,
 
     /// Each topic in the request.
+    ///
+    /// Note: A topic may only appear once within the request.
     pub topics: Vec<ListOffsetsRequestTopic>,
 }
 

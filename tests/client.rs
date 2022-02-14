@@ -2,7 +2,7 @@ use assert_matches::assert_matches;
 use rskafka::{
     client::{
         error::{Error as ClientError, ProtocolError, RequestError},
-        partition::Compression,
+        partition::{Compression, OffsetAt},
         ClientBuilder,
     },
     record::{Record, RecordAndOffset},
@@ -216,7 +216,7 @@ async fn test_consume_offset_out_of_range() {
 }
 
 #[tokio::test]
-async fn test_get_high_watermark() {
+async fn test_get_offset() {
     maybe_start_logging();
 
     let connection = maybe_skip_kafka_integration!();
@@ -238,7 +238,17 @@ async fn test_get_high_watermark() {
         .await
         .unwrap();
 
-    assert_eq!(partition_client.get_high_watermark().await.unwrap(), 0);
+    assert_eq!(
+        partition_client
+            .get_offset(OffsetAt::Earliest)
+            .await
+            .unwrap(),
+        0
+    );
+    assert_eq!(
+        partition_client.get_offset(OffsetAt::Latest).await.unwrap(),
+        0
+    );
 
     // add some data
     // use out-of order timestamps to ensure our "lastest offset" logic works
@@ -247,21 +257,29 @@ async fn test_get_high_watermark() {
         timestamp: record_early.timestamp + time::Duration::SECOND,
         ..record_early.clone()
     };
-    partition_client
+    let offsets = partition_client
         .produce(vec![record_late.clone()], Compression::NoCompression)
         .await
         .unwrap();
+    assert_eq!(offsets[0], 0);
 
     let offsets = partition_client
         .produce(vec![record_early.clone()], Compression::NoCompression)
         .await
         .unwrap();
     assert_eq!(offsets.len(), 1);
-    let expected = offsets[0] + 1;
+    assert_eq!(offsets[0], 1);
 
     assert_eq!(
-        partition_client.get_high_watermark().await.unwrap(),
-        expected
+        partition_client
+            .get_offset(OffsetAt::Earliest)
+            .await
+            .unwrap(),
+        0
+    );
+    assert_eq!(
+        partition_client.get_offset(OffsetAt::Latest).await.unwrap(),
+        2
     );
 }
 
@@ -496,6 +514,19 @@ async fn test_delete_records() {
                 offset: offset_4
             },
         ],
+    );
+
+    // offsets reflect deletion
+    assert_eq!(
+        partition_client
+            .get_offset(OffsetAt::Earliest)
+            .await
+            .unwrap(),
+        offset_3
+    );
+    assert_eq!(
+        partition_client.get_offset(OffsetAt::Latest).await.unwrap(),
+        offset_4 + 1
     );
 }
 
