@@ -339,6 +339,55 @@ async fn test_produce_consume_size_cutoff() {
 }
 
 #[tokio::test]
+async fn test_consume_midbatch() {
+    maybe_start_logging();
+
+    let connection = maybe_skip_kafka_integration!();
+    let topic_name = random_topic_name();
+
+    let client = ClientBuilder::new(vec![connection]).build().await.unwrap();
+    let controller_client = client.controller_client().await.unwrap();
+    controller_client
+        .create_topic(&topic_name, 1, 1, 5_000)
+        .await
+        .unwrap();
+
+    let partition_client = client.partition_client(&topic_name, 0).await.unwrap();
+
+    // produce two records into a single batch
+    let record_1 = record();
+    let record_2 = Record {
+        value: Some(b"x".to_vec()),
+        timestamp: now(),
+        ..record_1.clone()
+    };
+
+    let offsets = partition_client
+        .produce(
+            vec![record_1.clone(), record_2.clone()],
+            Compression::NoCompression,
+        )
+        .await
+        .unwrap();
+    let _offset_1 = offsets[0];
+    let offset_2 = offsets[1];
+
+    // when fetching from the middle of the record batch, the server will return both records but we should filter out
+    // the first one on the client side
+    let (records, _watermark) = partition_client
+        .fetch_records(offset_2, 1..10_000, 1_000)
+        .await
+        .unwrap();
+    assert_eq!(
+        records,
+        vec![RecordAndOffset {
+            record: record_2,
+            offset: offset_2
+        },],
+    );
+}
+
+#[tokio::test]
 async fn test_delete_records() {
     maybe_start_logging();
 
@@ -429,7 +478,8 @@ async fn test_delete_records() {
         ClientError::ServerError(ProtocolError::OffsetOutOfRange, _)
     );
 
-    // fetching untouched records still works, however the middle record batch is NOT half-deleted and still contains record_2
+    // fetching untouched records still works, however the middle record batch is NOT half-deleted and still contains
+    // record_2. `fetch_records` should filter this however.
     let (records, _watermark) = partition_client
         .fetch_records(offset_3, 1..10_000, 1_000)
         .await
@@ -437,10 +487,6 @@ async fn test_delete_records() {
     assert_eq!(
         records,
         vec![
-            RecordAndOffset {
-                record: record_2,
-                offset: offset_2
-            },
             RecordAndOffset {
                 record: record_3,
                 offset: offset_3
