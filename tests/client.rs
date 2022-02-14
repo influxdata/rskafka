@@ -1,11 +1,11 @@
 use assert_matches::assert_matches;
 use rskafka::{
     client::{
-        error::{Error as ClientError, ProtocolError},
+        error::{Error as ClientError, ProtocolError, RequestError},
         partition::Compression,
         ClientBuilder,
     },
-    record::Record,
+    record::{Record, RecordAndOffset},
 };
 use std::{collections::BTreeMap, str::FromStr, sync::Arc, time::Duration};
 
@@ -336,6 +336,121 @@ async fn test_produce_consume_size_cutoff() {
     let is_kafka = (n_records_minimal == 1) && (n_records_one_and_half == 1);
     let is_redpanda = (n_records_minimal == 1) && (n_records_one_and_half == 2);
     assert!(is_kafka ^ is_redpanda);
+}
+
+#[tokio::test]
+async fn test_delete_records() {
+    maybe_start_logging();
+
+    let connection = maybe_skip_kafka_integration!();
+    let topic_name = random_topic_name();
+
+    let client = ClientBuilder::new(vec![connection]).build().await.unwrap();
+    let controller_client = client.controller_client().await.unwrap();
+    controller_client
+        .create_topic(&topic_name, 1, 1, 5_000)
+        .await
+        .unwrap();
+
+    let partition_client = client.partition_client(&topic_name, 0).await.unwrap();
+
+    // produce the following record batches:
+    // - record_1
+    // - record_2, record_3
+    // - record_4
+    let record_1 = record();
+    let record_2 = Record {
+        value: Some(b"x".to_vec()),
+        timestamp: now(),
+        ..record_1.clone()
+    };
+    let record_3 = Record {
+        value: Some(b"y".to_vec()),
+        timestamp: now(),
+        ..record_1.clone()
+    };
+    let record_4 = Record {
+        value: Some(b"z".to_vec()),
+        timestamp: now(),
+        ..record_1.clone()
+    };
+
+    let offsets = partition_client
+        .produce(vec![record_1.clone()], Compression::NoCompression)
+        .await
+        .unwrap();
+    let offset_1 = offsets[0];
+
+    let offsets = partition_client
+        .produce(
+            vec![record_2.clone(), record_3.clone()],
+            Compression::NoCompression,
+        )
+        .await
+        .unwrap();
+    let offset_2 = offsets[0];
+    let offset_3 = offsets[1];
+
+    let offsets = partition_client
+        .produce(vec![record_4.clone()], Compression::NoCompression)
+        .await
+        .unwrap();
+    let offset_4 = offsets[0];
+
+    // delete from the middle of the 2nd batch
+    match partition_client.delete_records(offset_3, 1_000).await {
+        Ok(()) => {}
+        // Redpanda does not support deletions (https://github.com/redpanda-data/redpanda/issues/1016), but we also
+        // don't wanna skip it unconditionally
+        Err(ClientError::Request(RequestError::NoVersionMatch { .. }))
+            if std::env::var("TEST_DELETE_RECORDS").is_err() =>
+        {
+            println!("Skip test_delete_records");
+            return;
+        }
+        Err(e) => panic!("Cannot delete: {e}"),
+    }
+
+    // fetching data before the record fails
+    let err = partition_client
+        .fetch_records(offset_1, 1..10_000, 1_000)
+        .await
+        .unwrap_err();
+    assert_matches!(
+        err,
+        ClientError::ServerError(ProtocolError::OffsetOutOfRange, _)
+    );
+    let err = partition_client
+        .fetch_records(offset_2, 1..10_000, 1_000)
+        .await
+        .unwrap_err();
+    assert_matches!(
+        err,
+        ClientError::ServerError(ProtocolError::OffsetOutOfRange, _)
+    );
+
+    // fetching untouched records still works, however the middle record batch is NOT half-deleted and still contains record_2
+    let (records, _watermark) = partition_client
+        .fetch_records(offset_3, 1..10_000, 1_000)
+        .await
+        .unwrap();
+    assert_eq!(
+        records,
+        vec![
+            RecordAndOffset {
+                record: record_2,
+                offset: offset_2
+            },
+            RecordAndOffset {
+                record: record_3,
+                offset: offset_3
+            },
+            RecordAndOffset {
+                record: record_4,
+                offset: offset_4
+            },
+        ],
+    );
 }
 
 pub fn large_record() -> Record {

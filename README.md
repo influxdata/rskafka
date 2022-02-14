@@ -127,10 +127,11 @@ $ docker-compose -f docker-compose-kafka.yml up
 in one session, and then run:
 
 ```console
-$ TEST_INTEGRATION=1 KAFKA_CONNECT=localhost:9094 cargo test
+$ TEST_INTEGRATION=1 TEST_DELETE_RECORDS=1 KAFKA_CONNECT=localhost:9094 cargo test
 ```
 
-in another session.
+in another session. Note that Apache Kafka supports a different set of features then redpanda, so we pass other
+environment variables.
 
 ### Fuzzing
 RSKafka offers fuzz targets for certain protocol parsing steps. To build them make sure you have [cargo-fuzz] installed.

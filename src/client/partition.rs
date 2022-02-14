@@ -6,11 +6,12 @@ use crate::{
     protocol::{
         error::Error as ProtocolError,
         messages::{
-            FetchRequest, FetchRequestPartition, FetchRequestTopic, FetchResponse,
-            FetchResponsePartition, IsolationLevel, ListOffsetsRequest,
-            ListOffsetsRequestPartition, ListOffsetsRequestTopic, ListOffsetsResponse,
-            ListOffsetsResponsePartition, ProduceRequest, ProduceRequestPartitionData,
-            ProduceRequestTopicData, ProduceResponse, NORMAL_CONSUMER,
+            DeleteRecordsRequest, DeleteRecordsResponse, DeleteRequestPartition,
+            DeleteRequestTopic, DeleteResponsePartition, FetchRequest, FetchRequestPartition,
+            FetchRequestTopic, FetchResponse, FetchResponsePartition, IsolationLevel,
+            ListOffsetsRequest, ListOffsetsRequestPartition, ListOffsetsRequestTopic,
+            ListOffsetsResponse, ListOffsetsResponsePartition, ProduceRequest,
+            ProduceRequestPartitionData, ProduceRequestTopicData, ProduceResponse, NORMAL_CONSUMER,
         },
         primitives::*,
         record::{Record as ProtocolRecord, *},
@@ -157,6 +158,29 @@ impl PartitionClient {
         .await?;
 
         extract_high_watermark(partition)
+    }
+
+    /// Delete records whose offset is smaller than the given offset.
+    ///
+    /// # Supported Brokers
+    /// Currently this is only supported by Apache Kafka but NOT by Redpanda, see
+    /// <https://github.com/redpanda-data/redpanda/issues/1016>.
+    pub async fn delete_records(&self, offset: i64, timeout_ms: i32) -> Result<()> {
+        let request =
+            &build_delete_records_request(offset, timeout_ms, &self.topic, self.partition);
+
+        maybe_retry(
+            &self.backoff_config,
+            self,
+            "delete_records",
+            || async move {
+                let response = self.get().await?.request(&request).await?;
+                process_delete_records_response(&self.topic, self.partition, response)
+            },
+        )
+        .await?;
+
+        Ok(())
     }
 
     /// Retrieve the broker ID of the partition leader
@@ -623,5 +647,61 @@ fn extract_high_watermark(partition: ListOffsetsResponsePartition) -> Result<i64
         // new style
         (None, Some(offset)) => Ok(offset.0),
         _ => unreachable!(),
+    }
+}
+
+fn build_delete_records_request(
+    offset: i64,
+    timeout_ms: i32,
+    topic: &str,
+    partition: i32,
+) -> DeleteRecordsRequest {
+    DeleteRecordsRequest {
+        topics: vec![DeleteRequestTopic {
+            name: String_(topic.to_string()),
+            partitions: vec![DeleteRequestPartition {
+                partition_index: Int32(partition),
+                offset: Int64(offset),
+                tagged_fields: None,
+            }],
+            tagged_fields: None,
+        }],
+        timeout_ms: Int32(timeout_ms),
+        tagged_fields: None,
+    }
+}
+
+fn process_delete_records_response(
+    topic: &str,
+    partition: i32,
+    response: DeleteRecordsResponse,
+) -> Result<DeleteResponsePartition> {
+    let response_topic = response
+        .topics
+        .exactly_one()
+        .map_err(Error::exactly_one_topic)?;
+
+    if response_topic.name.0 != topic {
+        return Err(Error::InvalidResponse(format!(
+            "Expected data for topic '{}' but got data for topic '{}'",
+            topic, response_topic.name.0
+        )));
+    }
+
+    let response_partition = response_topic
+        .partitions
+        .exactly_one()
+        .map_err(Error::exactly_one_partition)?;
+
+    if response_partition.partition_index.0 != partition {
+        return Err(Error::InvalidResponse(format!(
+            "Expected data for partition {} but got data for partition {}",
+            partition, response_partition.partition_index.0
+        )));
+    }
+
+    match response_partition.error {
+        Some(err) => Err(Error::ServerError(err, String::new())),
+        None => Ok(response_partition),
     }
 }
