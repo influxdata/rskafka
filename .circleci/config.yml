@@ -256,6 +256,8 @@ jobs:
       RUST_LOG: "trace"
       # Run integration tests
       TEST_INTEGRATION: 1
+      # Kafka support DeleteRecords
+      TEST_DELETE_RECORDS: 1
       # Don't use the first node here since this is likely the controller and we want to ensure that we automatically
       # pick the controller for certain actions (e.g. topic creation) and don't just get lucky.
       KAFKA_CONNECT: "kafka-1:9093"

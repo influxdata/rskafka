@@ -22,6 +22,8 @@ mod constants;
 pub use constants::*;
 mod create_topics;
 pub use create_topics::*;
+mod delete_records;
+pub use delete_records::*;
 mod fetch;
 pub use fetch::*;
 mod header;

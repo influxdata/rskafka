@@ -1,5 +1,6 @@
 use thiserror::Error;
 
+pub use crate::messenger::RequestError;
 pub use crate::protocol::error::Error as ProtocolError;
 
 #[derive(Error, Debug)]
@@ -8,7 +9,7 @@ pub enum Error {
     Connection(#[from] crate::connection::Error),
 
     #[error("Request error: {0}")]
-    Request(#[from] crate::messenger::RequestError),
+    Request(#[from] RequestError),
 
     #[error("Invalid response: {0}")]
     InvalidResponse(String),
