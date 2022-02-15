@@ -198,7 +198,7 @@ async fn test_consume_offset_out_of_range() {
         .unwrap();
 
     let partition_client = client.partition_client(&topic_name, 1).await.unwrap();
-    let record = record();
+    let record = record(b"");
     let offsets = partition_client
         .produce(vec![record], Compression::NoCompression)
         .await
@@ -252,7 +252,7 @@ async fn test_get_offset() {
 
     // add some data
     // use out-of order timestamps to ensure our "lastest offset" logic works
-    let record_early = record();
+    let record_early = record(b"");
     let record_late = Record {
         timestamp: record_early.timestamp + time::Duration::SECOND,
         ..record_early.clone()
@@ -373,12 +373,8 @@ async fn test_consume_midbatch() {
     let partition_client = client.partition_client(&topic_name, 0).await.unwrap();
 
     // produce two records into a single batch
-    let record_1 = record();
-    let record_2 = Record {
-        value: Some(b"x".to_vec()),
-        timestamp: now(),
-        ..record_1.clone()
-    };
+    let record_1 = record(b"x");
+    let record_2 = record(b"y");
 
     let offsets = partition_client
         .produce(
@@ -425,22 +421,10 @@ async fn test_delete_records() {
     // - record_1
     // - record_2, record_3
     // - record_4
-    let record_1 = record();
-    let record_2 = Record {
-        value: Some(b"x".to_vec()),
-        timestamp: now(),
-        ..record_1.clone()
-    };
-    let record_3 = Record {
-        value: Some(b"y".to_vec()),
-        timestamp: now(),
-        ..record_1.clone()
-    };
-    let record_4 = Record {
-        value: Some(b"z".to_vec()),
-        timestamp: now(),
-        ..record_1.clone()
-    };
+    let record_1 = record(b"");
+    let record_2 = record(b"x");
+    let record_3 = record(b"y");
+    let record_4 = record(b"z");
 
     let offsets = partition_client
         .produce(vec![record_1.clone()], Compression::NoCompression)

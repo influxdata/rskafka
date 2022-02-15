@@ -23,7 +23,7 @@ async fn test_batch_producer() {
         .await
         .unwrap();
 
-    let record = record();
+    let record = record(b"");
 
     let partition_client = Arc::new(client.partition_client(&topic, 0).await.unwrap());
     let producer = BatchProducerBuilder::new(partition_client)

@@ -49,9 +49,9 @@ pub fn random_topic_name() -> String {
     format!("test_topic_{}", uuid::Uuid::new_v4())
 }
 
-pub fn record() -> Record {
+pub fn record(key: &[u8]) -> Record {
     Record {
-        key: Some(b"".to_vec()),
+        key: Some(key.to_vec()),
         value: Some(b"hello kafka".to_vec()),
         headers: BTreeMap::from([("foo".to_owned(), b"bar".to_vec())]),
         timestamp: now(),
