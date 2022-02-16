@@ -90,14 +90,16 @@ For more advanced production and consumption, see [`crate::client::producer`] an
 
 ## Features
 
-- **`compression-gzip`:** Support compression and decompression of messages using [gzip].
-- **`compression-lz4`:** Support compression and decompression of messages using [LZ4].
-- **`compression-snappy`:** Support compression and decompression of messages using [Snappy].
-- **`compression-zstd`:** Support compression and decompression of messages using [zstd].
-- **`fuzzing`:** Exposes some internal data structures so that they can be used by our fuzzers. This is NOT a stable
-  feature / API!
+- **`compression-gzip` (default):** Support compression and decompression of messages using [gzip].
+- **`compression-lz4` (default):** Support compression and decompression of messages using [LZ4].
+- **`compression-snappy` (default):** Support compression and decompression of messages using [Snappy].
+- **`compression-zstd` (default):** Support compression and decompression of messages using [zstd].
+- **`full`:** Includes all stable features (`compression-gzip`, `compression-lz4`, `compression-snappy`,
+  `compression-zstd`, `transport-socks5`, `transport-tls`).
 - **`transport-socks5`:** Allow transport via SOCKS5 proxy.
-- **`transport-tls` (default):** Allows TLS transport via [rustls].
+- **`transport-tls`:** Allows TLS transport via [rustls].
+- **`unstable-fuzzing`:** Exposes some internal data structures so that they can be used by our fuzzers. This is NOT a stable
+  feature / API!
 
 ## Testing
 

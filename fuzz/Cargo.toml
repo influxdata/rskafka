@@ -11,7 +11,7 @@ cargo-fuzz = true
 [dependencies]
 libfuzzer-sys = "0.4.0"
 pin-project-lite = "0.2"
-rskafka = { path = "..", features = ["fuzzing"] }
+rskafka = { path = "..", features = ["unstable-fuzzing"] }
 tokio = { version = "1.14", default-features = false, features = ["io-util", "rt"] }
 
 [[bin]]

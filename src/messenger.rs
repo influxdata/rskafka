@@ -258,7 +258,7 @@ where
         }
     }
 
-    #[cfg(feature = "fuzzing")]
+    #[cfg(feature = "unstable-fuzzing")]
     pub fn override_version_ranges(&self, ranges: HashMap<ApiKey, ApiVersionRange>) {
         self.set_version_ranges(ranges);
     }
