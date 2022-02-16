@@ -148,13 +148,13 @@ impl StreamConsumerBuilder {
     }
 }
 
-struct FetchResultInner {
+struct FetchResultOk {
     records_and_offsets: Vec<RecordAndOffset>,
     watermark: i64,
     used_offset: i64,
 }
 
-type FetchResult = Result<FetchResultInner>;
+type FetchResult = Result<FetchResultOk>;
 
 /// A trait wrapper to allow mocking
 trait FetchClient: std::fmt::Debug + Send + Sync {
@@ -252,7 +252,7 @@ impl Stream for StreamConsumer {
 
                     let (records_and_offsets, watermark) =
                         client.fetch_records(offset, bytes, max_wait_ms).await?;
-                    Ok(FetchResultInner {
+                    Ok(FetchResultOk {
                         records_and_offsets,
                         watermark,
                         used_offset: offset,
@@ -264,7 +264,7 @@ impl Stream for StreamConsumer {
 
             match (data, *this.start_offset) {
                 (Ok(inner), _) => {
-                    let FetchResultInner {
+                    let FetchResultOk {
                         mut records_and_offsets,
                         watermark,
                         used_offset,
