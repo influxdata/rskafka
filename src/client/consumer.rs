@@ -651,7 +651,7 @@ mod tests {
 
         assert_stream_pending(&mut stream).await;
 
-        // Write two records, nothing should happen as start offset is 2 (via "earlist")
+        // Write two records, nothing should happen as start offset is 2 (via "earliest")
         sender.send(record.clone()).await.unwrap();
         sender.send(record.clone()).await.unwrap();
 
@@ -694,7 +694,7 @@ mod tests {
 
         assert_stream_pending(&mut stream).await;
 
-        // Write two records, nothing should happen as start offset is 2 (via "earlist")
+        // Write two records, nothing should happen as start offset is 2 (via "latest")
         sender.send(record.clone()).await.unwrap();
         sender.send(record.clone()).await.unwrap();
 
