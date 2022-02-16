@@ -439,7 +439,10 @@ where
         // Flush data
         Self::flush_impl(&mut inner, self.client.as_ref(), self.compression).await;
 
-        extract(&result_slot.now_or_never().expect("just flushed"), tag)
+        // We need to poll the result slot here to make the result available via `peek`, otherwise the next thread in
+        // this critical section will flush the producer a 2nd time. We are using an ordinary `.await` call here instead
+        // of `now_or_never` because tokio might preempt us (or to be precise: might preempt polling from the result slot).
+        extract(&result_slot.await, tag)
     }
 
     /// Flushed out data from aggregator.

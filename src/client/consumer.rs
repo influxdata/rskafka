@@ -450,12 +450,20 @@ mod tests {
         assert_eq!(high_watermark, 5);
 
         let (record_and_offset, high_watermark) =
-            stream.next().now_or_never().unwrap().unwrap().unwrap();
+            tokio::time::timeout(Duration::from_millis(1), stream.next())
+                .await
+                .unwrap()
+                .unwrap()
+                .unwrap();
         assert_eq!(record_and_offset.offset, 4);
         assert_eq!(high_watermark, 5);
 
         let (record_and_offset, high_watermark) =
-            stream.next().now_or_never().unwrap().unwrap().unwrap();
+            tokio::time::timeout(Duration::from_millis(1), stream.next())
+                .await
+                .unwrap()
+                .unwrap()
+                .unwrap();
         assert_eq!(record_and_offset.offset, 5);
         assert_eq!(high_watermark, 5);
 

@@ -1,3 +1,5 @@
 disallowed-methods = [
+    { path = "tokio::io::AsyncReadExt::read", reason = "Use `read_exact`, because you likely forgot to use the IO amount. Also see `unused_io_amount` clippy lint." },
     { path = "tokio::io::AsyncWriteExt::write", reason = "Use `write_all`, because you likely forgot to use the IO amount. Also see `unused_io_amount` clippy lint." },
+    { path = "futures_util::future::future::FutureExt::now_or_never", reason = "Tokio might preempt tasks at any time, see https://tokio.rs/blog/2020-04-preemption" }
 ]
