@@ -365,6 +365,7 @@ where
             match error {
                 Error::Request(RequestError::Poisoned(_) | RequestError::IO(_))
                 | Error::Connection(_) => broker_cache.invalidate().await,
+                Error::ServerError(ProtocolError::InvalidReplicationFactor, _) => {}
                 Error::ServerError(ProtocolError::LeaderNotAvailable, _) => {}
                 Error::ServerError(ProtocolError::OffsetNotAvailable, _) => {}
                 Error::ServerError(ProtocolError::NotLeaderOrFollower, _) => {
