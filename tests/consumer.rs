@@ -69,6 +69,45 @@ async fn test_stream_consumer_start_at_0() {
 }
 
 #[tokio::test]
+async fn test_stream_consumer_start_at_1() {
+    maybe_start_logging();
+
+    let connection = maybe_skip_kafka_integration!();
+    let client = ClientBuilder::new(vec![connection]).build().await.unwrap();
+    let controller_client = client.controller_client().await.unwrap();
+
+    let topic = random_topic_name();
+    controller_client
+        .create_topic(&topic, 1, 1, 5_000)
+        .await
+        .unwrap();
+
+    let record_1 = record(b"x");
+    let record_2 = record(b"y");
+
+    let partition_client = Arc::new(client.partition_client(&topic, 0).await.unwrap());
+    partition_client
+        .produce(
+            vec![record_1.clone(), record_2.clone()],
+            Compression::NoCompression,
+        )
+        .await
+        .unwrap();
+
+    let mut stream = StreamConsumerBuilder::new(Arc::clone(&partition_client), StartOffset::At(1))
+        .with_max_wait_ms(50)
+        .build();
+
+    // Skips first record
+    let (record_and_offset, _watermark) =
+        assert_ok(timeout(Duration::from_millis(100), stream.next()).await);
+    assert_eq!(record_and_offset.record, record_2);
+
+    // No further records
+    assert_stream_pending(&mut stream).await;
+}
+
+#[tokio::test]
 async fn test_stream_consumer_offset_out_of_range() {
     maybe_start_logging();
 
@@ -179,8 +218,50 @@ async fn test_stream_consumer_start_at_earliest_empty() {
 
     // Get second record
     let (record_and_offset, _) =
-        assert_ok(timeout(Duration::from_millis(100), stream.next()).await);
+        assert_ok(timeout(Duration::from_millis(200), stream.next()).await);
     assert_eq!(record_and_offset.record, record);
+
+    // No further records
+    assert_stream_pending(&mut stream).await;
+}
+
+#[tokio::test]
+async fn test_stream_consumer_start_at_earliest_after_deletion() {
+    maybe_start_logging();
+
+    let connection = maybe_skip_kafka_integration!();
+    let client = ClientBuilder::new(vec![connection]).build().await.unwrap();
+    let controller_client = client.controller_client().await.unwrap();
+
+    let topic = random_topic_name();
+    controller_client
+        .create_topic(&topic, 1, 1, 5_000)
+        .await
+        .unwrap();
+
+    let record_1 = record(b"x");
+    let record_2 = record(b"y");
+
+    let partition_client = Arc::new(client.partition_client(&topic, 0).await.unwrap());
+    partition_client
+        .produce(
+            vec![record_1.clone(), record_2.clone()],
+            Compression::NoCompression,
+        )
+        .await
+        .unwrap();
+
+    maybe_skip_delete!(partition_client, 1);
+
+    let mut stream =
+        StreamConsumerBuilder::new(Arc::clone(&partition_client), StartOffset::Earliest)
+            .with_max_wait_ms(50)
+            .build();
+
+    // First record skipped / deleted
+    let (record_and_offset, _) =
+        assert_ok(timeout(Duration::from_millis(100), stream.next()).await);
+    assert_eq!(record_and_offset.record, record_2);
 
     // No further records
     assert_stream_pending(&mut stream).await;

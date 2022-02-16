@@ -1,7 +1,7 @@
 use assert_matches::assert_matches;
 use rskafka::{
     client::{
-        error::{Error as ClientError, ProtocolError, RequestError},
+        error::{Error as ClientError, ProtocolError},
         partition::{Compression, OffsetAt},
         ClientBuilder,
     },
@@ -10,9 +10,7 @@ use rskafka::{
 use std::{collections::BTreeMap, str::FromStr, sync::Arc, time::Duration};
 
 mod test_helpers;
-use test_helpers::{now, random_topic_name, record};
-
-use crate::test_helpers::maybe_start_logging;
+use test_helpers::{maybe_start_logging, now, random_topic_name, record};
 
 #[tokio::test]
 async fn test_plain() {
@@ -449,18 +447,7 @@ async fn test_delete_records() {
     let offset_4 = offsets[0];
 
     // delete from the middle of the 2nd batch
-    match partition_client.delete_records(offset_3, 1_000).await {
-        Ok(()) => {}
-        // Redpanda does not support deletions (https://github.com/redpanda-data/redpanda/issues/1016), but we also
-        // don't wanna skip it unconditionally
-        Err(ClientError::Request(RequestError::NoVersionMatch { .. }))
-            if std::env::var("TEST_DELETE_RECORDS").is_err() =>
-        {
-            println!("Skip test_delete_records");
-            return;
-        }
-        Err(e) => panic!("Cannot delete: {e}"),
-    }
+    maybe_skip_delete!(partition_client, offset_3);
 
     // fetching data before the record fails
     let err = partition_client
