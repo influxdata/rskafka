@@ -69,6 +69,8 @@ impl<T: Clone> std::future::Future for ReceiveFut<T> {
 
 #[cfg(test)]
 mod tests {
+    use std::time::Duration;
+
     use super::*;
 
     #[tokio::test]
@@ -93,10 +95,21 @@ mod tests {
 
         // Test drop
         let broadcast: BroadcastOnce<usize> = Default::default();
-        let r1 = broadcast.receive();
+        let mut r1 = broadcast.receive();
         let r2 = broadcast.receive();
-        assert!(r1.now_or_never().is_none());
+        assert_is_pending(&mut r1).await;
         broadcast.broadcast(5);
         assert_eq!(r2.await, 5);
+    }
+
+    async fn assert_is_pending<F, T>(f: &mut F)
+    where
+        F: Future<Output = T> + Send + Unpin,
+        T: std::fmt::Debug,
+    {
+        tokio::select! {
+            x = f => panic!("future is not pending, yielded: {x:?}"),
+            _ = tokio::time::sleep(Duration::from_millis(1)) => {},
+        };
     }
 }
