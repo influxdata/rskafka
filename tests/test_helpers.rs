@@ -2,6 +2,7 @@ use parking_lot::Once;
 use rskafka::record::Record;
 use std::collections::BTreeMap;
 use time::OffsetDateTime;
+
 /// Get the testing Kafka connection string or return current scope.
 ///
 /// If `TEST_INTEGRATION` and `KAFKA_CONNECT` are set, return the Kafka connection URL to the
@@ -44,14 +45,37 @@ macro_rules! maybe_skip_kafka_integration {
     }};
 }
 
+/// Performs delete operation using.
+///
+/// This is skipped (via `return`) if the broker returns `NoVersionMatch`, except when the `TEST_DELETE_RECORDS`
+/// environment variable is set.
+///
+/// This is helpful because Redpanda does not support deletes yet, see
+/// <https://github.com/redpanda-data/redpanda/issues/1016> but we also don not want to skip these test unconditionally.
+#[macro_export]
+macro_rules! maybe_skip_delete {
+    ($partition_client:ident, $offset:expr) => {
+        match $partition_client.delete_records($offset, 1_000).await {
+            Ok(()) => {}
+            Err(rskafka::client::error::Error::Request(
+                rskafka::client::error::RequestError::NoVersionMatch { .. },
+            )) if std::env::var("TEST_DELETE_RECORDS").is_err() => {
+                println!("Skip test_delete_records");
+                return;
+            }
+            Err(e) => panic!("Cannot delete: {e}"),
+        }
+    };
+}
+
 /// Generated random topic name for testing.
 pub fn random_topic_name() -> String {
     format!("test_topic_{}", uuid::Uuid::new_v4())
 }
 
-pub fn record() -> Record {
+pub fn record(key: &[u8]) -> Record {
     Record {
-        key: Some(b"".to_vec()),
+        key: Some(key.to_vec()),
         value: Some(b"hello kafka".to_vec()),
         headers: BTreeMap::from([("foo".to_owned(), b"bar".to_vec())]),
         timestamp: now(),

@@ -138,7 +138,7 @@ async fn assert_produce_consume<F1, G1, F2, G2>(
     );
 
     let record_1 = {
-        let record = record();
+        let record = record(b"");
         match compression {
             Compression::NoCompression => record,
             #[allow(unreachable_patterns)]

@@ -6,7 +6,10 @@
 //! use futures::StreamExt;
 //! use rskafka::client::{
 //!     ClientBuilder,
-//!     consumer::StreamConsumerBuilder,
+//!     consumer::{
+//!         StartOffset,
+//!         StreamConsumerBuilder,
+//!     },
 //! };
 //! use std::sync::Arc;
 //!
@@ -20,7 +23,7 @@
 //! // construct stream consumer
 //! let mut stream = StreamConsumerBuilder::new(
 //!         partition_client,
-//!         0,  // start offset
+//!         StartOffset::Earliest,
 //!     )
 //!     .with_max_wait_ms(100)
 //!     .build();
@@ -38,22 +41,48 @@ use std::ops::Range;
 use std::pin::Pin;
 use std::sync::Arc;
 use std::task::{Context, Poll};
+use std::time::Duration;
 
 use futures::future::{BoxFuture, Fuse, FusedFuture, FutureExt};
 use futures::Stream;
 use pin_project_lite::pin_project;
-use tracing::trace;
+use tracing::{trace, warn};
 
 use crate::{
-    client::{error::Result, partition::PartitionClient},
+    client::{
+        error::{Error, ProtocolError, Result},
+        partition::PartitionClient,
+    },
     record::RecordAndOffset,
 };
+
+use super::partition::OffsetAt;
+
+/// At which position shall the stream start.
+#[derive(Debug, Clone, Copy)]
+pub enum StartOffset {
+    /// At the earlist known offset.
+    ///
+    /// This might be larger than 0 if some records were already deleted due to a retention policy.
+    Earliest,
+
+    /// At the latest known offset.
+    ///
+    /// This is helpful if you only want ot process new data.
+    Latest,
+
+    /// At a specific offset.
+    ///
+    /// Note that specifying an offset that is unknown to the broker will result in a [`Error::ServerError`] with
+    /// [`ProtocolError::OffsetOutOfRange`] and the stream will terminate right after the error.
+    At(i64),
+}
 
 #[derive(Debug)]
 pub struct StreamConsumerBuilder {
     client: Arc<dyn FetchClient>,
 
-    start_offset: i64,
+    start_offset: StartOffset,
 
     max_wait_ms: i32,
 
@@ -63,12 +92,12 @@ pub struct StreamConsumerBuilder {
 }
 
 impl StreamConsumerBuilder {
-    pub fn new(client: Arc<PartitionClient>, start_offset: i64) -> Self {
+    pub fn new(client: Arc<PartitionClient>, start_offset: StartOffset) -> Self {
         Self::new_with_client(client, start_offset)
     }
 
     /// Internal API for creating with any `dyn FetchClient`
-    fn new_with_client(client: Arc<dyn FetchClient>, start_offset: i64) -> Self {
+    fn new_with_client(client: Arc<dyn FetchClient>, start_offset: StartOffset) -> Self {
         Self {
             client,
             start_offset,
@@ -110,7 +139,9 @@ impl StreamConsumerBuilder {
             max_wait_ms: self.max_wait_ms,
             min_batch_size: self.min_batch_size,
             max_batch_size: self.max_batch_size,
-            next_offset: self.start_offset,
+            next_offset: None,
+            next_backoff: None,
+            start_offset: self.start_offset,
             terminated: false,
             last_high_watermark: -1,
             buffer: Default::default(),
@@ -119,7 +150,13 @@ impl StreamConsumerBuilder {
     }
 }
 
-type FetchResult = Result<(Vec<RecordAndOffset>, i64)>;
+struct FetchResultOk {
+    records_and_offsets: Vec<RecordAndOffset>,
+    watermark: i64,
+    used_offset: i64,
+}
+
+type FetchResult = Result<FetchResultOk>;
 
 /// A trait wrapper to allow mocking
 trait FetchClient: std::fmt::Debug + Send + Sync {
@@ -132,6 +169,11 @@ trait FetchClient: std::fmt::Debug + Send + Sync {
         bytes: Range<i32>,
         max_wait_ms: i32,
     ) -> BoxFuture<'_, Result<(Vec<RecordAndOffset>, i64)>>;
+
+    /// Get offset.
+    ///
+    /// Arguments are identical to [`PartitionClient::get_offset`].
+    fn get_offset(&self, at: OffsetAt) -> BoxFuture<'_, Result<i64>>;
 }
 
 impl FetchClient for PartitionClient {
@@ -142,6 +184,10 @@ impl FetchClient for PartitionClient {
         max_wait_ms: i32,
     ) -> BoxFuture<'_, Result<(Vec<RecordAndOffset>, i64)>> {
         Box::pin(self.fetch_records(offset, bytes, max_wait_ms))
+    }
+
+    fn get_offset(&self, at: OffsetAt) -> BoxFuture<'_, Result<i64>> {
+        Box::pin(self.get_offset(at))
     }
 }
 
@@ -160,7 +206,11 @@ pin_project! {
 
         max_wait_ms: i32,
 
-        next_offset: i64,
+        start_offset: StartOffset,
+
+        next_offset: Option<i64>,
+
+        next_backoff: Option<Duration>,
 
         terminated: bool,
 
@@ -186,38 +236,92 @@ impl Stream for StreamConsumer {
             }
 
             if this.fetch_fut.is_terminated() {
-                let offset = *this.next_offset;
+                let next_offset = *this.next_offset;
+                let start_offset = *this.start_offset;
                 let bytes = (*this.min_batch_size)..(*this.max_batch_size);
                 let max_wait_ms = *this.max_wait_ms;
+                let next_backoff = std::mem::take(this.next_backoff);
                 let client = Arc::clone(this.client);
 
-                trace!(offset, "Fetching records at offset");
+                trace!(?start_offset, ?next_offset, "Fetching records at offset");
 
                 *this.fetch_fut = FutureExt::fuse(Box::pin(async move {
-                    client.fetch_records(offset, bytes, max_wait_ms).await
+                    if let Some(backoff) = next_backoff {
+                        tokio::time::sleep(backoff).await;
+                    }
+
+                    let offset = match next_offset {
+                        Some(x) => x,
+                        None => match start_offset {
+                            StartOffset::Earliest => client.get_offset(OffsetAt::Earliest).await?,
+                            StartOffset::Latest => client.get_offset(OffsetAt::Latest).await?,
+                            StartOffset::At(x) => x,
+                        },
+                    };
+
+                    let (records_and_offsets, watermark) =
+                        client.fetch_records(offset, bytes, max_wait_ms).await?;
+                    Ok(FetchResultOk {
+                        records_and_offsets,
+                        watermark,
+                        used_offset: offset,
+                    })
                 }));
             }
 
             let data: FetchResult = futures::ready!(this.fetch_fut.poll_unpin(cx));
 
-            match data {
-                Ok((mut v, watermark)) => {
+            match (data, *this.start_offset) {
+                (Ok(inner), _) => {
+                    let FetchResultOk {
+                        mut records_and_offsets,
+                        watermark,
+                        used_offset,
+                    } = inner;
                     trace!(
                         high_watermark = watermark,
-                        n_records = v.len(),
+                        n_records = records_and_offsets.len(),
                         "Received records and a high watermark",
                     );
 
+                    // Remember used offset (might be overwritten if there was any data) so we don't refetch the
+                    // earliest / latest offset for every try. Also fetching the latest offset might be racy otherwise,
+                    // since we'll never be in a position where the latest one can actually be fetched.
+                    *this.next_offset = Some(used_offset);
+
                     // Sort records by offset in case they aren't in order
-                    v.sort_by_key(|x| x.offset);
+                    records_and_offsets.sort_by_key(|x| x.offset);
                     *this.last_high_watermark = watermark;
-                    if let Some(x) = v.last() {
-                        *this.next_offset = x.offset + 1;
-                        this.buffer.extend(v.into_iter())
+                    if let Some(x) = records_and_offsets.last() {
+                        *this.next_offset = Some(x.offset + 1);
+                        this.buffer.extend(records_and_offsets.into_iter())
                     }
                     continue;
                 }
-                Err(e) => {
+                // if we don't have an offset, try again because fetching the offset is racy
+                (
+                    Err(Error::ServerError(ProtocolError::OffsetOutOfRange, _)),
+                    StartOffset::Earliest | StartOffset::Latest,
+                ) => {
+                    // wipe offset and try again
+                    *this.next_offset = None;
+
+                    // This will only happen if retention / deletions happen after we've asked for the earliest/latest
+                    // offset and our "fetch" request. This should be a rather rare event, but if something is horrible
+                    // wrong in our cluster (e.g. some actor is spamming "delete" requests) then let's at least backoff
+                    // a bit.
+                    let backoff_secs = 1;
+                    warn!(
+                        start_offset=?this.start_offset,
+                        backoff_secs,
+                        "Records are gone between ListOffsets and Fetch, backoff a bit",
+                    );
+                    *this.next_backoff = Some(Duration::from_secs(backoff_secs));
+
+                    continue;
+                }
+                // if we have an offset, terminate the stream
+                (Err(e), _) => {
                     *this.terminated = true;
 
                     // report error once
@@ -268,16 +372,20 @@ mod tests {
     struct MockFetchInner {
         batch_sizes: Vec<usize>,
         stream: mpsc::Receiver<Record>,
+        next_err: Option<Error>,
         buffer: Vec<Record>,
+        range: (i64, i64),
     }
 
     impl MockFetch {
-        fn new(stream: mpsc::Receiver<Record>) -> Self {
+        fn new(stream: mpsc::Receiver<Record>, next_err: Option<Error>, range: (i64, i64)) -> Self {
             Self {
                 inner: Arc::new(Mutex::new(MockFetchInner {
                     batch_sizes: vec![],
                     stream,
                     buffer: Default::default(),
+                    next_err,
+                    range,
                 })),
             }
         }
@@ -296,6 +404,10 @@ mod tests {
         ) -> BoxFuture<'_, Result<(Vec<RecordAndOffset>, i64)>> {
             let inner = Arc::clone(&self.inner);
             Box::pin(async move {
+                if let Some(err) = inner.lock().await.next_err.take() {
+                    return Err(err);
+                }
+
                 println!("MockFetch::fetch_records");
                 let mut inner = inner.lock().await;
                 println!("MockFetch::fetch_records locked");
@@ -370,33 +482,14 @@ mod tests {
                 Ok((buffer, inner.buffer.len() as i64 - 1))
             })
         }
-    }
 
-    #[derive(Debug)]
-    struct MockErrFetch {
-        inner: Arc<Mutex<Option<Error>>>,
-    }
-
-    impl MockErrFetch {
-        fn new(e: Error) -> Self {
-            Self {
-                inner: Arc::new(Mutex::new(Some(e))),
-            }
-        }
-    }
-
-    impl FetchClient for MockErrFetch {
-        fn fetch_records(
-            &self,
-            _offset: i64,
-            _bytes: Range<i32>,
-            _max_wait_ms: i32,
-        ) -> BoxFuture<'_, Result<(Vec<RecordAndOffset>, i64)>> {
+        fn get_offset(&self, at: OffsetAt) -> BoxFuture<'_, Result<i64>> {
             let inner = Arc::clone(&self.inner);
+
             Box::pin(async move {
-                match inner.lock().await.take() {
-                    Some(e) => Err(e),
-                    None => panic!("EOF"),
+                match at {
+                    OffsetAt::Earliest => Ok(inner.lock().await.range.0),
+                    OffsetAt::Latest => Ok(inner.lock().await.range.1),
                 }
             })
         }
@@ -412,23 +505,21 @@ mod tests {
         };
 
         let (sender, receiver) = mpsc::channel(10);
-        let consumer = Arc::new(MockFetch::new(receiver));
-        let mut stream =
-            StreamConsumerBuilder::new_with_client(Arc::<MockFetch>::clone(&consumer), 2)
-                .with_max_wait_ms(10)
-                .build();
+        let consumer = Arc::new(MockFetch::new(receiver, None, (0, 1_000)));
+        let mut stream = StreamConsumerBuilder::new_with_client(
+            Arc::<MockFetch>::clone(&consumer),
+            StartOffset::At(2),
+        )
+        .with_max_wait_ms(10)
+        .build();
 
-        tokio::time::timeout(Duration::from_micros(1), stream.next())
-            .await
-            .expect_err("timeout");
+        assert_stream_pending(&mut stream).await;
 
         // Write two records, nothing should happen as start offset is 2
         sender.send(record.clone()).await.unwrap();
         sender.send(record.clone()).await.unwrap();
 
-        tokio::time::timeout(Duration::from_micros(10), stream.next())
-            .await
-            .expect_err("timeout");
+        assert_stream_pending(&mut stream).await;
 
         sender.send(record.clone()).await.unwrap();
 
@@ -481,21 +572,21 @@ mod tests {
         };
 
         let (sender, receiver) = mpsc::channel(10);
-        let consumer = Arc::new(MockFetch::new(receiver));
+        let consumer = Arc::new(MockFetch::new(receiver, None, (0, 1_000)));
 
         assert!(consumer.batch_sizes().await.is_empty());
 
-        let mut stream =
-            StreamConsumerBuilder::new_with_client(Arc::<MockFetch>::clone(&consumer), 0)
-                .with_min_batch_size((record.approximate_size() * 2) as i32)
-                .with_max_batch_size((record.approximate_size() * 3) as i32)
-                .with_max_wait_ms(1)
-                .build();
+        let mut stream = StreamConsumerBuilder::new_with_client(
+            Arc::<MockFetch>::clone(&consumer),
+            StartOffset::At(0),
+        )
+        .with_min_batch_size((record.approximate_size() * 2) as i32)
+        .with_max_batch_size((record.approximate_size() * 3) as i32)
+        .with_max_wait_ms(5)
+        .build();
 
         // Should return nothing
-        tokio::time::timeout(Duration::from_millis(10), stream.next())
-            .await
-            .expect_err("timeout");
+        assert_stream_pending(&mut stream).await;
 
         // Stream might be holding lock, so must poll it whilst trying to extract batch sizes
         // to allow timeouts to be serviced and the lock released
@@ -521,13 +612,13 @@ mod tests {
         sender.send(record.clone()).await.unwrap();
 
         // Should not wait for max_wait_ms
-        tokio::time::timeout(Duration::from_micros(10), stream.next())
+        tokio::time::timeout(Duration::from_micros(1), stream.next())
             .await
             .unwrap()
             .unwrap()
             .unwrap();
         // Should not wait for max_wait_ms
-        tokio::time::timeout(Duration::from_micros(10), stream.next())
+        tokio::time::timeout(Duration::from_micros(1), stream.next())
             .await
             .unwrap()
             .unwrap()
@@ -540,9 +631,11 @@ mod tests {
             ProtocolError::OffsetOutOfRange,
             String::from("offset out of range"),
         );
-        let consumer = Arc::new(MockErrFetch::new(e));
+        let (_sender, receiver) = mpsc::channel(10);
+        let consumer = Arc::new(MockFetch::new(receiver, Some(e), (0, 1_000)));
 
-        let mut stream = StreamConsumerBuilder::new_with_client(consumer, 0).build();
+        let mut stream =
+            StreamConsumerBuilder::new_with_client(consumer, StartOffset::At(0)).build();
 
         let error = stream.next().await.expect("stream not empty").unwrap_err();
         assert_matches!(
@@ -552,5 +645,107 @@ mod tests {
 
         // stream ends
         assert!(stream.next().await.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_consumer_earliest() {
+        let record = Record {
+            key: Some(vec![0; 4]),
+            value: Some(vec![0; 6]),
+            headers: Default::default(),
+            timestamp: OffsetDateTime::now_utc(),
+        };
+
+        // Simulate an error on first fetch to encourage an offset update
+        let e = Error::ServerError(
+            ProtocolError::OffsetOutOfRange,
+            String::from("offset out of range"),
+        );
+
+        let (sender, receiver) = mpsc::channel(10);
+        let consumer = Arc::new(MockFetch::new(receiver, Some(e), (2, 1_000)));
+        let mut stream = StreamConsumerBuilder::new_with_client(
+            Arc::<MockFetch>::clone(&consumer),
+            StartOffset::Earliest,
+        )
+        .with_max_wait_ms(10)
+        .build();
+
+        assert_stream_pending(&mut stream).await;
+
+        // Write two records, nothing should happen as start offset is 2 (via "earliest")
+        sender.send(record.clone()).await.unwrap();
+        sender.send(record.clone()).await.unwrap();
+
+        assert_stream_pending(&mut stream).await;
+
+        sender.send(record.clone()).await.unwrap();
+
+        let unwrap = |e: Result<Option<Result<_, _>>, _>| e.unwrap().unwrap().unwrap();
+
+        // need a solid timeout here because we have simulated an error that caused a backoff
+        let (record_and_offset, high_watermark) =
+            unwrap(tokio::time::timeout(Duration::from_secs(2), stream.next()).await);
+
+        assert_eq!(record_and_offset.offset, 2);
+        assert_eq!(high_watermark, 2);
+    }
+
+    #[tokio::test]
+    async fn test_consumer_latest() {
+        let record = Record {
+            key: Some(vec![0; 4]),
+            value: Some(vec![0; 6]),
+            headers: Default::default(),
+            timestamp: OffsetDateTime::now_utc(),
+        };
+
+        // Simulate an error on first fetch to encourage an offset update
+        let e = Error::ServerError(
+            ProtocolError::OffsetOutOfRange,
+            String::from("offset out of range"),
+        );
+
+        let (sender, receiver) = mpsc::channel(10);
+        let consumer = Arc::new(MockFetch::new(receiver, Some(e), (0, 2)));
+        let mut stream = StreamConsumerBuilder::new_with_client(
+            Arc::<MockFetch>::clone(&consumer),
+            StartOffset::Latest,
+        )
+        .with_max_wait_ms(10)
+        .build();
+
+        assert_stream_pending(&mut stream).await;
+
+        // Write two records, nothing should happen as start offset is 2 (via "latest")
+        sender.send(record.clone()).await.unwrap();
+        sender.send(record.clone()).await.unwrap();
+
+        assert_stream_pending(&mut stream).await;
+
+        sender.send(record.clone()).await.unwrap();
+
+        let unwrap = |e: Result<Option<Result<_, _>>, _>| e.unwrap().unwrap().unwrap();
+
+        // need a solid timeout here because we have simulated an error that caused a backoff
+        let (record_and_offset, high_watermark) =
+            unwrap(tokio::time::timeout(Duration::from_secs(2), stream.next()).await);
+
+        assert_eq!(record_and_offset.offset, 2);
+        assert_eq!(high_watermark, 2);
+    }
+
+    /// Assert that given stream is pending.
+    ///
+    /// This will will try to poll the stream for a bit to ensure that async IO has a chance to catch up.
+    async fn assert_stream_pending<S>(stream: &mut S)
+    where
+        S: Stream + Send + Unpin,
+        S::Item: std::fmt::Debug,
+    {
+        tokio::select! {
+            e = stream.next() => panic!("stream is not pending, yielded: {e:?}"),
+            _ = tokio::time::sleep(Duration::from_millis(1)) => {},
+        };
     }
 }

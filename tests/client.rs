@@ -1,7 +1,7 @@
 use assert_matches::assert_matches;
 use rskafka::{
     client::{
-        error::{Error as ClientError, ProtocolError, RequestError},
+        error::{Error as ClientError, ProtocolError},
         partition::{Compression, OffsetAt},
         ClientBuilder,
     },
@@ -10,9 +10,7 @@ use rskafka::{
 use std::{collections::BTreeMap, str::FromStr, sync::Arc, time::Duration};
 
 mod test_helpers;
-use test_helpers::{now, random_topic_name, record};
-
-use crate::test_helpers::maybe_start_logging;
+use test_helpers::{maybe_start_logging, now, random_topic_name, record};
 
 #[tokio::test]
 async fn test_plain() {
@@ -198,7 +196,7 @@ async fn test_consume_offset_out_of_range() {
         .unwrap();
 
     let partition_client = client.partition_client(&topic_name, 1).await.unwrap();
-    let record = record();
+    let record = record(b"");
     let offsets = partition_client
         .produce(vec![record], Compression::NoCompression)
         .await
@@ -252,7 +250,7 @@ async fn test_get_offset() {
 
     // add some data
     // use out-of order timestamps to ensure our "lastest offset" logic works
-    let record_early = record();
+    let record_early = record(b"");
     let record_late = Record {
         timestamp: record_early.timestamp + time::Duration::SECOND,
         ..record_early.clone()
@@ -373,12 +371,8 @@ async fn test_consume_midbatch() {
     let partition_client = client.partition_client(&topic_name, 0).await.unwrap();
 
     // produce two records into a single batch
-    let record_1 = record();
-    let record_2 = Record {
-        value: Some(b"x".to_vec()),
-        timestamp: now(),
-        ..record_1.clone()
-    };
+    let record_1 = record(b"x");
+    let record_2 = record(b"y");
 
     let offsets = partition_client
         .produce(
@@ -425,22 +419,10 @@ async fn test_delete_records() {
     // - record_1
     // - record_2, record_3
     // - record_4
-    let record_1 = record();
-    let record_2 = Record {
-        value: Some(b"x".to_vec()),
-        timestamp: now(),
-        ..record_1.clone()
-    };
-    let record_3 = Record {
-        value: Some(b"y".to_vec()),
-        timestamp: now(),
-        ..record_1.clone()
-    };
-    let record_4 = Record {
-        value: Some(b"z".to_vec()),
-        timestamp: now(),
-        ..record_1.clone()
-    };
+    let record_1 = record(b"");
+    let record_2 = record(b"x");
+    let record_3 = record(b"y");
+    let record_4 = record(b"z");
 
     let offsets = partition_client
         .produce(vec![record_1.clone()], Compression::NoCompression)
@@ -465,18 +447,7 @@ async fn test_delete_records() {
     let offset_4 = offsets[0];
 
     // delete from the middle of the 2nd batch
-    match partition_client.delete_records(offset_3, 1_000).await {
-        Ok(()) => {}
-        // Redpanda does not support deletions (https://github.com/redpanda-data/redpanda/issues/1016), but we also
-        // don't wanna skip it unconditionally
-        Err(ClientError::Request(RequestError::NoVersionMatch { .. }))
-            if std::env::var("TEST_DELETE_RECORDS").is_err() =>
-        {
-            println!("Skip test_delete_records");
-            return;
-        }
-        Err(e) => panic!("Cannot delete: {e}"),
-    }
+    maybe_skip_delete!(partition_client, offset_3);
 
     // fetching data before the record fails
     let err = partition_client
