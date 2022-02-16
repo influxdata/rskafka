@@ -41,11 +41,12 @@ use std::ops::Range;
 use std::pin::Pin;
 use std::sync::Arc;
 use std::task::{Context, Poll};
+use std::time::Duration;
 
 use futures::future::{BoxFuture, Fuse, FusedFuture, FutureExt};
 use futures::Stream;
 use pin_project_lite::pin_project;
-use tracing::trace;
+use tracing::{trace, warn};
 
 use crate::{
     client::{
@@ -139,6 +140,7 @@ impl StreamConsumerBuilder {
             min_batch_size: self.min_batch_size,
             max_batch_size: self.max_batch_size,
             next_offset: None,
+            next_backoff: None,
             start_offset: self.start_offset,
             terminated: false,
             last_high_watermark: -1,
@@ -208,6 +210,8 @@ pin_project! {
 
         next_offset: Option<i64>,
 
+        next_backoff: Option<Duration>,
+
         terminated: bool,
 
         last_high_watermark: i64,
@@ -236,16 +240,21 @@ impl Stream for StreamConsumer {
                 let start_offset = *this.start_offset;
                 let bytes = (*this.min_batch_size)..(*this.max_batch_size);
                 let max_wait_ms = *this.max_wait_ms;
+                let next_backoff = std::mem::take(this.next_backoff);
                 let client = Arc::clone(this.client);
 
                 trace!(?start_offset, ?next_offset, "Fetching records at offset");
 
                 *this.fetch_fut = FutureExt::fuse(Box::pin(async move {
+                    if let Some(backoff) = next_backoff {
+                        tokio::time::sleep(backoff).await;
+                    }
+
                     let offset = match next_offset {
                         Some(x) => x,
                         None => match start_offset {
                             StartOffset::Earliest => client.get_offset(OffsetAt::Earliest).await?,
-                            StartOffset::Latest => dbg!(client.get_offset(OffsetAt::Latest).await?),
+                            StartOffset::Latest => client.get_offset(OffsetAt::Latest).await?,
                             StartOffset::At(x) => x,
                         },
                     };
@@ -296,6 +305,19 @@ impl Stream for StreamConsumer {
                 ) => {
                     // wipe offset and try again
                     *this.next_offset = None;
+
+                    // This will only happen if retention / deletions happen after we've asked for the earliest/latest
+                    // offset and our "fetch" request. This should be a rather rare event, but if something is horrible
+                    // wrong in our cluster (e.g. some actor is spamming "delete" requests) then let's at least backoff
+                    // a bit.
+                    let backoff_secs = 1;
+                    warn!(
+                        start_offset=?this.start_offset,
+                        backoff_secs,
+                        "Records are gone between ListOffsets and Fetch, backoff a bit",
+                    );
+                    *this.next_backoff = Some(Duration::from_secs(backoff_secs));
+
                     continue;
                 }
                 // if we have an offset, terminate the stream
@@ -661,8 +683,9 @@ mod tests {
 
         let unwrap = |e: Result<Option<Result<_, _>>, _>| e.unwrap().unwrap().unwrap();
 
+        // need a solid timeout here because we have simulated an error that caused a backoff
         let (record_and_offset, high_watermark) =
-            unwrap(tokio::time::timeout(Duration::from_micros(10), stream.next()).await);
+            unwrap(tokio::time::timeout(Duration::from_secs(2), stream.next()).await);
 
         assert_eq!(record_and_offset.offset, 2);
         assert_eq!(high_watermark, 2);
@@ -704,8 +727,9 @@ mod tests {
 
         let unwrap = |e: Result<Option<Result<_, _>>, _>| e.unwrap().unwrap().unwrap();
 
+        // need a solid timeout here because we have simulated an error that caused a backoff
         let (record_and_offset, high_watermark) =
-            unwrap(tokio::time::timeout(Duration::from_micros(10), stream.next()).await);
+            unwrap(tokio::time::timeout(Duration::from_secs(2), stream.next()).await);
 
         assert_eq!(record_and_offset.offset, 2);
         assert_eq!(high_watermark, 2);
