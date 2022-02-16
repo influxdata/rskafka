@@ -36,6 +36,7 @@ time = "0.3"
 tokio = { version = "1.14", default-features = false, features = ["io-util", "net", "rt", "sync", "time"] }
 tokio-rustls = { version = "0.23", optional = true }
 tracing = "0.1"
+zstd = { version = "0.10", optional = true }
 
 [dev-dependencies]
 assert_matches = "1.5"
@@ -45,7 +46,7 @@ futures = "0.3"
 proptest = "1"
 proptest-derive = "0.3"
 rustls-pemfile = "0.3"
-rdkafka = "0.28"
+rdkafka = { version = "0.28", default-features = false, features = ["libz", "tokio", "zstd"] }
 tokio = { version = "1.14", features = ["macros", "rt-multi-thread"] }
 tracing-log = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
@@ -57,6 +58,7 @@ default = ["transport-tls"]
 compression-gzip = ["flate2"]
 compression-lz4 = ["lz4"]
 compression-snappy = ["snap"]
+compression-zstd = ["zstd"]
 fuzzing = []
 transport-socks5 = ["async-socks5"]
 transport-tls = ["rustls", "tokio-rustls"]
