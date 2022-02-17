@@ -8,13 +8,33 @@ use rskafka::{
     record::{Record, RecordAndOffset},
 };
 
+mod java_helper;
 mod rdkafka_helper;
 mod test_helpers;
 
 use test_helpers::{maybe_start_logging, now, random_topic_name, record};
 
 #[tokio::test]
+async fn test_produce_java_consume_java_nocompression() {
+    maybe_skip_java_interopt!();
+    assert_produce_consume(produce_java, consume_java, Compression::NoCompression).await;
+}
+
+#[tokio::test]
+async fn test_produce_java_consume_rskafka_nocompression() {
+    maybe_skip_java_interopt!();
+    assert_produce_consume(produce_java, consume_rskafka, Compression::NoCompression).await;
+}
+
+#[tokio::test]
+async fn test_produce_rskafka_consume_java_nocompression() {
+    maybe_skip_java_interopt!();
+    assert_produce_consume(produce_rskafka, consume_java, Compression::NoCompression).await;
+}
+
+#[tokio::test]
 async fn test_produce_rdkafka_consume_rdkafka_nocompression() {
+    maybe_skip_java_interopt!();
     assert_produce_consume(produce_rdkafka, consume_rdkafka, Compression::NoCompression).await;
 }
 
@@ -31,6 +51,27 @@ async fn test_produce_rdkafka_consume_rskafka_nocompression() {
 #[tokio::test]
 async fn test_produce_rskafka_consume_rskafka_nocompression() {
     assert_produce_consume(produce_rskafka, consume_rskafka, Compression::NoCompression).await;
+}
+
+#[cfg(feature = "compression-gzip")]
+#[tokio::test]
+async fn test_produce_java_consume_java_gzip() {
+    maybe_skip_java_interopt!();
+    assert_produce_consume(produce_java, consume_java, Compression::Gzip).await;
+}
+
+#[cfg(feature = "compression-gzip")]
+#[tokio::test]
+async fn test_produce_java_consume_rskafka_gzip() {
+    maybe_skip_java_interopt!();
+    assert_produce_consume(produce_java, consume_rskafka, Compression::Gzip).await;
+}
+
+#[cfg(feature = "compression-gzip")]
+#[tokio::test]
+async fn test_produce_rskafka_consume_java_gzip() {
+    maybe_skip_java_interopt!();
+    assert_produce_consume(produce_rskafka, consume_java, Compression::Gzip).await;
 }
 
 #[cfg(feature = "compression-gzip")]
@@ -59,6 +100,27 @@ async fn test_produce_rskafka_consume_rskafka_gzip() {
 
 #[cfg(feature = "compression-lz4")]
 #[tokio::test]
+async fn test_produce_java_consume_java_lz4() {
+    maybe_skip_java_interopt!();
+    assert_produce_consume(produce_java, consume_java, Compression::Lz4).await;
+}
+
+#[cfg(feature = "compression-lz4")]
+#[tokio::test]
+async fn test_produce_java_consume_rskafka_lz4() {
+    maybe_skip_java_interopt!();
+    assert_produce_consume(produce_java, consume_rskafka, Compression::Lz4).await;
+}
+
+#[cfg(feature = "compression-lz4")]
+#[tokio::test]
+async fn test_produce_rskafka_consume_java_lz4() {
+    maybe_skip_java_interopt!();
+    assert_produce_consume(produce_rskafka, consume_java, Compression::Lz4).await;
+}
+
+#[cfg(feature = "compression-lz4")]
+#[tokio::test]
 async fn test_produce_rdkafka_consume_rdkafka_lz4() {
     assert_produce_consume(produce_rdkafka, consume_rdkafka, Compression::Lz4).await;
 }
@@ -83,6 +145,27 @@ async fn test_produce_rskafka_consume_rskafka_lz4() {
 
 #[cfg(feature = "compression-snappy")]
 #[tokio::test]
+async fn test_produce_java_consume_java_snappy() {
+    maybe_skip_java_interopt!();
+    assert_produce_consume(produce_java, consume_java, Compression::Snappy).await;
+}
+
+#[cfg(feature = "compression-snappy")]
+#[tokio::test]
+async fn test_produce_java_consume_rskafka_snappy() {
+    maybe_skip_java_interopt!();
+    assert_produce_consume(produce_java, consume_rskafka, Compression::Snappy).await;
+}
+
+#[cfg(feature = "compression-snappy")]
+#[tokio::test]
+async fn test_produce_rskafka_consume_java_snappy() {
+    maybe_skip_java_interopt!();
+    assert_produce_consume(produce_rskafka, consume_java, Compression::Snappy).await;
+}
+
+#[cfg(feature = "compression-snappy")]
+#[tokio::test]
 async fn test_produce_rdkafka_consume_rdkafka_snappy() {
     assert_produce_consume(produce_rdkafka, consume_rdkafka, Compression::Snappy).await;
 }
@@ -103,6 +186,27 @@ async fn test_produce_rdkafka_consume_rskafka_snappy() {
 #[tokio::test]
 async fn test_produce_rskafka_consume_rskafka_snappy() {
     assert_produce_consume(produce_rskafka, consume_rskafka, Compression::Snappy).await;
+}
+
+#[cfg(feature = "compression-zstd")]
+#[tokio::test]
+async fn test_produce_java_consume_java_zstd() {
+    maybe_skip_java_interopt!();
+    assert_produce_consume(produce_java, consume_java, Compression::Zstd).await;
+}
+
+#[cfg(feature = "compression-zstd")]
+#[tokio::test]
+async fn test_produce_java_consume_rskafka_zstd() {
+    maybe_skip_java_interopt!();
+    assert_produce_consume(produce_java, consume_rskafka, Compression::Zstd).await;
+}
+
+#[cfg(feature = "compression-zstd")]
+#[tokio::test]
+async fn test_produce_rskafka_consume_java_zstd() {
+    maybe_skip_java_interopt!();
+    assert_produce_consume(produce_rskafka, consume_java, Compression::Zstd).await;
 }
 
 #[cfg(feature = "compression-zstd")]
@@ -211,6 +315,10 @@ async fn assert_produce_consume<F1, G1, F2, G2>(
         )
         .await,
     );
+    assert_eq!(offsets.len(), 3);
+    assert_ne!(offsets[0], offsets[1]);
+    assert_ne!(offsets[1], offsets[2]);
+    assert_ne!(offsets[2], offsets[0]);
 
     // consume
     let actual = f_consume(partition_client, connection, topic_name, 1, 3).await;
@@ -220,6 +328,25 @@ async fn assert_produce_consume<F1, G1, F2, G2>(
         .map(|(offset, record)| RecordAndOffset { record, offset })
         .collect();
     assert_eq!(actual, expected);
+}
+
+async fn produce_java(
+    _partition_client: Arc<PartitionClient>,
+    connection: String,
+    topic_name: String,
+    partition_index: i32,
+    records: Vec<Record>,
+    compression: Compression,
+) -> Vec<i64> {
+    java_helper::produce(
+        &connection,
+        records
+            .into_iter()
+            .map(|record| (topic_name.clone(), partition_index, record))
+            .collect(),
+        compression,
+    )
+    .await
 }
 
 async fn produce_rdkafka(
@@ -253,6 +380,16 @@ async fn produce_rskafka(
         .produce(records, compression)
         .await
         .unwrap()
+}
+
+async fn consume_java(
+    _partition_client: Arc<PartitionClient>,
+    connection: String,
+    topic_name: String,
+    partition_index: i32,
+    n: usize,
+) -> Vec<RecordAndOffset> {
+    java_helper::consume(&connection, &topic_name, partition_index, n).await
 }
 
 async fn consume_rdkafka(
