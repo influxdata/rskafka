@@ -53,15 +53,31 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 uuid = { version = "0.8", features = ["v4"] }
 
 [features]
-default = ["transport-tls"]
+default = [
+    "compression-gzip",
+    "compression-lz4",
+    "compression-snappy",
+    "compression-zstd",
+]
+
+full = [
+    "compression-gzip",
+    "compression-lz4",
+    "compression-snappy",
+    "compression-zstd",
+    "transport-socks5",
+    "transport-tls",
+]
 
 compression-gzip = ["flate2"]
 compression-lz4 = ["lz4"]
 compression-snappy = ["snap"]
 compression-zstd = ["zstd"]
-fuzzing = []
+
 transport-socks5 = ["async-socks5"]
 transport-tls = ["rustls", "tokio-rustls"]
+
+unstable-fuzzing = []
 
 [[bench]]
 name = "write_throughput"

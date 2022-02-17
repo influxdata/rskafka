@@ -22,14 +22,14 @@ mod backoff;
 pub mod client;
 
 mod connection;
-#[cfg(feature = "fuzzing")]
+#[cfg(feature = "unstable-fuzzing")]
 pub mod messenger;
-#[cfg(not(feature = "fuzzing"))]
+#[cfg(not(feature = "unstable-fuzzing"))]
 mod messenger;
 
-#[cfg(feature = "fuzzing")]
+#[cfg(feature = "unstable-fuzzing")]
 pub mod protocol;
-#[cfg(not(feature = "fuzzing"))]
+#[cfg(not(feature = "unstable-fuzzing"))]
 mod protocol;
 
 pub mod record;
