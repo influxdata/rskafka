@@ -439,10 +439,7 @@ where
         // Flush data
         Self::flush_impl(&mut inner, self.client.as_ref(), self.compression).await;
 
-        // We need to poll the result slot here to make the result available via `peek`, otherwise the next thread in
-        // this critical section will flush the producer a 2nd time. We are using an ordinary `.await` call here instead
-        // of `now_or_never` because tokio might preempt us (or to be precise: might preempt polling from the result slot).
-        extract(&result_slot.await, tag)
+        extract(result_slot.peek().expect("just flushed"), tag)
     }
 
     /// Flushed out data from aggregator.
@@ -467,7 +464,7 @@ where
                 // Reset result slot
                 let slot = std::mem::take(&mut inner.result_slot);
 
-                slot.broadcast(Err(Error::Aggregator(e.into())));
+                slot.broadcast(Err(Error::Aggregator(e.into()))).await;
                 return;
             }
         };
@@ -497,7 +494,7 @@ where
             Err(e) => Err(Error::Client(Arc::new(e))),
         };
 
-        slot.broadcast(inner)
+        slot.broadcast(inner).await;
     }
 }
 
