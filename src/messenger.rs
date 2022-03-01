@@ -277,8 +277,7 @@ where
             .read()
             .expect("lock poisoned")
             .get(&R::API_KEY)
-            .map(|range_server| match_versions(*range_server, R::API_VERSION_RANGE))
-            .flatten()
+            .and_then(|range_server| match_versions(*range_server, R::API_VERSION_RANGE))
             .ok_or(RequestError::NoVersionMatch {
                 api_key: R::API_KEY,
             })?;
