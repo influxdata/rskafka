@@ -201,7 +201,7 @@ use futures::future::BoxFuture;
 use futures::{pin_mut, FutureExt};
 use thiserror::Error;
 use tokio::sync::Mutex;
-use tracing::{debug, error, trace};
+use tracing::{debug, error};
 
 use crate::client::producer::aggregator::TryPush;
 use crate::client::{error::Error as ClientError, partition::PartitionClient};
@@ -392,7 +392,7 @@ where
             {
                 TryPush::Aggregated(tag) => tag,
                 TryPush::NoCapacity(data) => {
-                    debug!("Insufficient capacity in aggregator - flushing");
+                    debug!(client=?self.client, "Insufficient capacity in aggregator - flushing");
 
                     Self::flush_impl(&mut inner, self.client.as_ref(), self.compression).await;
                     match inner
@@ -402,7 +402,7 @@ where
                     {
                         TryPush::Aggregated(tag) => tag,
                         TryPush::NoCapacity(_) => {
-                            error!("Record too large for aggregator");
+                            error!(client=?self.client, "Record too large for aggregator");
                             return Err(Error::TooLarge);
                         }
                     }
@@ -434,7 +434,7 @@ where
             return extract(r, tag);
         }
 
-        debug!("Linger expired - flushing");
+        debug!(client=?self.client, "Linger expired - flushing");
 
         // Flush data
         Self::flush_impl(&mut inner, self.client.as_ref(), self.compression).await;
@@ -448,7 +448,7 @@ where
     /// Flushed out data from aggregator.
     pub async fn flush(&self) {
         let mut inner = self.inner.lock().await;
-        debug!("Manual flush");
+        debug!(client=?self.client, "Manual flush");
         Self::flush_impl(&mut inner, self.client.as_ref(), self.compression).await;
     }
 
@@ -459,11 +459,13 @@ where
         client: &dyn ProducerClient,
         compression: Compression,
     ) {
-        trace!("Flushing batch producer");
+        debug!(?client, "Flushing batch producer");
 
         let (output, status_deagg) = match inner.aggregator.flush() {
             Ok(x) => x,
             Err(e) => {
+                debug!(?client, error=?e, "Failed to flush aggregator");
+
                 // Reset result slot
                 let slot = std::mem::take(&mut inner.result_slot);
 
@@ -473,7 +475,7 @@ where
         };
 
         let r = if output.is_empty() {
-            debug!("No data aggregated, skipping client request");
+            debug!(?client, "No data aggregated, skipping client request");
 
             // A custom aggregator might have produced no records, but the the calls to `.produce` are still waiting for
             // their slot values, so we need to provide them some result, otherwise we might flush twice or panic with
@@ -488,13 +490,19 @@ where
 
         let inner = match r {
             Ok(status) => {
+                debug!(?client, ?status, "Successfully produced records");
+
                 let aggregated_status = AggregatedStatus {
                     aggregated_status: status,
                     status_deagg,
                 };
                 Ok(Arc::new(aggregated_status))
             }
-            Err(e) => Err(Error::Client(Arc::new(e))),
+            Err(e) => {
+                debug!(?client, error=?e, "Failed to produce records");
+
+                Err(Error::Client(Arc::new(e)))
+            }
         };
 
         slot.broadcast(inner)
