@@ -31,7 +31,7 @@ impl<T: Clone> Default for BroadcastOnce<T> {
 }
 
 impl<T: Clone> BroadcastOnce<T> {
-    /// Returns a [`Future`] that completes when [`BroadcastOnce::broadcast`] is called
+    /// Returns a [`ReceiveFut`] that completes when [`BroadcastOnce::broadcast`] is called
     pub fn receive(&self) -> ReceiveFut<T> {
         self.receiver.clone()
     }
