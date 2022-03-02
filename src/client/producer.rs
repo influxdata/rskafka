@@ -204,6 +204,7 @@ use tokio::sync::Mutex;
 use tracing::{debug, error};
 
 use crate::client::producer::aggregator::TryPush;
+use crate::client::producer::result::ResultSlot;
 use crate::client::{error::Error as ClientError, partition::PartitionClient};
 use crate::record::Record;
 
@@ -211,6 +212,7 @@ use super::partition::Compression;
 
 pub mod aggregator;
 mod broadcast;
+mod result;
 
 #[derive(Debug, Error, Clone)]
 pub enum Error {
@@ -353,12 +355,13 @@ where
         Err(e) => Err(e.clone()),
     }
 }
+
 #[derive(Debug)]
 struct ProducerInner<A>
 where
     A: aggregator::Aggregator,
 {
-    result_slot: broadcast::BroadcastOnce<AggregatedResult<A>>,
+    result_slot: ResultSlot<AggregatedResult<A>>,
 
     aggregator: A,
 }
@@ -431,10 +434,11 @@ where
         // - the linger expired "simultaneously" with the publish
         // - the linger expired but another thread triggered the flush
         if let Some(r) = result_slot.peek() {
+            debug!(client=?self.client, generation=result_slot.generation(), ?tag, "Already flushed");
             return extract(r, tag);
         }
 
-        debug!(client=?self.client, "Linger expired - flushing");
+        debug!(client=?self.client, generation=result_slot.generation(), ?tag, "Linger expired - flushing");
 
         // Flush data
         Self::flush_impl(&mut inner, self.client.as_ref(), self.compression).await;
@@ -459,23 +463,24 @@ where
         client: &dyn ProducerClient,
         compression: Compression,
     ) {
-        debug!(?client, "Flushing batch producer");
+        let generation = inner.result_slot.generation();
+
+        debug!(?client, generation, "Flushing batch producer");
 
         let (output, status_deagg) = match inner.aggregator.flush() {
             Ok(x) => x,
             Err(e) => {
-                debug!(?client, error=?e, "Failed to flush aggregator");
-
-                // Reset result slot
-                let slot = std::mem::take(&mut inner.result_slot);
-
-                slot.broadcast(Err(Error::Aggregator(e.into())));
+                debug!(?client, error=?e, generation, "Failed to flush aggregator");
+                inner.result_slot.produce(Err(Error::Aggregator(e.into())));
                 return;
             }
         };
 
         let r = if output.is_empty() {
-            debug!(?client, "No data aggregated, skipping client request");
+            debug!(
+                ?client,
+                generation, "No data aggregated, skipping client request"
+            );
 
             // A custom aggregator might have produced no records, but the the calls to `.produce` are still waiting for
             // their slot values, so we need to provide them some result, otherwise we might flush twice or panic with
@@ -485,12 +490,14 @@ where
             client.produce(output, compression).await
         };
 
-        // Reset result slot
-        let slot = std::mem::take(&mut inner.result_slot);
-
-        let inner = match r {
+        let result = match r {
             Ok(status) => {
-                debug!(?client, ?status, "Successfully produced records");
+                debug!(
+                    ?client,
+                    ?status,
+                    generation,
+                    "Successfully produced records"
+                );
 
                 let aggregated_status = AggregatedStatus {
                     aggregated_status: status,
@@ -499,13 +506,13 @@ where
                 Ok(Arc::new(aggregated_status))
             }
             Err(e) => {
-                debug!(?client, error=?e, "Failed to produce records");
+                debug!(?client, error=?e, generation, "Failed to produce records");
 
                 Err(Error::Client(Arc::new(e)))
             }
         };
 
-        slot.broadcast(inner)
+        inner.result_slot.produce(result);
     }
 }
 

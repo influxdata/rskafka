@@ -1,4 +1,4 @@
-use futures::future::{Future, FutureExt};
+use futures::future::FutureExt;
 use pin_project_lite::pin_project;
 use std::pin::Pin;
 use std::task::{Context, Poll};
@@ -9,12 +9,12 @@ use tracing::warn;
 ///
 /// - Receivers can be created with `BroadcastOnce::receiver`
 /// - The value can be produced with `BroadcastOnce::broadcast`
-pub struct BroadcastOnce<T: Clone> {
-    receiver: futures::future::Shared<ReceiveFut<T>>,
+pub struct BroadcastOnce<T> {
+    receiver: ReceiveFut<T>,
     sender: oneshot::Sender<T>,
 }
 
-impl<T: Clone> std::fmt::Debug for BroadcastOnce<T> {
+impl<T> std::fmt::Debug for BroadcastOnce<T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "ResultSlot")
     }
@@ -24,7 +24,7 @@ impl<T: Clone> Default for BroadcastOnce<T> {
     fn default() -> Self {
         let (sender, receiver) = oneshot::channel();
         Self {
-            receiver: ReceiveFut { inner: receiver }.shared(),
+            receiver: OneshotFut { inner: receiver }.shared(),
             sender,
         }
     }
@@ -32,7 +32,7 @@ impl<T: Clone> Default for BroadcastOnce<T> {
 
 impl<T: Clone> BroadcastOnce<T> {
     /// Returns a [`Future`] that completes when [`BroadcastOnce::broadcast`] is called
-    pub fn receive(&self) -> futures::future::Shared<impl Future<Output = T>> {
+    pub fn receive(&self) -> ReceiveFut<T> {
         self.receiver.clone()
     }
 
@@ -43,15 +43,17 @@ impl<T: Clone> BroadcastOnce<T> {
     }
 }
 
+pub type ReceiveFut<T> = futures::future::Shared<OneshotFut<T>>;
+
 pin_project! {
     /// A future that completes when [`BroadcastOnce::broadcast`] is called
-    struct ReceiveFut<T>{
+    pub struct OneshotFut<T>{
         #[pin]
         inner: oneshot::Receiver<T>,
     }
 }
 
-impl<T: Clone> std::future::Future for ReceiveFut<T> {
+impl<T> std::future::Future for OneshotFut<T> {
     type Output = T;
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
@@ -69,6 +71,7 @@ impl<T: Clone> std::future::Future for ReceiveFut<T> {
 
 #[cfg(test)]
 mod tests {
+    use std::future::Future;
     use std::time::Duration;
 
     use super::*;

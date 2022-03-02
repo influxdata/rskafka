@@ -39,7 +39,7 @@ pub trait Aggregator: Send {
     type Input: Send;
 
     /// Tag used to deaggregate status.
-    type Tag: Send;
+    type Tag: Send + std::fmt::Debug;
 
     /// De-aggregates the status for successful `produce` operations.
     type StatusDeaggregator: StatusDeaggregator<Tag = Self::Tag>;
