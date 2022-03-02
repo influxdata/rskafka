@@ -34,7 +34,7 @@ impl<I, T> TryPush<I, T> {
 }
 
 /// A type that receives one or more input and returns a single output
-pub trait Aggregator: Send {
+pub trait Aggregator: Send + 'static {
     /// The unaggregated input.
     type Input: Send;
 

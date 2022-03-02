@@ -198,13 +198,12 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use futures::future::BoxFuture;
-use futures::{pin_mut, FutureExt};
 use thiserror::Error;
-use tokio::sync::Mutex;
+use tokio::sync::{Mutex, OwnedMutexGuard};
 use tracing::{debug, error};
 
 use crate::client::producer::aggregator::TryPush;
-use crate::client::producer::result::ResultSlot;
+use crate::client::producer::broadcast::BroadcastOnce;
 use crate::client::{error::Error as ClientError, partition::PartitionClient};
 use crate::record::Record;
 
@@ -212,7 +211,6 @@ use super::partition::Compression;
 
 pub mod aggregator;
 mod broadcast;
-mod result;
 
 #[derive(Debug, Error, Clone)]
 pub enum Error {
@@ -221,6 +219,9 @@ pub enum Error {
 
     #[error("Client error: {0}")]
     Client(#[from] Arc<ClientError>),
+
+    #[error("Flush error: {0}")]
+    FlushError(String),
 
     #[error("Input too large for aggregator")]
     TooLarge,
@@ -274,10 +275,10 @@ impl BatchProducerBuilder {
             linger: self.linger,
             compression: self.compression,
             client: self.client,
-            inner: Mutex::new(ProducerInner {
+            inner: Arc::new(Mutex::new(ProducerInner {
                 aggregator,
                 result_slot: Default::default(),
-            }),
+            })),
         }
     }
 }
@@ -321,7 +322,7 @@ where
 
     client: Arc<dyn ProducerClient>,
 
-    inner: Mutex<ProducerInner<A>>,
+    inner: Arc<Mutex<ProducerInner<A>>>,
 }
 
 #[derive(Debug)]
@@ -336,24 +337,19 @@ where
 type AggregatedResult<A> = Result<Arc<AggregatedStatus<A>>, Error>;
 
 fn extract<A>(
-    result: &AggregatedResult<A>,
+    result: broadcast::Result<AggregatedResult<A>>,
     tag: A::Tag,
 ) -> Result<<A as aggregator::AggregatorStatus>::Status, Error>
 where
     A: aggregator::Aggregator,
 {
     use self::aggregator::StatusDeaggregator;
+    let status = result.map_err(|e| Error::FlushError(e.to_string()))??;
 
-    match result {
-        Ok(status) => match status
-            .status_deagg
-            .deaggregate(&status.aggregated_status, tag)
-        {
-            Ok(status) => Ok(status),
-            Err(e) => Err(Error::Aggregator(e.into())),
-        },
-        Err(e) => Err(e.clone()),
-    }
+    status
+        .status_deagg
+        .deaggregate(&status.aggregated_status, tag)
+        .map_err(|e| Error::Aggregator(e.into()))
 }
 
 #[derive(Debug)]
@@ -361,7 +357,7 @@ struct ProducerInner<A>
 where
     A: aggregator::Aggregator,
 {
-    result_slot: ResultSlot<AggregatedResult<A>>,
+    result_slot: BroadcastOnce<AggregatedResult<A>>,
 
     aggregator: A,
 }
@@ -377,8 +373,8 @@ where
     ///
     /// # Cancellation
     ///
-    /// The returned future is not cancellation safe, if it is dropped the record
-    /// may or may not be published
+    /// The returned future is cancellation safe in that it won't leave the [`BatchProducer`]
+    /// in an inconsistent state, however, the provided data may or may not be produced
     ///
     pub async fn produce(
         &self,
@@ -386,47 +382,42 @@ where
     ) -> Result<<A as aggregator::AggregatorStatus>::Status> {
         let (result_slot, tag) = {
             // Try to add the record to the aggregator
-            let mut inner = self.inner.lock().await;
+            let mut inner = self.lock().await;
 
-            let tag = match inner
+            match inner
                 .aggregator
                 .try_push(data)
                 .map_err(|e| Error::Aggregator(e.into()))?
             {
-                TryPush::Aggregated(tag) => tag,
+                TryPush::Aggregated(tag) => (inner.result_slot.receiver(), tag),
                 TryPush::NoCapacity(data) => {
                     debug!(client=?self.client, "Insufficient capacity in aggregator - flushing");
 
-                    Self::flush_impl(&mut inner, self.client.as_ref(), self.compression).await;
+                    let mut inner =
+                        Self::flush_impl(inner, Arc::clone(&self.client), self.compression).await?;
+
                     match inner
                         .aggregator
                         .try_push(data)
                         .map_err(|e| Error::Aggregator(e.into()))?
                     {
-                        TryPush::Aggregated(tag) => tag,
+                        TryPush::Aggregated(tag) => (inner.result_slot.receiver(), tag),
                         TryPush::NoCapacity(_) => {
                             error!(client=?self.client, "Record too large for aggregator");
                             return Err(Error::TooLarge);
                         }
                     }
                 }
-            };
-
-            // Get a future that completes when the record is published
-            (inner.result_slot.receive(), tag)
+            }
         };
 
-        let linger = tokio::time::sleep(self.linger).fuse();
-        pin_mut!(linger);
-        pin_mut!(result_slot);
-
-        futures::select! {
-            r = result_slot => return extract(&r, tag),
-            _ = linger => {}
+        tokio::select! {
+            _ = tokio::time::sleep(self.linger) => {},
+            r = result_slot.receive() => return extract(r, tag),
         }
 
         // Linger expired - reacquire lock
-        let mut inner = self.inner.lock().await;
+        let inner = self.lock().await;
 
         // Whilst holding lock - check hasn't been flushed already
         //
@@ -434,85 +425,92 @@ where
         // - the linger expired "simultaneously" with the publish
         // - the linger expired but another thread triggered the flush
         if let Some(r) = result_slot.peek() {
-            debug!(client=?self.client, generation=result_slot.generation(), ?tag, "Already flushed");
+            debug!(client=?self.client, ?tag, "Already flushed");
             return extract(r, tag);
         }
 
-        debug!(client=?self.client, generation=result_slot.generation(), ?tag, "Linger expired - flushing");
+        debug!(client=?self.client, ?tag, "Linger expired - flushing");
 
         // Flush data
-        Self::flush_impl(&mut inner, self.client.as_ref(), self.compression).await;
+        Self::flush_impl(inner, Arc::clone(&self.client), self.compression).await?;
 
-        // We need to poll the result slot here to make the result available via `peek`, otherwise the next thread in
-        // this critical section will flush the producer a 2nd time. We are using an ordinary `.await` call here instead
-        // of `now_or_never` because tokio might preempt us (or to be precise: might preempt polling from the result slot).
-        extract(&result_slot.await, tag)
+        extract(result_slot.peek().unwrap(), tag)
     }
 
     /// Flushed out data from aggregator.
-    pub async fn flush(&self) {
-        let mut inner = self.inner.lock().await;
+    pub async fn flush(&self) -> Result<()> {
+        let inner = self.lock().await;
         debug!(client=?self.client, "Manual flush");
-        Self::flush_impl(&mut inner, self.client.as_ref(), self.compression).await;
+        Self::flush_impl(inner, Arc::clone(&self.client), self.compression).await?;
+        Ok(())
     }
 
     /// Flushes out the data from the aggregator, publishes the result to the result slot,
     /// and creates a fresh result slot for future writes to use
     async fn flush_impl(
-        inner: &mut ProducerInner<A>,
-        client: &dyn ProducerClient,
+        mut inner: OwnedMutexGuard<ProducerInner<A>>,
+        client: Arc<dyn ProducerClient>,
         compression: Compression,
-    ) {
-        let generation = inner.result_slot.generation();
+    ) -> Result<OwnedMutexGuard<ProducerInner<A>>> {
+        debug!(?client, "Flushing batch producer");
 
-        debug!(?client, generation, "Flushing batch producer");
+        // Spawn a task to provide cancellation safety
+        let handle = tokio::spawn(async move {
+            // Swap the result slot first, this ensures that if the task panics the Drop
+            // implementation will still signal the result slot preventing flushing twice
+            let slot = std::mem::take(&mut inner.result_slot);
 
-        let (output, status_deagg) = match inner.aggregator.flush() {
-            Ok(x) => x,
-            Err(e) => {
-                debug!(?client, error=?e, generation, "Failed to flush aggregator");
-                inner.result_slot.produce(Err(Error::Aggregator(e.into())));
-                return;
-            }
-        };
+            let (output, status_deagg) = match inner.aggregator.flush() {
+                Ok(x) => x,
+                Err(e) => {
+                    debug!(?client, error=?e, "Failed to flush aggregator");
+                    let e = Error::Aggregator(e.into());
+                    slot.broadcast(Err(e.clone()));
+                    return Err(e);
+                }
+            };
 
-        let r = if output.is_empty() {
-            debug!(
-                ?client,
-                generation, "No data aggregated, skipping client request"
-            );
+            let r = if output.is_empty() {
+                debug!(?client, "No data aggregated, skipping client request");
 
-            // A custom aggregator might have produced no records, but the the calls to `.produce` are still waiting for
-            // their slot values, so we need to provide them some result, otherwise we might flush twice or panic with
-            // "just flushed" because no data is available right after flushing.
-            Ok(vec![])
-        } else {
-            client.produce(output, compression).await
-        };
+                // A custom aggregator might have produced no records, but the the calls to `.produce` are still waiting for
+                // their slot values, so we need to provide them some result, otherwise we might flush twice or panic with
+                // "just flushed" because no data is available right after flushing.
+                Ok(vec![])
+            } else {
+                client.produce(output, compression).await
+            };
 
-        let result = match r {
-            Ok(status) => {
-                debug!(
-                    ?client,
-                    ?status,
-                    generation,
-                    "Successfully produced records"
-                );
+            let result = match r {
+                Ok(status) => {
+                    debug!(?client, ?status, "Successfully produced records");
 
-                let aggregated_status = AggregatedStatus {
-                    aggregated_status: status,
-                    status_deagg,
-                };
-                Ok(Arc::new(aggregated_status))
-            }
-            Err(e) => {
-                debug!(?client, error=?e, generation, "Failed to produce records");
+                    let aggregated_status = AggregatedStatus {
+                        aggregated_status: status,
+                        status_deagg,
+                    };
+                    Ok(Arc::new(aggregated_status))
+                }
+                Err(e) => {
+                    debug!(?client, error=?e, "Failed to produce records");
 
-                Err(Error::Client(Arc::new(e)))
-            }
-        };
+                    Err(Error::Client(Arc::new(e)))
+                }
+            };
 
-        inner.result_slot.produce(result);
+            slot.broadcast(result);
+
+            Ok(inner)
+        });
+
+        match handle.await {
+            Ok(r) => r,
+            Err(e) => Err(Error::FlushError(e.to_string())),
+        }
+    }
+
+    async fn lock(&self) -> OwnedMutexGuard<ProducerInner<A>> {
+        Arc::clone(&self.inner).lock_owned().await
     }
 }
 
@@ -523,13 +521,14 @@ mod tests {
     use crate::{
         client::producer::aggregator::RecordAggregator, protocol::error::Error as ProtocolError,
     };
-    use futures::stream::FuturesUnordered;
-    use futures::StreamExt;
+    use futures::stream::{FuturesOrdered, FuturesUnordered};
+    use futures::{pin_mut, FutureExt, StreamExt};
     use time::OffsetDateTime;
 
     #[derive(Debug)]
     struct MockClient {
         error: Option<ProtocolError>,
+        panic: Option<String>,
         delay: Duration,
         batch_sizes: parking_lot::Mutex<Vec<usize>>,
     }
@@ -545,6 +544,10 @@ mod tests {
 
                 if let Some(e) = self.error {
                     return Err(ClientError::ServerError(e, "".to_string()));
+                }
+
+                if let Some(p) = self.panic.as_ref() {
+                    panic!("{}", p);
                 }
 
                 let mut batch_sizes = self.batch_sizes.lock();
@@ -575,6 +578,7 @@ mod tests {
         for delay in [Duration::from_secs(0), Duration::from_millis(1)] {
             let client = Arc::new(MockClient {
                 error: None,
+                panic: None,
                 delay,
                 batch_sizes: Default::default(),
             });
@@ -584,7 +588,7 @@ mod tests {
                 .with_linger(linger)
                 .build(aggregator);
 
-            let mut futures = FuturesUnordered::new();
+            let mut futures = FuturesOrdered::new();
 
             futures.push(producer.produce(record.clone()));
             futures.push(producer.produce(record.clone()));
@@ -628,6 +632,7 @@ mod tests {
 
         let client = Arc::new(MockClient {
             error: None,
+            panic: None,
             delay: Duration::from_millis(1),
             batch_sizes: Default::default(),
         });
@@ -649,7 +654,7 @@ mod tests {
             _ = tokio::time::sleep(Duration::from_millis(100)).fuse() => {}
         };
 
-        producer.flush().await;
+        producer.flush().await.unwrap();
 
         let offset_a = tokio::time::timeout(Duration::from_millis(10), a)
             .await
@@ -670,6 +675,7 @@ mod tests {
 
         let client = Arc::new(MockClient {
             error: None,
+            panic: None,
             delay: Duration::from_millis(0),
             batch_sizes: Default::default(),
         });
@@ -732,6 +738,7 @@ mod tests {
         let linger = Duration::from_millis(5);
         let client = Arc::new(MockClient {
             error: Some(ProtocolError::NetworkException),
+            panic: None,
             delay: Duration::from_millis(1),
             batch_sizes: Default::default(),
         });
@@ -755,6 +762,7 @@ mod tests {
         let linger = Duration::from_millis(5);
         let client = Arc::new(MockClient {
             error: None,
+            panic: None,
             delay: Duration::from_millis(1),
             batch_sizes: Default::default(),
         });
@@ -784,6 +792,7 @@ mod tests {
         let linger = Duration::from_millis(5);
         let client = Arc::new(MockClient {
             error: None,
+            panic: None,
             delay: Duration::from_millis(1),
             batch_sizes: Default::default(),
         });
@@ -812,6 +821,7 @@ mod tests {
         let linger = Duration::from_millis(5);
         let client = Arc::new(MockClient {
             error: None,
+            panic: None,
             delay: Duration::from_millis(1),
             batch_sizes: Default::default(),
         });
@@ -832,6 +842,73 @@ mod tests {
 
         futures.next().await.unwrap().unwrap_err();
         futures.next().await.unwrap().unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_producer_aggregator_cancel() {
+        let record = record();
+        let linger = Duration::from_micros(100);
+        let client = Arc::new(MockClient {
+            error: None,
+            panic: None,
+            delay: Duration::from_millis(10),
+            batch_sizes: Default::default(),
+        });
+
+        let aggregator = RecordAggregator::new(record.approximate_size() * 2);
+        let producer = BatchProducerBuilder::new_with_client(Arc::<MockClient>::clone(&client))
+            .with_linger(linger)
+            .build(aggregator);
+
+        let a = producer.produce(record.clone()).fuse();
+        let b = producer.produce(record).fuse();
+        pin_mut!(b);
+
+        {
+            // Cancel a when it exits this block
+            pin_mut!(a);
+
+            // Select biased to encourage a to be the one with the linger that
+            // expires first and performs the produce operation
+            futures::select_biased! {
+                _ = &mut a => panic!("a should not have flushed"),
+                _ = &mut b => panic!("b should not have flushed"),
+                _ = tokio::time::sleep(Duration::from_millis(1)).fuse() => {},
+            }
+        }
+
+        // But b should still complete successfully
+        tokio::time::timeout(Duration::from_secs(1), b)
+            .await
+            .unwrap()
+            .unwrap();
+
+        assert_eq!(client.batch_sizes.lock().as_slice(), &[2]);
+    }
+
+    #[tokio::test]
+    async fn test_producer_aggregator_panic() {
+        let record = record();
+        let linger = Duration::from_millis(100);
+        let client = Arc::new(MockClient {
+            error: None,
+            panic: Some("test panic".into()),
+            delay: Duration::from_millis(0),
+            batch_sizes: Default::default(),
+        });
+
+        let aggregator = RecordAggregator::new(record.approximate_size() * 2);
+        let producer = BatchProducerBuilder::new_with_client(Arc::<MockClient>::clone(&client))
+            .with_linger(linger)
+            .build(aggregator);
+
+        let a = producer.produce(record.clone());
+        let b = producer.produce(record);
+
+        let (a, b) = futures::future::join(a, b).await;
+
+        assert!(matches!(&a, Err(Error::FlushError(_))));
+        assert!(matches!(&b, Err(Error::FlushError(_))));
     }
 
     #[derive(Debug)]
