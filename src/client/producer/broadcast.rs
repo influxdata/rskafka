@@ -90,7 +90,7 @@ impl<T: Clone + Send> BroadcastOnceReceiver<T> {
 
         notified.await;
 
-        self.peek().unwrap()
+        self.peek().expect("just got notified")
     }
 }
 
@@ -108,7 +108,10 @@ mod tests {
         let broadcast: BroadcastOnce<usize> = Default::default();
         let receiver = broadcast.receiver();
         broadcast.broadcast(2);
+        assert_eq!(receiver.peek().unwrap(), Ok(2));
+        assert_eq!(receiver.peek().unwrap(), Ok(2));  // can peek multiple times
         assert_eq!(receiver.receive().await, Ok(2));
+        assert_eq!(receiver.receive().await, Ok(2));  // can receive multiple times
 
         // Test multiple receiver
         let broadcast: BroadcastOnce<usize> = Default::default();

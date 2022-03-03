@@ -434,7 +434,7 @@ where
         // Flush data
         Self::flush_impl(inner, Arc::clone(&self.client), self.compression).await?;
 
-        extract(result_slot.peek().unwrap(), tag)
+        extract(result_slot.peek().expect("just flushed"), tag)
     }
 
     /// Flushed out data from aggregator.
