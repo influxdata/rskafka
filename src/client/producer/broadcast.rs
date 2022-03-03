@@ -97,6 +97,7 @@ impl<T: Clone + Send> BroadcastOnceReceiver<T> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::time::Duration;
 
     #[tokio::test]
     async fn test_broadcast_once() {
@@ -107,11 +108,20 @@ mod tests {
         // Test simple receiver
         let broadcast: BroadcastOnce<usize> = Default::default();
         let receiver = broadcast.receiver();
+        assert!(receiver.peek().is_none());
+
+        // Should timeout as no values produced
+        tokio::time::timeout(Duration::from_millis(1), receiver.receive())
+            .await
+            .unwrap_err();
+
+        // Produce to slot
         broadcast.broadcast(2);
+
         assert_eq!(receiver.peek().unwrap(), Ok(2));
-        assert_eq!(receiver.peek().unwrap(), Ok(2));  // can peek multiple times
+        assert_eq!(receiver.peek().unwrap(), Ok(2)); // can peek multiple times
         assert_eq!(receiver.receive().await, Ok(2));
-        assert_eq!(receiver.receive().await, Ok(2));  // can receive multiple times
+        assert_eq!(receiver.receive().await, Ok(2)); // can receive multiple times
 
         // Test multiple receiver
         let broadcast: BroadcastOnce<usize> = Default::default();
