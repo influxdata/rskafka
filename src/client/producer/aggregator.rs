@@ -34,12 +34,12 @@ impl<I, T> TryPush<I, T> {
 }
 
 /// A type that receives one or more input and returns a single output
-pub trait Aggregator: Send {
+pub trait Aggregator: Send + 'static {
     /// The unaggregated input.
     type Input: Send;
 
     /// Tag used to deaggregate status.
-    type Tag: Send;
+    type Tag: Send + std::fmt::Debug;
 
     /// De-aggregates the status for successful `produce` operations.
     type StatusDeaggregator: StatusDeaggregator<Tag = Self::Tag>;

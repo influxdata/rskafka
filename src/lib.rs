@@ -14,7 +14,7 @@
     clippy::future_not_send,
     clippy::use_self,
     clippy::clone_on_ref_ptr,
-    clippy::disallowed_method
+    clippy::disallowed_methods
 )]
 
 mod backoff;
