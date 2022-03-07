@@ -941,15 +941,24 @@ mod tests {
 
         let messenger = Messenger::new(tx_front, 1_000);
 
+        // create two barriers:
+        // - pause: will be passed after 3 bytes were sent by the client
+        // - continue: will be passed to continue client->broker traffic
+        //
+        // The barriers do NOT affect broker->client traffic.
+        //
+        // The sizes of the barriers is 2: one for the network simulation task and one for the main/control thread.
         let network_pause = Arc::new(Barrier::new(2));
         let network_pause_captured = Arc::clone(&network_pause);
+        let network_continue = Arc::new(Barrier::new(2));
+        let network_continue_captured = Arc::clone(&network_continue);
         let handle_network = tokio::spawn(async move {
             // Need to split both directions into read and write halfs so we can run full-duplex in two loops. Otherwise
             // the test might deadlock even though the code is just fine (TCP is full-duplex).
             let (mut rx_middle_read, mut rx_middle_write) = tokio::io::split(rx_middle);
             let (mut tx_middle_read, mut tx_middle_write) = tokio::io::split(tx_middle);
 
-            let direction1 = async {
+            let direction_client_broker = async {
                 for i in 0.. {
                     let mut buf = [0; 1];
                     rx_middle_read.read_exact(&mut buf).await.unwrap();
@@ -957,11 +966,12 @@ mod tests {
 
                     if i == 3 {
                         network_pause_captured.wait().await;
+                        network_continue_captured.wait().await;
                     }
                 }
             };
 
-            let direction2 = async {
+            let direction_broker_client = async {
                 loop {
                     let mut buf = [0; 1];
                     tx_middle_read.read_exact(&mut buf).await.unwrap();
@@ -970,8 +980,8 @@ mod tests {
             };
 
             tokio::select! {
-                _ = direction1 => {}
-                _ = direction2 => {}
+                _ = direction_client_broker => {}
+                _ = direction_broker_client => {}
             }
         });
 
@@ -1027,6 +1037,9 @@ mod tests {
                 _ = network_pause.wait().fuse() => {},
             }
         }
+
+        // continue client->broker traffic
+        network_continue.wait().await;
 
         // IF the original bug in https://github.com/influxdata/rskafka/issues/103 exists, then the following statement
         // will timeout because the broker got garbage and will wait forever to read the message.
