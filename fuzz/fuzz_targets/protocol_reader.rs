@@ -34,9 +34,9 @@ fn driver(data: &[u8]) -> Result<(), Error> {
     match api_key {
         ApiKey::ApiVersions => send_recv(
             ApiVersionsRequest {
-                client_software_name: CompactString(String::new()),
-                client_software_version: CompactString(String::new()),
-                tagged_fields: TaggedFields::default(),
+                client_software_name: Some(CompactString(String::new())),
+                client_software_version: Some(CompactString(String::new())),
+                tagged_fields: Some(TaggedFields::default()),
             },
             cursor,
             api_key,

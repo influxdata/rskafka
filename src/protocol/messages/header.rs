@@ -9,7 +9,8 @@ use crate::protocol::{
 
 use super::{ReadVersionedError, ReadVersionedType, WriteVersionedError, WriteVersionedType};
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq)]
+#[cfg_attr(test, derive(proptest_derive::Arbitrary))]
 pub struct RequestHeader {
     /// The API key of this request.
     pub request_api_key: ApiKey,
@@ -23,12 +24,30 @@ pub struct RequestHeader {
     /// The client ID string.
     ///
     /// Added in version 1.
-    pub client_id: NullableString,
+    pub client_id: Option<NullableString>,
 
     /// The tagged fields.
     ///
     /// Added in version 2.
-    pub tagged_fields: TaggedFields,
+    pub tagged_fields: Option<TaggedFields>,
+}
+
+impl<R> ReadVersionedType<R> for RequestHeader
+where
+    R: Read,
+{
+    fn read_versioned(reader: &mut R, version: ApiVersion) -> Result<Self, ReadVersionedError> {
+        let v = version.0 .0;
+        assert!(v <= 2);
+
+        Ok(Self {
+            request_api_key: ApiKey::from(Int16::read(reader)?),
+            request_api_version: ApiVersion(Int16::read(reader)?),
+            correlation_id: Int32::read(reader)?,
+            client_id: (v >= 1).then(|| NullableString::read(reader)).transpose()?,
+            tagged_fields: (v >= 2).then(|| TaggedFields::read(reader)).transpose()?,
+        })
+    }
 }
 
 impl<W> WriteVersionedType<W> for RequestHeader
@@ -48,11 +67,25 @@ where
         self.correlation_id.write(writer)?;
 
         if v >= 1 {
-            self.client_id.write(writer)?;
+            match self.client_id.as_ref() {
+                Some(client_id) => {
+                    client_id.write(writer)?;
+                }
+                None => {
+                    NullableString::default().write(writer)?;
+                }
+            }
         }
 
         if v >= 2 {
-            self.tagged_fields.write(writer)?;
+            match self.tagged_fields.as_ref() {
+                Some(tagged_fields) => {
+                    tagged_fields.write(writer)?;
+                }
+                None => {
+                    TaggedFields::default().write(writer)?;
+                }
+            }
         }
 
         Ok(())
@@ -121,6 +154,13 @@ mod tests {
     use crate::protocol::messages::test_utils::test_roundtrip_versioned;
 
     use super::*;
+
+    test_roundtrip_versioned!(
+        RequestHeader,
+        ApiVersion(Int16(0)),
+        ApiVersion(Int16(2)),
+        test_roundtrip_request_header
+    );
 
     test_roundtrip_versioned!(
         ResponseHeader,

@@ -281,7 +281,7 @@ where
 ///
 /// For non-null strings, first the length N is given as an INT16. Then N bytes follow which are the UTF-8 encoding of
 /// the character sequence. A null value is encoded with length of -1 and there are no following bytes.
-#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
 #[cfg_attr(test, derive(proptest_derive::Arbitrary))]
 pub struct NullableString(pub Option<String>);
 
@@ -360,7 +360,7 @@ where
 }
 
 /// Represents a string whose length is expressed as a variable-length integer rather than a fixed 2-byte length.
-#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
 #[cfg_attr(test, derive(proptest_derive::Arbitrary))]
 pub struct CompactString(pub String);
 

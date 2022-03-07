@@ -91,7 +91,7 @@ pub struct Messenger<RW> {
     /// The half of the stream that we use to send data TO the broker.
     ///
     /// This will be used by [`request`](Self::request) to queue up messages.
-    stream_write: Mutex<WriteHalf<RW>>,
+    stream_write: Arc<Mutex<WriteHalf<RW>>>,
 
     /// The next correction ID.
     ///
@@ -250,7 +250,7 @@ where
         });
 
         Self {
-            stream_write: Mutex::new(stream_write),
+            stream_write: Arc::new(Mutex::new(stream_write)),
             correlation_id: AtomicI32::new(0),
             version_ranges: RwLock::new(HashMap::new()),
             state,
@@ -298,8 +298,8 @@ where
             request_api_key: R::API_KEY,
             request_api_version: body_api_version,
             correlation_id: Int32(correlation_id),
-            client_id: NullableString(None),
-            tagged_fields: TaggedFields::default(),
+            client_id: Some(NullableString(None)),
+            tagged_fields: Some(TaggedFields::default()),
         };
         let header_version = if use_tagged_fields_in_request {
             ApiVersion(Int16(2))
@@ -330,7 +330,7 @@ where
             }
         }
 
-        self.send_message(&buf).await?;
+        self.send_message(buf).await?;
 
         let mut response = rx.await.expect("Who closed this channel?!")?;
         let body = R::ResponseBody::read_versioned(&mut response.data, body_api_version)?;
@@ -350,7 +350,7 @@ where
         Ok(body)
     }
 
-    async fn send_message(&self, msg: &[u8]) -> Result<(), RequestError> {
+    async fn send_message(&self, msg: Vec<u8>) -> Result<(), RequestError> {
         match self.send_message_inner(msg).await {
             Ok(()) => Ok(()),
             Err(e) => {
@@ -361,11 +361,17 @@ where
         }
     }
 
-    async fn send_message_inner(&self, msg: &[u8]) -> Result<(), RequestError> {
-        let mut stream_write = self.stream_write.lock().await;
-        stream_write.write_message(msg).await?;
-        stream_write.flush().await?;
-        Ok(())
+    async fn send_message_inner(&self, msg: Vec<u8>) -> Result<(), RequestError> {
+        let mut stream_write = Arc::clone(&self.stream_write).lock_owned().await;
+
+        // use a task so that cancelation doesn't cancel the send operation and leaves half-send messages on the wire
+        let handle = tokio::spawn(async move {
+            stream_write.write_message(&msg).await?;
+            stream_write.flush().await?;
+            Ok(())
+        });
+
+        handle.await.expect("background task died")
     }
 
     pub async fn sync_versions(&self) -> Result<(), SyncVersionsError> {
@@ -382,9 +388,11 @@ where
             )]));
 
             let body = ApiVersionsRequest {
-                client_software_name: CompactString(String::from(env!("CARGO_PKG_NAME"))),
-                client_software_version: CompactString(String::from(env!("CARGO_PKG_VERSION"))),
-                tagged_fields: TaggedFields::default(),
+                client_software_name: Some(CompactString(String::from(env!("CARGO_PKG_NAME")))),
+                client_software_version: Some(CompactString(String::from(env!(
+                    "CARGO_PKG_VERSION"
+                )))),
+                tagged_fields: Some(TaggedFields::default()),
             };
 
             match self.request(body).await {
@@ -489,10 +497,14 @@ fn match_versions(range_a: ApiVersionRange, range_b: ApiVersionRange) -> Option<
 
 #[cfg(test)]
 mod tests {
-    use std::ops::Deref;
+    use std::{ops::Deref, time::Duration};
 
     use assert_matches::assert_matches;
-    use tokio::{io::DuplexStream, sync::mpsc::UnboundedSender};
+    use futures::{pin_mut, FutureExt};
+    use tokio::{
+        io::{AsyncReadExt, DuplexStream},
+        sync::{mpsc::UnboundedSender, Barrier},
+    };
 
     use super::*;
 
@@ -913,13 +925,166 @@ mod tests {
 
         let actual = messenger
             .request(ApiVersionsRequest {
-                client_software_name: CompactString(String::new()),
-                client_software_version: CompactString(String::new()),
-                tagged_fields: TaggedFields::default(),
+                client_software_name: Some(CompactString(String::new())),
+                client_software_version: Some(CompactString(String::new())),
+                tagged_fields: Some(TaggedFields::default()),
             })
             .await
             .unwrap();
         assert_eq!(actual, resp);
+    }
+
+    #[tokio::test]
+    async fn test_cancel_request() {
+        // Use a "virtual" network between a simulated broker and a client. The network is intercepted in the middle to
+        // pause it after 3 bytes are sent by the client.
+        let (tx_front, rx_middle) = tokio::io::duplex(1);
+        let (tx_middle, mut rx_back) = tokio::io::duplex(1);
+
+        let messenger = Messenger::new(tx_front, 1_000);
+
+        // create two barriers:
+        // - pause: will be passed after 3 bytes were sent by the client
+        // - continue: will be passed to continue client->broker traffic
+        //
+        // The barriers do NOT affect broker->client traffic.
+        //
+        // The sizes of the barriers is 2: one for the network simulation task and one for the main/control thread.
+        let network_pause = Arc::new(Barrier::new(2));
+        let network_pause_captured = Arc::clone(&network_pause);
+        let network_continue = Arc::new(Barrier::new(2));
+        let network_continue_captured = Arc::clone(&network_continue);
+        let handle_network = tokio::spawn(async move {
+            // Need to split both directions into read and write halfs so we can run full-duplex in two loops. Otherwise
+            // the test might deadlock even though the code is just fine (TCP is full-duplex).
+            let (mut rx_middle_read, mut rx_middle_write) = tokio::io::split(rx_middle);
+            let (mut tx_middle_read, mut tx_middle_write) = tokio::io::split(tx_middle);
+
+            let direction_client_broker = async {
+                for i in 0.. {
+                    let mut buf = [0; 1];
+                    rx_middle_read.read_exact(&mut buf).await.unwrap();
+                    tx_middle_write.write_all(&buf).await.unwrap();
+
+                    if i == 3 {
+                        network_pause_captured.wait().await;
+                        network_continue_captured.wait().await;
+                    }
+                }
+            };
+
+            let direction_broker_client = async {
+                loop {
+                    let mut buf = [0; 1];
+                    tx_middle_read.read_exact(&mut buf).await.unwrap();
+                    rx_middle_write.write_all(&buf).await.unwrap();
+                }
+            };
+
+            tokio::select! {
+                _ = direction_client_broker => {}
+                _ = direction_broker_client => {}
+            }
+        });
+
+        // simulated broker, just reads messages and answers w/ "api versions" responses
+        let handle_broker = tokio::spawn(async move {
+            for correlation_id in 0.. {
+                let data = rx_back.read_message(1_000).await.unwrap();
+                let mut data = Cursor::new(data);
+                let header =
+                    RequestHeader::read_versioned(&mut data, ApiVersion(Int16(1))).unwrap();
+                assert_eq!(
+                    header,
+                    RequestHeader {
+                        request_api_key: ApiKey::ApiVersions,
+                        request_api_version: ApiVersion(Int16(0)),
+                        correlation_id: Int32(correlation_id),
+                        client_id: Some(NullableString(None)),
+                        tagged_fields: None,
+                    }
+                );
+                let body =
+                    ApiVersionsRequest::read_versioned(&mut data, ApiVersion(Int16(0))).unwrap();
+                assert_eq!(
+                    body,
+                    ApiVersionsRequest {
+                        client_software_name: None,
+                        client_software_version: None,
+                        tagged_fields: None,
+                    }
+                );
+                assert_eq!(data.position() as usize, data.get_ref().len());
+
+                let mut msg = vec![];
+                ResponseHeader {
+                    correlation_id: Int32(correlation_id),
+                    tagged_fields: Default::default(), // NOT serialized for ApiVersion!
+                }
+                .write_versioned(&mut msg, ApiVersion(Int16(0)))
+                .unwrap();
+                let resp = ApiVersionsResponse {
+                    error_code: Some(ApiError::CorruptMessage),
+                    api_keys: vec![],
+                    throttle_time_ms: Some(Int32(1)),
+                    tagged_fields: Some(TaggedFields::default()),
+                };
+                resp.write_versioned(&mut msg, ApiVersionsRequest::API_VERSION_RANGE.min())
+                    .unwrap();
+                rx_back.write_message(&msg).await.unwrap();
+            }
+        });
+
+        messenger.set_version_ranges(HashMap::from([(
+            ApiKey::ApiVersions,
+            ApiVersionRange::new(ApiVersion(Int16(0)), ApiVersion(Int16(0))),
+        )]));
+
+        // send first message, this task will be canceled after 3 bytes got sent.
+        let task_to_cancel = (async {
+            messenger
+                .request(ApiVersionsRequest {
+                    client_software_name: Some(CompactString(String::from("foo"))),
+                    client_software_version: Some(CompactString(String::from("bar"))),
+                    tagged_fields: Some(TaggedFields::default()),
+                })
+                .await
+                .unwrap();
+        })
+        .fuse();
+
+        {
+            // cancel when we exit this block
+            pin_mut!(task_to_cancel);
+
+            // write exactly 3 bytes via the client and then cancel the task.
+            futures::select_biased! {
+                _ = &mut task_to_cancel => panic!("should not have finished"),
+                _ = network_pause.wait().fuse() => {},
+            }
+        }
+
+        // continue client->broker traffic
+        network_continue.wait().await;
+
+        // IF the original bug in https://github.com/influxdata/rskafka/issues/103 exists, then the following statement
+        // will timeout because the broker got garbage and will wait forever to read the message.
+        tokio::time::timeout(Duration::from_millis(100), async {
+            messenger
+                .request(ApiVersionsRequest {
+                    client_software_name: Some(CompactString(String::from("foo"))),
+                    client_software_version: Some(CompactString(String::from("bar"))),
+                    tagged_fields: Some(TaggedFields::default()),
+                })
+                .await
+                .unwrap();
+        })
+        .await
+        .unwrap();
+
+        // clean up helper tasks
+        handle_broker.abort();
+        handle_network.abort();
     }
 
     #[derive(Debug)]
