@@ -360,7 +360,7 @@ where
 }
 
 /// Represents a string whose length is expressed as a variable-length integer rather than a fixed 2-byte length.
-#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
 #[cfg_attr(test, derive(proptest_derive::Arbitrary))]
 pub struct CompactString(pub String);
 

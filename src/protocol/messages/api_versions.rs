@@ -19,16 +19,39 @@ use super::{
 #[cfg(test)]
 use proptest::prelude::*;
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq)]
+#[cfg_attr(test, derive(proptest_derive::Arbitrary))]
 pub struct ApiVersionsRequest {
     /// The name of the client.
-    pub client_software_name: CompactString,
+    ///
+    /// Added in version 3.
+    pub client_software_name: Option<CompactString>,
 
     /// The version of the client.
-    pub client_software_version: CompactString,
+    ///
+    /// Added in version 3.
+    pub client_software_version: Option<CompactString>,
 
     /// The tagged fields.
-    pub tagged_fields: TaggedFields,
+    ///
+    /// Added in version 3.
+    pub tagged_fields: Option<TaggedFields>,
+}
+
+impl<R> ReadVersionedType<R> for ApiVersionsRequest
+where
+    R: Read,
+{
+    fn read_versioned(reader: &mut R, version: ApiVersion) -> Result<Self, ReadVersionedError> {
+        let v = version.0 .0;
+        assert!(v <= 3);
+
+        Ok(Self {
+            client_software_name: (v >= 3).then(|| CompactString::read(reader)).transpose()?,
+            client_software_version: (v >= 3).then(|| CompactString::read(reader)).transpose()?,
+            tagged_fields: (v >= 3).then(|| TaggedFields::read(reader)).transpose()?,
+        })
+    }
 }
 
 impl<W> WriteVersionedType<W> for ApiVersionsRequest
@@ -44,9 +67,32 @@ where
         assert!(v <= 3);
 
         if v >= 3 {
-            self.client_software_name.write(writer)?;
-            self.client_software_version.write(writer)?;
-            self.tagged_fields.write(writer)?;
+            match self.client_software_name.as_ref() {
+                Some(client_software_name) => {
+                    client_software_name.write(writer)?;
+                }
+                None => {
+                    CompactString::default().write(writer)?;
+                }
+            }
+
+            match self.client_software_version.as_ref() {
+                Some(client_software_version) => {
+                    client_software_version.write(writer)?;
+                }
+                None => {
+                    CompactString::default().write(writer)?;
+                }
+            }
+
+            match self.tagged_fields.as_ref() {
+                Some(tagged_fields) => {
+                    tagged_fields.write(writer)?;
+                }
+                None => {
+                    TaggedFields::default().write(writer)?;
+                }
+            }
         }
 
         Ok(())
@@ -235,6 +281,13 @@ mod tests {
     use crate::protocol::messages::test_utils::test_roundtrip_versioned;
 
     use super::*;
+
+    test_roundtrip_versioned!(
+        ApiVersionsRequest,
+        ApiVersionsRequest::API_VERSION_RANGE.min(),
+        ApiVersionsRequest::API_VERSION_RANGE.max(),
+        test_roundtrip_api_versions_request
+    );
 
     test_roundtrip_versioned!(
         ApiVersionsResponse,

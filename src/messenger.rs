@@ -388,9 +388,11 @@ where
             )]));
 
             let body = ApiVersionsRequest {
-                client_software_name: CompactString(String::from(env!("CARGO_PKG_NAME"))),
-                client_software_version: CompactString(String::from(env!("CARGO_PKG_VERSION"))),
-                tagged_fields: TaggedFields::default(),
+                client_software_name: Some(CompactString(String::from(env!("CARGO_PKG_NAME")))),
+                client_software_version: Some(CompactString(String::from(env!(
+                    "CARGO_PKG_VERSION"
+                )))),
+                tagged_fields: Some(TaggedFields::default()),
             };
 
             match self.request(body).await {
@@ -923,9 +925,9 @@ mod tests {
 
         let actual = messenger
             .request(ApiVersionsRequest {
-                client_software_name: CompactString(String::new()),
-                client_software_version: CompactString(String::new()),
-                tagged_fields: TaggedFields::default(),
+                client_software_name: Some(CompactString(String::new())),
+                client_software_version: Some(CompactString(String::new())),
+                tagged_fields: Some(TaggedFields::default()),
             })
             .await
             .unwrap();
@@ -1018,9 +1020,9 @@ mod tests {
         let task_to_cancel = (async {
             messenger
                 .request(ApiVersionsRequest {
-                    client_software_name: CompactString(String::from("foo")),
-                    client_software_version: CompactString(String::from("bar")),
-                    tagged_fields: TaggedFields::default(),
+                    client_software_name: Some(CompactString(String::from("foo"))),
+                    client_software_version: Some(CompactString(String::from("bar"))),
+                    tagged_fields: Some(TaggedFields::default()),
                 })
                 .await
                 .unwrap();
@@ -1046,9 +1048,9 @@ mod tests {
         tokio::time::timeout(Duration::from_millis(100), async {
             messenger
                 .request(ApiVersionsRequest {
-                    client_software_name: CompactString(String::from("foo")),
-                    client_software_version: CompactString(String::from("bar")),
-                    tagged_fields: TaggedFields::default(),
+                    client_software_name: Some(CompactString(String::from("foo"))),
+                    client_software_version: Some(CompactString(String::from("bar"))),
+                    tagged_fields: Some(TaggedFields::default()),
                 })
                 .await
                 .unwrap();
