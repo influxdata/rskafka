@@ -944,7 +944,7 @@ mod tests {
         let network_pause = Arc::new(Barrier::new(2));
         let network_pause_captured = Arc::clone(&network_pause);
         let handle_network = tokio::spawn(async move {
-            // Need to split both directions into read and write halfs so we can run full-deplux in two loops. Otherwise
+            // Need to split both directions into read and write halfs so we can run full-duplex in two loops. Otherwise
             // the test might deadlock even though the code is just fine (TCP is full-duplex).
             let (mut rx_middle_read, mut rx_middle_write) = tokio::io::split(rx_middle);
             let (mut tx_middle_read, mut tx_middle_write) = tokio::io::split(tx_middle);
