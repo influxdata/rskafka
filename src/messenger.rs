@@ -990,7 +990,31 @@ mod tests {
         // simulated broker, just reads messages and answers w/ "api versions" responses
         let handle_broker = tokio::spawn(async move {
             for correlation_id in 0.. {
-                rx_back.read_message(1_000).await.unwrap();
+                let data = rx_back.read_message(1_000).await.unwrap();
+                let mut data = Cursor::new(data);
+                let header =
+                    RequestHeader::read_versioned(&mut data, ApiVersion(Int16(1))).unwrap();
+                assert_eq!(
+                    header,
+                    RequestHeader {
+                        request_api_key: ApiKey::ApiVersions,
+                        request_api_version: ApiVersion(Int16(0)),
+                        correlation_id: Int32(correlation_id),
+                        client_id: Some(NullableString(None)),
+                        tagged_fields: None,
+                    }
+                );
+                let body =
+                    ApiVersionsRequest::read_versioned(&mut data, ApiVersion(Int16(0))).unwrap();
+                assert_eq!(
+                    body,
+                    ApiVersionsRequest {
+                        client_software_name: None,
+                        client_software_version: None,
+                        tagged_fields: None,
+                    }
+                );
+                assert_eq!(data.position() as usize, data.get_ref().len());
 
                 let mut msg = vec![];
                 ResponseHeader {
