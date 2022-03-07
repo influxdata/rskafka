@@ -298,8 +298,8 @@ where
             request_api_key: R::API_KEY,
             request_api_version: body_api_version,
             correlation_id: Int32(correlation_id),
-            client_id: NullableString(None),
-            tagged_fields: TaggedFields::default(),
+            client_id: Some(NullableString(None)),
+            tagged_fields: Some(TaggedFields::default()),
         };
         let header_version = if use_tagged_fields_in_request {
             ApiVersion(Int16(2))
