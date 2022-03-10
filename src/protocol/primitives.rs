@@ -262,7 +262,7 @@ where
     fn write(&self, writer: &mut W) -> Result<(), WriteError> {
         let mut curr = self.0;
         loop {
-            let mut c = u8::try_from(curr & 0x7f).map_err(|e| WriteError::Overflow(e))?;
+            let mut c = u8::try_from(curr & 0x7f).map_err(WriteError::Overflow)?;
             curr >>= 7;
             if curr > 0 {
                 c |= 0x80;
@@ -409,7 +409,7 @@ where
     W: Write,
 {
     fn write(&self, writer: &mut W) -> Result<(), WriteError> {
-        let len = u64::try_from(self.0.len() + 1).map_err(|e| WriteError::Overflow(e))?;
+        let len = u64::try_from(self.0.len() + 1).map_err(WriteError::Overflow)?;
         UnsignedVarint(len).write(writer)?;
         writer.write_all(self.0.as_bytes())?;
         Ok(())
@@ -466,7 +466,7 @@ where
     fn write(&self, writer: &mut W) -> Result<(), WriteError> {
         match &self.0 {
             Some(s) => {
-                let len = u64::try_from(s.len() + 1).map_err(|e| WriteError::Overflow(e))?;
+                let len = u64::try_from(s.len() + 1).map_err(WriteError::Overflow)?;
                 UnsignedVarint(len).write(writer)?;
                 writer.write_all(s.as_bytes())?;
             }
@@ -535,13 +535,13 @@ where
 {
     fn read(reader: &mut R) -> Result<Self, ReadError> {
         let len = UnsignedVarint::read(reader)?;
-        let len = usize::try_from(len.0).map_err(|e| ReadError::Overflow(e))?;
+        let len = usize::try_from(len.0).map_err(ReadError::Overflow)?;
         let mut res = VecBuilder::new(len);
         for _ in 0..len {
             let tag = UnsignedVarint::read(reader)?;
 
             let data_len = UnsignedVarint::read(reader)?;
-            let data_len = usize::try_from(data_len.0).map_err(|e| ReadError::Overflow(e))?;
+            let data_len = usize::try_from(data_len.0).map_err(ReadError::Overflow)?;
             let mut data_builder = VecBuilder::new(data_len);
             data_builder = data_builder.read_exact(reader)?;
 
@@ -556,12 +556,12 @@ where
     W: Write,
 {
     fn write(&self, writer: &mut W) -> Result<(), WriteError> {
-        let len = u64::try_from(self.0.len()).map_err(|e| WriteError::Overflow(e))?;
+        let len = u64::try_from(self.0.len()).map_err(WriteError::Overflow)?;
         UnsignedVarint(len).write(writer)?;
 
         for (tag, data) in &self.0 {
             tag.write(writer)?;
-            let data_len = u64::try_from(data.len()).map_err(|e| WriteError::Overflow(e))?;
+            let data_len = u64::try_from(data.len()).map_err(WriteError::Overflow)?;
             UnsignedVarint(data_len).write(writer)?;
             writer.write_all(data)?;
         }
