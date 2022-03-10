@@ -236,9 +236,9 @@ where
         let mut shift = 0;
         loop {
             reader.read_exact(&mut buf)?;
-            let c = buf[0];
+            let c: u64 = buf[0].into();
 
-            res |= ((c as u64) & 0x7f) << shift;
+            res |= (c & 0x7f) << shift;
             shift += 7;
 
             if (c & 0x80) == 0 {
@@ -262,7 +262,7 @@ where
     fn write(&self, writer: &mut W) -> Result<(), WriteError> {
         let mut curr = self.0;
         loop {
-            let mut c = (curr & 0x7f) as u8;
+            let mut c = u8::try_from(curr & 0x7f).map_err(|e| WriteError::Overflow(e))?;
             curr >>= 7;
             if curr > 0 {
                 c |= 0x80;
@@ -409,7 +409,8 @@ where
     W: Write,
 {
     fn write(&self, writer: &mut W) -> Result<(), WriteError> {
-        UnsignedVarint(self.0.len() as u64 + 1).write(writer)?;
+        let len = u64::try_from(self.0.len() + 1).map_err(|e| WriteError::Overflow(e))?;
+        UnsignedVarint(len).write(writer)?;
         writer.write_all(self.0.as_bytes())?;
         Ok(())
     }
@@ -465,7 +466,8 @@ where
     fn write(&self, writer: &mut W) -> Result<(), WriteError> {
         match &self.0 {
             Some(s) => {
-                UnsignedVarint(s.len() as u64 + 1).write(writer)?;
+                let len = u64::try_from(s.len() + 1).map_err(|e| WriteError::Overflow(e))?;
+                UnsignedVarint(len).write(writer)?;
                 writer.write_all(s.as_bytes())?;
             }
             None => {
@@ -533,12 +535,14 @@ where
 {
     fn read(reader: &mut R) -> Result<Self, ReadError> {
         let len = UnsignedVarint::read(reader)?;
-        let mut res = VecBuilder::new(len.0 as usize);
-        for _ in 0..len.0 {
+        let len = usize::try_from(len.0).map_err(|e| ReadError::Overflow(e))?;
+        let mut res = VecBuilder::new(len);
+        for _ in 0..len {
             let tag = UnsignedVarint::read(reader)?;
 
             let data_len = UnsignedVarint::read(reader)?;
-            let mut data_builder = VecBuilder::new(data_len.0 as usize);
+            let data_len = usize::try_from(data_len.0).map_err(|e| ReadError::Overflow(e))?;
+            let mut data_builder = VecBuilder::new(data_len);
             data_builder = data_builder.read_exact(reader)?;
 
             res.push((tag, data_builder.into()));
@@ -552,11 +556,13 @@ where
     W: Write,
 {
     fn write(&self, writer: &mut W) -> Result<(), WriteError> {
-        UnsignedVarint(self.0.len() as u64).write(writer)?;
+        let len = u64::try_from(self.0.len()).map_err(|e| WriteError::Overflow(e))?;
+        UnsignedVarint(len).write(writer)?;
 
         for (tag, data) in &self.0 {
             tag.write(writer)?;
-            UnsignedVarint(data.len() as u64).write(writer)?;
+            let data_len = u64::try_from(data.len()).map_err(|e| WriteError::Overflow(e))?;
+            UnsignedVarint(data_len).write(writer)?;
             writer.write_all(data)?;
         }
 
@@ -661,7 +667,7 @@ where
 {
     fn read(reader: &mut R) -> Result<Self, ReadError> {
         let buf = NullableBytes::read(reader)?.0.unwrap_or_default();
-        let len = buf.len() as u64;
+        let len = u64::try_from(buf.len())?;
         let mut buf = Cursor::new(buf);
 
         let mut batches = vec![];
