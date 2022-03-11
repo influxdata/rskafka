@@ -42,11 +42,8 @@ where
         let len = Int32::read(&mut Cursor::new(len_buf))
             .expect("Reading Int32 from in-mem buffer should always work");
 
-        // convert to usize
-        if len.0 < 0 {
-            return Err(ReadError::NegativeMessageSize { size: len.0 });
-        }
-        let len = len.0 as usize;
+        let len =
+            usize::try_from(len.0).map_err(|_| ReadError::NegativeMessageSize { size: len.0 })?;
 
         // check max message size to not blow up memory
         if len > max_message_size {
@@ -70,7 +67,7 @@ where
             });
         }
 
-        let mut buf = vec![0u8; len as usize];
+        let mut buf = vec![0u8; len];
         self.read_exact(&mut buf).await?;
         Ok(buf)
     }
