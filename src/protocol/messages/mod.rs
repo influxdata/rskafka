@@ -137,7 +137,7 @@ fn read_versioned_array<R: Read, T: ReadVersionedType<R>>(
             format!("Invalid negative length for array: {}", l).into(),
         ))),
         _ => {
-            let len = len as usize;
+            let len = usize::try_from(len).map_err(ReadError::Overflow)?;
             let mut builder = VecBuilder::new(len);
             for _ in 0..len {
                 builder.push(T::read_versioned(reader, version)?);
@@ -187,7 +187,8 @@ fn read_compact_versioned_array<R: Read, T: ReadVersionedType<R>>(
     match len {
         0 => Ok(None),
         n => {
-            let len = (n - 1) as usize;
+            let len = usize::try_from(n - 1)
+                .map_err(|e| ReadVersionedError::ReadError(ReadError::Overflow(e)))?;
             let mut builder = VecBuilder::new(len);
             for _ in 0..len {
                 builder.push(T::read_versioned(reader, version)?);
