@@ -188,7 +188,7 @@ fn read_compact_versioned_array<R: Read, T: ReadVersionedType<R>>(
         0 => Ok(None),
         n => {
             let len = usize::try_from(n - 1)
-                .map_err(|e| ReadVersionedError::ReadError(ReadError::Overflow(e)))?;
+                .map_err(ReadError::Overflow)?;
             let mut builder = VecBuilder::new(len);
             for _ in 0..len {
                 builder.push(T::read_versioned(reader, version)?);
