@@ -104,8 +104,8 @@ where
     fn read(reader: &mut R) -> Result<Self, ReadError> {
         // length
         let len = Varint::read(reader)?;
-        let len = usize::try_from(len.0).map_err(|e| ReadError::Malformed(Box::new(e)))?;
-        let reader = &mut reader.take(len as u64);
+        let len = u64::try_from(len.0).map_err(|e| ReadError::Malformed(Box::new(e)))?;
+        let reader = &mut reader.take(len);
 
         // attributes
         Int8::read(reader)?;
@@ -399,7 +399,7 @@ where
 
         // check if there is any trailing data because this is likely a bug
         let bytes_read = data.position();
-        let bytes_total = data.into_inner().len() as u64;
+        let bytes_total = u64::try_from(data.into_inner().len()).map_err(ReadError::Overflow)?;
         let bytes_left = bytes_total - bytes_read;
         if bytes_left != 0 {
             return Err(ReadError::Malformed(
