@@ -197,14 +197,15 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use futures::future::BoxFuture;
+use futures::future::{try_join_all, BoxFuture};
 use thiserror::Error;
 use tokio::sync::{Mutex, OwnedMutexGuard};
-use tracing::{debug, error};
+use tracing::*;
 
 use crate::client::producer::aggregator::TryPush;
 use crate::client::producer::broadcast::BroadcastOnce;
 use crate::client::{error::Error as ClientError, partition::PartitionClient};
+use crate::protocol::error::Error as ProtocolError;
 use crate::record::Record;
 
 use super::partition::Compression;
@@ -305,10 +306,16 @@ impl ProducerClient for PartitionClient {
 /// [`BatchProducer`] attempts to aggregate multiple produce requests together
 /// using the provided [`Aggregator`].
 ///
-/// It will buffer up records until either the linger time expires or [`Aggregator`]
-/// cannot accommodate another record.
+/// It will buffer up records until either the linger time expires or
+/// [`Aggregator`] cannot accommodate another record.
 ///
-/// At this point it will flush the [`Aggregator`]
+/// At this point it will flush the [`Aggregator`].
+///
+/// If the batch produce request results in a [`ProtocolError::MessageTooLarge`]
+/// response from the broker, a warning log is emitted and the batch is split
+/// into two halves and retried internally. In this case a partial write is
+/// possible with one half succeeding and one half failing and the produce call
+/// returns an error for the entire batch.
 ///
 /// [`Aggregator`]: aggregator::Aggregator
 #[derive(Debug)]
@@ -368,13 +375,14 @@ where
 {
     /// Write `data` to this [`BatchProducer`]
     ///
-    /// Returns when the data has been committed to Kafka or
-    /// an unrecoverable error has been encountered
+    /// Returns when the data has been committed to Kafka or an unrecoverable
+    /// error has been encountered.
     ///
     /// # Cancellation
     ///
-    /// The returned future is cancellation safe in that it won't leave the [`BatchProducer`]
-    /// in an inconsistent state, however, the provided data may or may not be produced
+    /// The returned future is cancellation safe in that it won't leave the
+    /// [`BatchProducer`] in an inconsistent state, however, the provided data
+    /// may or may not be produced.
     ///
     pub async fn produce(
         &self,
@@ -470,35 +478,57 @@ where
                 }
             };
 
-            let r = if output.is_empty() {
-                debug!(?client, "No data aggregated, skipping client request");
+            let result = match flush_batch(&output, &*client, compression).await {
+                // Pick out the "MESSAGE_TOO_LARGE" error state
+                Err(e @  ClientError::ServerError(ProtocolError::MessageTooLarge, _))
+                    // Only attempt to split the batch if it can be split.
+                    if output.len() > 1 =>
+                {
+                    warn!(
+                        ?client,
+                        error=%e,
+                        "broker indicates message too large, splitting batch"
+                    );
 
-                // A custom aggregator might have produced no records, but the the calls to `.produce` are still waiting for
-                // their slot values, so we need to provide them some result, otherwise we might flush twice or panic with
-                // "just flushed" because no data is available right after flushing.
-                Ok(vec![])
-            } else {
-                client.produce(&output, compression).await
+                    // Split the batch into two halves
+                    let mid = output.len() / 2;
+                    let (p1, p2) = output.split_at(mid);
+
+                    // Concurrently produce each half, and join together the
+                    // results in the same order for the de-aggregation indexes
+                    // into the results vec to remain correct.
+                    let f1 = flush_batch(p1, &*client, compression);
+                    let f2 = flush_batch(p2, &*client, compression);
+                    match try_join_all([f1, f2]).await {
+                        Ok(status) => {
+                            debug!(
+                                ?client,
+                                ?status,
+                                "successfully produced records after splitting batch"
+                            );
+
+                            Ok(status.into_iter().flatten().collect::<Vec<_>>())
+                        }
+                        Err(e) => {
+                            warn!(?client, error=%e, "failed to produce records after splitting batch");
+                            Err(e)
+                        }
+                    }
+                }
+                // Anything else is returned to the caller.
+                v => v,
             };
 
-            let result = match r {
-                Ok(status) => {
-                    debug!(?client, ?status, "Successfully produced records");
-
-                    let aggregated_status = AggregatedStatus {
-                        aggregated_status: status,
-                        status_deagg,
-                    };
-                    Ok(Arc::new(aggregated_status))
-                }
-                Err(e) => {
-                    debug!(?client, error=?e, "Failed to produce records");
-
-                    Err(Error::Client(Arc::new(e)))
-                }
-            };
-
-            slot.broadcast(result);
+            slot.broadcast(
+                result
+                    .map(|status| {
+                        Arc::new(AggregatedStatus {
+                            aggregated_status: status,
+                            status_deagg,
+                        })
+                    })
+                    .map_err(|e| Error::Client(Arc::new(e))),
+            );
 
             Ok(inner)
         });
@@ -511,6 +541,36 @@ where
 
     async fn lock(&self) -> OwnedMutexGuard<ProducerInner<A>> {
         Arc::clone(&self.inner).lock_owned().await
+    }
+}
+
+async fn flush_batch(
+    records: &[Record],
+    client: &dyn ProducerClient,
+    compression: Compression,
+) -> Result<Vec<i64>, ClientError> {
+    debug!(?client, n_records = records.len(), "flushing batch");
+
+    let r = if records.is_empty() {
+        debug!(?client, "No data aggregated, skipping client request");
+
+        // A custom aggregator might have produced no records, but the the calls to `.produce` are still waiting for
+        // their slot values, so we need to provide them some result, otherwise we might flush twice or panic with
+        // "just flushed" because no data is available right after flushing.
+        Ok(vec![])
+    } else {
+        client.produce(records, compression).await
+    };
+
+    match r {
+        Ok(status) => {
+            debug!(?client, ?status, "Successfully produced records");
+            Ok(status)
+        }
+        Err(e) => {
+            debug!(?client, error=?e, "Failed to produce records");
+            Err(e)
+        }
     }
 }
 
@@ -564,7 +624,7 @@ mod tests {
             Box::pin(async move {
                 tokio::time::sleep(self.delay).await;
 
-                if let Some(e) = self.error.as_ref().map(|m| m.lock().pop_front()).flatten() {
+                if let Some(e) = self.error.as_ref().and_then(|m| m.lock().pop_front()) {
                     return Err(ClientError::ServerError(e, "".to_string()));
                 }
 
@@ -926,6 +986,83 @@ mod tests {
 
         assert!(matches!(&a, Err(Error::FlushError(_))));
         assert!(matches!(&b, Err(Error::FlushError(_))));
+    }
+
+    /// Asserts that a batch observing a [`ProtocolError::MessageTooLarge`]
+    /// error is split in two and successfully produced.
+    #[tokio::test]
+    async fn test_producer_message_too_large_split_batch_ok() {
+        let record = record();
+        let linger = Duration::from_millis(100);
+        let client = Arc::new(MockClient::default().with_errors([ProtocolError::MessageTooLarge]));
+
+        let aggregator = RecordAggregator::new(record.approximate_size() * 2);
+        let producer = BatchProducerBuilder::new_with_client(Arc::<MockClient>::clone(&client))
+            .with_linger(linger)
+            .build(aggregator);
+
+        let a = producer.produce(record.clone());
+        let b = producer.produce(record);
+
+        let (a, b) = futures::future::join(a, b).await;
+        // De-aggregates to the correct response even after splitting.
+        assert!(matches!(a, Ok(0)));
+        assert!(matches!(b, Ok(1)));
+
+        // Check there were two batches of size=1 successfully wrote after the
+        // split.
+        let sizes = client.batch_sizes.lock().clone();
+        assert_eq!(sizes, [1, 1]);
+    }
+
+    /// Asserts the error path of the split batch code path does not mask
+    /// errors.
+    #[tokio::test]
+    async fn test_producer_message_too_large_split_batch_failure() {
+        let record = record();
+        let linger = Duration::from_millis(100);
+        let client = Arc::new(MockClient::default().with_errors([
+            ProtocolError::MessageTooLarge, // First batch of size=2
+            ProtocolError::RequestTimedOut, // Split batch, part 1 (size=1)
+            ProtocolError::RequestTimedOut, // Split batch, part 2 (size=1)
+        ]));
+
+        let aggregator = RecordAggregator::new(record.approximate_size() * 2);
+        let producer = BatchProducerBuilder::new_with_client(Arc::<MockClient>::clone(&client))
+            .with_linger(linger)
+            .build(aggregator);
+
+        let a = producer.produce(record.clone());
+        let b = producer.produce(record);
+
+        let (a, b) = futures::future::join(a, b).await;
+        assert!(a.is_err());
+        assert!(b.is_err());
+    }
+
+    /// Asserts the partial error semantics of the split-batch produce code
+    /// path, and at-most once batch splitting.
+    #[tokio::test]
+    async fn test_producer_message_too_large_split_batch_partial_failure() {
+        let record = record();
+        let linger = Duration::from_millis(100);
+        let client = Arc::new(MockClient::default().with_errors([
+            ProtocolError::MessageTooLarge, // First batch of size=2
+            ProtocolError::MessageTooLarge, // Split batch, part 1 (size=1)
+                                            // Split batch, part 2 succeeds.
+        ]));
+
+        let aggregator = RecordAggregator::new(record.approximate_size() * 2);
+        let producer = BatchProducerBuilder::new_with_client(Arc::<MockClient>::clone(&client))
+            .with_linger(linger)
+            .build(aggregator);
+
+        let a = producer.produce(record.clone());
+        let b = producer.produce(record);
+
+        let (a, b) = futures::future::join(a, b).await;
+        assert!(a.is_err());
+        assert!(b.is_err());
     }
 
     #[derive(Debug)]

@@ -407,7 +407,7 @@ fn build_produce_request(
     let mut max_timestamp = first_timestamp;
 
     let records = records
-        .into_iter()
+        .iter()
         .enumerate()
         .map(|(offset_delta, record)| {
             max_timestamp = max_timestamp.max(record.timestamp);
@@ -601,8 +601,7 @@ fn extract_records(
                                 .headers
                                 .into_iter()
                                 .map(|header| (header.key, header.value))
-                                .collect::<BTreeMap<_, _>>()
-                                .into(),
+                                .collect::<BTreeMap<_, _>>(),
                             timestamp,
                         },
                         offset,
