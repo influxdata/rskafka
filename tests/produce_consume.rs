@@ -250,7 +250,7 @@ async fn produce_rskafka(
     compression: Compression,
 ) -> Vec<i64> {
     partition_client
-        .produce(records, compression)
+        .produce(&records, compression)
         .await
         .unwrap()
 }

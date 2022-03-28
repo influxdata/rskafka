@@ -285,19 +285,19 @@ impl BatchProducerBuilder {
 
 // A trait wrapper to allow mocking
 trait ProducerClient: std::fmt::Debug + Send + Sync {
-    fn produce(
-        &self,
-        records: Vec<Record>,
+    fn produce<'a>(
+        &'a self,
+        records: &'a [Record],
         compression: Compression,
-    ) -> BoxFuture<'_, Result<Vec<i64>, ClientError>>;
+    ) -> BoxFuture<'a, Result<Vec<i64>, ClientError>>;
 }
 
 impl ProducerClient for PartitionClient {
-    fn produce(
-        &self,
-        records: Vec<Record>,
+    fn produce<'a>(
+        &'a self,
+        records: &'a [Record],
         compression: Compression,
-    ) -> BoxFuture<'_, Result<Vec<i64>, ClientError>> {
+    ) -> BoxFuture<'a, Result<Vec<i64>, ClientError>> {
         Box::pin(self.produce(records, compression))
     }
 }
@@ -478,7 +478,7 @@ where
                 // "just flushed" because no data is available right after flushing.
                 Ok(vec![])
             } else {
-                client.produce(output, compression).await
+                client.produce(&output, compression).await
             };
 
             let result = match r {
@@ -534,11 +534,11 @@ mod tests {
     }
 
     impl ProducerClient for MockClient {
-        fn produce(
-            &self,
-            records: Vec<Record>,
+        fn produce<'a>(
+            &'a self,
+            records: &'a [Record],
             _compression: Compression,
-        ) -> BoxFuture<'_, Result<Vec<i64>, ClientError>> {
+        ) -> BoxFuture<'a, Result<Vec<i64>, ClientError>> {
             Box::pin(async move {
                 tokio::time::sleep(self.delay).await;
 

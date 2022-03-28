@@ -105,9 +105,9 @@ impl PartitionClient {
     }
 
     /// Produce a batch of records to the partition
-    pub async fn produce(
-        &self,
-        records: Vec<Record>,
+    pub async fn produce<'a>(
+        &'a self,
+        records: &'a [Record],
         compression: Compression,
     ) -> Result<Vec<i64>> {
         // skip request entirely if `records` is empty
@@ -395,7 +395,7 @@ where
 fn build_produce_request(
     partition: i32,
     topic: &str,
-    records: Vec<Record>,
+    records: &[Record],
     compression: Compression,
 ) -> ProduceRequest {
     let n = records.len() as i32;
@@ -419,6 +419,7 @@ fn build_produce_request(
                 offset_delta: offset_delta as i32,
                 headers: record
                     .headers
+                    .clone()
                     .into_iter()
                     .map(|(key, value)| RecordHeader { key, value })
                     .collect(),

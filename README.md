@@ -37,7 +37,7 @@ use rskafka::{
     record::Record,
 };
 use time::OffsetDateTime;
-use std::collections::BTreeMap;
+use std::{collections::BTreeMap, sync::Arc};
 
 // setup client
 let connection = "localhost:9093".to_owned();
@@ -71,7 +71,7 @@ let record = Record {
     ]),
     timestamp: OffsetDateTime::now_utc(),
 };
-partition_client.produce(vec![record], Compression::default()).await.unwrap();
+partition_client.produce(&[record], Compression::default()).await.unwrap();
 
 // consume data
 let (records, high_watermark) = partition_client

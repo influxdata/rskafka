@@ -36,7 +36,7 @@ async fn test_stream_consumer_start_at_0() {
 
     let partition_client = Arc::new(client.partition_client(&topic, 0).await.unwrap());
     partition_client
-        .produce(vec![record.clone()], Compression::NoCompression)
+        .produce(&[record.clone()], Compression::NoCompression)
         .await
         .unwrap();
 
@@ -52,7 +52,7 @@ async fn test_stream_consumer_start_at_0() {
 
     partition_client
         .produce(
-            vec![record.clone(), record.clone()],
+            &[record.clone(), record.clone()],
             Compression::NoCompression,
         )
         .await
@@ -88,7 +88,7 @@ async fn test_stream_consumer_start_at_1() {
     let partition_client = Arc::new(client.partition_client(&topic, 0).await.unwrap());
     partition_client
         .produce(
-            vec![record_1.clone(), record_2.clone()],
+            &[record_1.clone(), record_2.clone()],
             Compression::NoCompression,
         )
         .await
@@ -154,7 +154,7 @@ async fn test_stream_consumer_start_at_earliest() {
 
     let partition_client = Arc::new(client.partition_client(&topic, 0).await.unwrap());
     partition_client
-        .produce(vec![record_1.clone()], Compression::NoCompression)
+        .produce(&[record_1.clone()], Compression::NoCompression)
         .await
         .unwrap();
 
@@ -172,7 +172,7 @@ async fn test_stream_consumer_start_at_earliest() {
     assert_stream_pending(&mut stream).await;
 
     partition_client
-        .produce(vec![record_2.clone()], Compression::NoCompression)
+        .produce(&[record_2.clone()], Compression::NoCompression)
         .await
         .unwrap();
 
@@ -212,7 +212,7 @@ async fn test_stream_consumer_start_at_earliest_empty() {
     assert_stream_pending(&mut stream).await;
 
     partition_client
-        .produce(vec![record.clone()], Compression::NoCompression)
+        .produce(&[record.clone()], Compression::NoCompression)
         .await
         .unwrap();
 
@@ -245,7 +245,7 @@ async fn test_stream_consumer_start_at_earliest_after_deletion() {
     let partition_client = Arc::new(client.partition_client(&topic, 0).await.unwrap());
     partition_client
         .produce(
-            vec![record_1.clone(), record_2.clone()],
+            &[record_1.clone(), record_2.clone()],
             Compression::NoCompression,
         )
         .await
@@ -286,7 +286,7 @@ async fn test_stream_consumer_start_at_latest() {
 
     let partition_client = Arc::new(client.partition_client(&topic, 0).await.unwrap());
     partition_client
-        .produce(vec![record_1.clone()], Compression::NoCompression)
+        .produce(&[record_1.clone()], Compression::NoCompression)
         .await
         .unwrap();
 
@@ -298,7 +298,7 @@ async fn test_stream_consumer_start_at_latest() {
     assert_stream_pending(&mut stream).await;
 
     partition_client
-        .produce(vec![record_2.clone()], Compression::NoCompression)
+        .produce(&[record_2.clone()], Compression::NoCompression)
         .await
         .unwrap();
 
@@ -337,7 +337,7 @@ async fn test_stream_consumer_start_at_latest_empty() {
     assert_stream_pending(&mut stream).await;
 
     partition_client
-        .produce(vec![record.clone()], Compression::NoCompression)
+        .produce(&[record.clone()], Compression::NoCompression)
         .await
         .unwrap();
 

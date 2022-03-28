@@ -152,7 +152,7 @@ async fn test_produce_empty() {
 
     let partition_client = client.partition_client(&topic_name, 1).await.unwrap();
     partition_client
-        .produce(vec![], Compression::NoCompression)
+        .produce(&[], Compression::NoCompression)
         .await
         .unwrap();
 }
@@ -199,7 +199,7 @@ async fn test_consume_offset_out_of_range() {
     let partition_client = client.partition_client(&topic_name, 1).await.unwrap();
     let record = record(b"");
     let offsets = partition_client
-        .produce(vec![record], Compression::NoCompression)
+        .produce(&[record], Compression::NoCompression)
         .await
         .unwrap();
     let offset = offsets[0];
@@ -257,13 +257,13 @@ async fn test_get_offset() {
         ..record_early.clone()
     };
     let offsets = partition_client
-        .produce(vec![record_late.clone()], Compression::NoCompression)
+        .produce(&[record_late.clone()], Compression::NoCompression)
         .await
         .unwrap();
     assert_eq!(offsets[0], 0);
 
     let offsets = partition_client
-        .produce(vec![record_early.clone()], Compression::NoCompression)
+        .produce(&[record_early.clone()], Compression::NoCompression)
         .await
         .unwrap();
     assert_eq!(offsets.len(), 1);
@@ -304,15 +304,15 @@ async fn test_produce_consume_size_cutoff() {
 
     // produce in spearate request so we have three record batches
     partition_client
-        .produce(vec![record_1.clone()], Compression::NoCompression)
+        .produce(&[record_1.clone()], Compression::NoCompression)
         .await
         .unwrap();
     partition_client
-        .produce(vec![record_2.clone()], Compression::NoCompression)
+        .produce(&[record_2.clone()], Compression::NoCompression)
         .await
         .unwrap();
     partition_client
-        .produce(vec![record_3.clone()], Compression::NoCompression)
+        .produce(&[record_3.clone()], Compression::NoCompression)
         .await
         .unwrap();
 
@@ -377,7 +377,7 @@ async fn test_consume_midbatch() {
 
     let offsets = partition_client
         .produce(
-            vec![record_1.clone(), record_2.clone()],
+            &[record_1.clone(), record_2.clone()],
             Compression::NoCompression,
         )
         .await
@@ -426,14 +426,14 @@ async fn test_delete_records() {
     let record_4 = record(b"z");
 
     let offsets = partition_client
-        .produce(vec![record_1.clone()], Compression::NoCompression)
+        .produce(&[record_1.clone()], Compression::NoCompression)
         .await
         .unwrap();
     let offset_1 = offsets[0];
 
     let offsets = partition_client
         .produce(
-            vec![record_2.clone(), record_3.clone()],
+            &[record_2.clone(), record_3.clone()],
             Compression::NoCompression,
         )
         .await
@@ -442,7 +442,7 @@ async fn test_delete_records() {
     let offset_3 = offsets[1];
 
     let offsets = partition_client
-        .produce(vec![record_4.clone()], Compression::NoCompression)
+        .produce(&[record_4.clone()], Compression::NoCompression)
         .await
         .unwrap();
     let offset_4 = offsets[0];

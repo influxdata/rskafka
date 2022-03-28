@@ -82,7 +82,7 @@ pub fn criterion_benchmark(c: &mut Criterion) {
 
                     for _ in 0..iters {
                         client
-                            .produce(vec![record.clone()], Compression::NoCompression)
+                            .produce(&[record.clone()], Compression::NoCompression)
                             .await
                             .unwrap();
                     }
