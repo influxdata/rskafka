@@ -73,7 +73,7 @@
 //! // produce data
 //! let record = Record {
 //!     key: None,
-//!     value: Some(b"hello kafka".to_vec()),
+//!     value: Some(Arc::new(b"hello kafka".to_vec())),
 //!     headers: BTreeMap::from([
 //!         ("foo".to_owned(), b"bar".to_vec()),
 //!     ]),
@@ -146,7 +146,7 @@
 //!         let records = vec![
 //!             Record {
 //!                 key: None,
-//!                 value: Some(data),
+//!                 value: Some(Arc::new(data)),
 //!                 headers: BTreeMap::from([
 //!                     ("foo".to_owned(), b"bar".to_vec()),
 //!                 ]),
@@ -563,8 +563,8 @@ mod tests {
 
     fn record() -> Record {
         Record {
-            key: Some(vec![0; 4]),
-            value: Some(vec![0; 6]),
+            key: Some(Arc::new(vec![0; 4])),
+            value: Some(Arc::new(vec![0; 6])),
             headers: Default::default(),
             timestamp: OffsetDateTime::from_unix_timestamp(320).unwrap(),
         }

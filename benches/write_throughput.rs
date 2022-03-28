@@ -72,8 +72,8 @@ pub fn criterion_benchmark(c: &mut Criterion) {
                 async move {
                     let client = setup_rskafka(connection).await;
                     let record = Record {
-                        key: Some(key),
-                        value: Some(value),
+                        key: Some(Arc::new(key)),
+                        value: Some(Arc::new(value)),
                         headers: BTreeMap::default(),
                         timestamp: OffsetDateTime::now_utc(),
                     };
@@ -139,8 +139,8 @@ pub fn criterion_benchmark(c: &mut Criterion) {
                 async move {
                     let client = setup_rskafka(connection).await;
                     let record = Record {
-                        key: Some(key),
-                        value: Some(value),
+                        key: Some(Arc::new(key)),
+                        value: Some(Arc::new(value)),
                         headers: BTreeMap::default(),
                         timestamp: OffsetDateTime::now_utc(),
                     };

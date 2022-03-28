@@ -1,6 +1,6 @@
 use parking_lot::Once;
 use rskafka::record::Record;
-use std::collections::BTreeMap;
+use std::{collections::BTreeMap, sync::Arc};
 use time::OffsetDateTime;
 
 /// Get the testing Kafka connection string or return current scope.
@@ -75,8 +75,8 @@ pub fn random_topic_name() -> String {
 
 pub fn record(key: &[u8]) -> Record {
     Record {
-        key: Some(key.to_vec()),
-        value: Some(b"hello kafka".to_vec()),
+        key: Some(Arc::new(key.to_vec())),
+        value: Some(Arc::new(b"hello kafka".to_vec())),
         headers: BTreeMap::from([("foo".to_owned(), b"bar".to_vec())]),
         timestamp: now(),
     }

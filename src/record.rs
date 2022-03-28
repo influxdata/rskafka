@@ -1,12 +1,12 @@
-use std::collections::BTreeMap;
+use std::{collections::BTreeMap, sync::Arc};
 
 use time::OffsetDateTime;
 
 /// High-level record.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Record {
-    pub key: Option<Vec<u8>>,
-    pub value: Option<Vec<u8>>,
+    pub key: Option<Arc<Vec<u8>>>,
+    pub value: Option<Arc<Vec<u8>>>,
     pub headers: BTreeMap<String, Vec<u8>>,
     pub timestamp: OffsetDateTime,
 }
@@ -38,8 +38,8 @@ mod tests {
     #[test]
     fn test_approximate_size() {
         let record = Record {
-            key: Some(vec![0; 23]),
-            value: Some(vec![0; 45]),
+            key: Some(Arc::new(vec![0; 23])),
+            value: Some(Arc::new(vec![0; 45])),
             headers: vec![("a".to_string(), vec![0; 5]), ("b".to_string(), vec![0; 7])]
                 .into_iter()
                 .collect(),

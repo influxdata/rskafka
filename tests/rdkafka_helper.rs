@@ -1,4 +1,4 @@
-use std::time::Duration;
+use std::{sync::Arc, time::Duration};
 
 use futures::{StreamExt, TryStreamExt};
 use rdkafka::{
@@ -56,8 +56,8 @@ pub async fn produce(
             .partition(partition_index)
             .headers(headers)
             .timestamp((record.timestamp.unix_timestamp_nanos() / 1_000_000) as i64);
-        let key_ref: Option<&Vec<u8>> = record.key.as_ref();
-        let value_ref: Option<&Vec<u8>> = record.value.as_ref();
+        let key_ref: Option<&Vec<u8>> = record.key.as_deref();
+        let value_ref: Option<&Vec<u8>> = record.value.as_deref();
         if let Some(key) = key_ref {
             f_record = f_record.key(key);
         }
@@ -97,8 +97,8 @@ pub async fn consume(
                 .take(n)
                 .map_ok(|msg| RecordAndOffset {
                     record: Record {
-                        key: msg.key().map(|k| k.to_vec()),
-                        value: msg.payload().map(|v| v.to_vec()),
+                        key: msg.key().map(|k| Arc::new(k.to_vec())),
+                        value: msg.payload().map(|v| Arc::new(v.to_vec())),
                         headers: msg
                             .headers()
                             .map(|headers| {

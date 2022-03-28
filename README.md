@@ -65,7 +65,7 @@ let partition_client = client
 // produce some data
 let record = Record {
     key: None,
-    value: Some(b"hello kafka".to_vec()),
+    value: Some(Arc::new(b"hello kafka".to_vec())),
     headers: BTreeMap::from([
         ("foo".to_owned(), b"bar".to_vec()),
     ]),

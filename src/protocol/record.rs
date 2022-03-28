@@ -19,7 +19,10 @@
 //!
 //! [KIP-32]: https://cwiki.apache.org/confluence/display/KAFKA/KIP-32+-+Add+timestamps+to+Kafka+message
 //! [KIP-98]: https://cwiki.apache.org/confluence/display/KAFKA/KIP-98+-+Exactly+Once+Delivery+and+Transactional+Messaging
-use std::io::{Cursor, Read, Write};
+use std::{
+    io::{Cursor, Read, Write},
+    sync::Arc,
+};
 
 #[cfg(test)]
 use proptest::prelude::*;
@@ -92,8 +95,8 @@ where
 pub struct Record {
     pub timestamp_delta: i64,
     pub offset_delta: i32,
-    pub key: Option<Vec<u8>>,
-    pub value: Option<Vec<u8>>,
+    pub key: Option<Arc<Vec<u8>>>,
+    pub value: Option<Arc<Vec<u8>>>,
     pub headers: Vec<RecordHeader>,
 }
 
@@ -124,7 +127,7 @@ where
             let len = usize::try_from(len).map_err(|e| ReadError::Malformed(Box::new(e)))?;
             let mut key = VecBuilder::new(len);
             key = key.read_exact(reader)?;
-            Some(key.into())
+            Some(Arc::new(key.into()))
         };
 
         // value
@@ -135,7 +138,7 @@ where
             let len = usize::try_from(len).map_err(|e| ReadError::Malformed(Box::new(e)))?;
             let mut value = VecBuilder::new(len);
             value = value.read_exact(reader)?;
-            Some(value.into())
+            Some(Arc::new(value.into()))
         };
 
         // headers
@@ -965,8 +968,8 @@ mod tests {
             records: ControlBatchOrRecords::Records(vec![Record {
                 timestamp_delta: 0,
                 offset_delta: 0,
-                key: Some(vec![]),
-                value: Some(b"hello kafka".to_vec()),
+                key: Some(Arc::new(vec![])),
+                value: Some(Arc::new(b"hello kafka".to_vec())),
                 headers: vec![RecordHeader {
                     key: "foo".to_owned(),
                     value: b"bar".to_vec(),
@@ -1011,8 +1014,8 @@ mod tests {
             records: ControlBatchOrRecords::Records(vec![Record {
                 timestamp_delta: 0,
                 offset_delta: 0,
-                key: Some(vec![b'x'; 100]),
-                value: Some(b"hello kafka".to_vec()),
+                key: Some(Arc::new(vec![b'x'; 100])),
+                value: Some(Arc::new(b"hello kafka".to_vec())),
                 headers: vec![RecordHeader {
                     key: "foo".to_owned(),
                     value: b"bar".to_vec(),
@@ -1061,8 +1064,8 @@ mod tests {
             records: ControlBatchOrRecords::Records(vec![Record {
                 timestamp_delta: 0,
                 offset_delta: 0,
-                key: Some(vec![b'x'; 100]),
-                value: Some(b"hello kafka".to_vec()),
+                key: Some(Arc::new(vec![b'x'; 100])),
+                value: Some(Arc::new(b"hello kafka".to_vec())),
                 headers: vec![RecordHeader {
                     key: "foo".to_owned(),
                     value: b"bar".to_vec(),
@@ -1111,8 +1114,8 @@ mod tests {
             records: ControlBatchOrRecords::Records(vec![Record {
                 timestamp_delta: 0,
                 offset_delta: 0,
-                key: Some(vec![b'x'; 100]),
-                value: Some(b"hello kafka".to_vec()),
+                key: Some(Arc::new(vec![b'x'; 100])),
+                value: Some(Arc::new(b"hello kafka".to_vec())),
                 headers: vec![RecordHeader {
                     key: "foo".to_owned(),
                     value: b"bar".to_vec(),
@@ -1161,8 +1164,8 @@ mod tests {
             records: ControlBatchOrRecords::Records(vec![Record {
                 timestamp_delta: 0,
                 offset_delta: 0,
-                key: Some(vec![b'x'; 100]),
-                value: Some(b"hello kafka".to_vec()),
+                key: Some(Arc::new(vec![b'x'; 100])),
+                value: Some(Arc::new(b"hello kafka".to_vec())),
                 headers: vec![RecordHeader {
                     key: "foo".to_owned(),
                     value: b"bar".to_vec(),
@@ -1223,14 +1226,14 @@ mod tests {
                 timestamp_delta: 0,
                 offset_delta: 0,
                 key: None,
-                value: Some(vec![
+                value: Some(Arc::new(vec![
                     10, 101, 10, 47, 116, 101, 115, 116, 95, 116, 111, 112, 105, 99, 95, 51, 55,
                     51, 57, 56, 102, 56, 100, 45, 57, 53, 102, 56, 45, 52, 52, 101, 101, 45, 56,
                     51, 97, 52, 45, 52, 100, 48, 99, 53, 57, 50, 98, 52, 52, 54, 100, 18, 50, 10,
                     3, 117, 112, 99, 18, 23, 10, 4, 117, 115, 101, 114, 16, 3, 26, 10, 18, 8, 0, 0,
                     0, 0, 0, 0, 240, 63, 34, 1, 0, 18, 16, 10, 4, 116, 105, 109, 101, 16, 4, 26, 3,
                     10, 1, 100, 34, 1, 0, 24, 1,
-                ]),
+                ])),
                 headers: vec![
                     RecordHeader {
                         key: "content-type".to_owned(),

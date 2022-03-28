@@ -498,8 +498,8 @@ mod tests {
     #[tokio::test]
     async fn test_consumer() {
         let record = Record {
-            key: Some(vec![0; 4]),
-            value: Some(vec![0; 6]),
+            key: Some(Arc::new(vec![0; 4])),
+            value: Some(Arc::new(vec![0; 6])),
             headers: Default::default(),
             timestamp: OffsetDateTime::now_utc(),
         };
@@ -565,8 +565,8 @@ mod tests {
     #[tokio::test]
     async fn test_consumer_timeout() {
         let record = Record {
-            key: Some(vec![0; 4]),
-            value: Some(vec![0; 6]),
+            key: Some(Arc::new(vec![0; 4])),
+            value: Some(Arc::new(vec![0; 6])),
             headers: Default::default(),
             timestamp: OffsetDateTime::now_utc(),
         };
@@ -650,8 +650,8 @@ mod tests {
     #[tokio::test]
     async fn test_consumer_earliest() {
         let record = Record {
-            key: Some(vec![0; 4]),
-            value: Some(vec![0; 6]),
+            key: Some(Arc::new(vec![0; 4])),
+            value: Some(Arc::new(vec![0; 6])),
             headers: Default::default(),
             timestamp: OffsetDateTime::now_utc(),
         };
@@ -694,8 +694,8 @@ mod tests {
     #[tokio::test]
     async fn test_consumer_latest() {
         let record = Record {
-            key: Some(vec![0; 4]),
-            value: Some(vec![0; 6]),
+            key: Some(Arc::new(vec![0; 4])),
+            value: Some(Arc::new(vec![0; 6])),
             headers: Default::default(),
             timestamp: OffsetDateTime::now_utc(),
         };

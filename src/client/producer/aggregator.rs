@@ -143,20 +143,22 @@ impl StatusDeaggregator for RecordAggregatorStatusDeaggregator {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+
     use super::*;
     use time::OffsetDateTime;
 
     #[test]
     fn test_record_aggregator() {
         let r1 = Record {
-            key: Some(vec![0; 45]),
-            value: Some(vec![0; 2]),
+            key: Some(Arc::new(vec![0; 45])),
+            value: Some(Arc::new(vec![0; 2])),
             headers: Default::default(),
             timestamp: OffsetDateTime::from_unix_timestamp(20).unwrap(),
         };
 
         let r2 = Record {
-            value: Some(vec![0; 34]),
+            value: Some(Arc::new(vec![0; 34])),
             ..r1.clone()
         };
 

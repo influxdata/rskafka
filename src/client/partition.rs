@@ -20,8 +20,11 @@ use crate::{
     validation::ExactlyOne,
 };
 use async_trait::async_trait;
-use std::ops::{ControlFlow, Deref, Range};
 use std::sync::Arc;
+use std::{
+    collections::BTreeMap,
+    ops::{ControlFlow, Deref, Range},
+};
 use time::OffsetDateTime;
 use tokio::sync::Mutex;
 use tracing::{error, info, warn};
@@ -410,8 +413,8 @@ fn build_produce_request(
             max_timestamp = max_timestamp.max(record.timestamp);
 
             ProtocolRecord {
-                key: record.key,
-                value: record.value,
+                key: record.key.as_ref().map(Arc::clone),
+                value: record.value.as_ref().map(Arc::clone),
                 timestamp_delta: (record.timestamp - first_timestamp).whole_milliseconds() as i64,
                 offset_delta: offset_delta as i32,
                 headers: record
@@ -597,7 +600,8 @@ fn extract_records(
                                 .headers
                                 .into_iter()
                                 .map(|header| (header.key, header.value))
-                                .collect(),
+                                .collect::<BTreeMap<_, _>>()
+                                .into(),
                             timestamp,
                         },
                         offset,

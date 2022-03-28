@@ -504,8 +504,8 @@ async fn test_delete_records() {
 
 pub fn large_record() -> Record {
     Record {
-        key: Some(b"".to_vec()),
-        value: Some(vec![b'x'; 1024]),
+        key: Some(Arc::new(b"".to_vec())),
+        value: Some(Arc::new(vec![b'x'; 1024])),
         headers: BTreeMap::from([("foo".to_owned(), b"bar".to_vec())]),
         timestamp: now(),
     }
