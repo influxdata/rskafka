@@ -516,6 +516,8 @@ where
 
 #[cfg(test)]
 mod tests {
+    use std::collections::VecDeque;
+
     use super::aggregator::{Aggregator, RecordAggregatorStatusDeaggregator, StatusDeaggregator};
     use super::*;
     use crate::{
@@ -527,10 +529,30 @@ mod tests {
 
     #[derive(Debug)]
     struct MockClient {
-        error: Option<ProtocolError>,
+        error: Option<parking_lot::Mutex<VecDeque<ProtocolError>>>,
         panic: Option<String>,
         delay: Duration,
         batch_sizes: parking_lot::Mutex<Vec<usize>>,
+    }
+
+    impl Default for MockClient {
+        fn default() -> Self {
+            Self {
+                error: Default::default(),
+                panic: Default::default(),
+                delay: Duration::from_millis(1),
+                batch_sizes: Default::default(),
+            }
+        }
+    }
+
+    impl MockClient {
+        pub fn with_errors(self, errors: impl Into<VecDeque<ProtocolError>>) -> Self {
+            Self {
+                error: Some(parking_lot::Mutex::new(errors.into())),
+                ..self
+            }
+        }
     }
 
     impl ProducerClient for MockClient {
@@ -542,7 +564,7 @@ mod tests {
             Box::pin(async move {
                 tokio::time::sleep(self.delay).await;
 
-                if let Some(e) = self.error {
+                if let Some(e) = self.error.as_ref().map(|m| m.lock().pop_front()).flatten() {
                     return Err(ClientError::ServerError(e, "".to_string()));
                 }
 
@@ -736,12 +758,7 @@ mod tests {
     async fn test_producer_client_error() {
         let record = record();
         let linger = Duration::from_millis(5);
-        let client = Arc::new(MockClient {
-            error: Some(ProtocolError::NetworkException),
-            panic: None,
-            delay: Duration::from_millis(1),
-            batch_sizes: Default::default(),
-        });
+        let client = Arc::new(MockClient::default().with_errors([ProtocolError::NetworkException]));
 
         let aggregator = RecordAggregator::new(record.approximate_size() * 2);
         let producer = BatchProducerBuilder::new_with_client(Arc::<MockClient>::clone(&client))
