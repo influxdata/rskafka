@@ -314,7 +314,7 @@ jobs:
       - cache_restore
       - run:
           name: Cargo build
-          command: cargo build --no-default-features
+          command: cargo build --no-default-features --all-targets
       - cache_save
 
   # Builds RSKafka w/ all features.

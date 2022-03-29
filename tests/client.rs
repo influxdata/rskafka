@@ -73,6 +73,7 @@ async fn test_topic_crud() {
 // Disabled as currently no TLS integration tests
 #[ignore]
 #[tokio::test]
+#[cfg(feature = "transport-tls")]
 async fn test_tls() {
     maybe_start_logging();
 

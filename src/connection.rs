@@ -620,7 +620,7 @@ mod tests {
 
         async fn connect(
             &self,
-            _tls_config: Option<Arc<rustls::ClientConfig>>,
+            _tls_config: TlsConfig,
             _socks5_proxy: Option<String>,
             _max_message_size: usize,
         ) -> Result<Arc<Self::R>> {
