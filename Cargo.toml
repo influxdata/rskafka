@@ -45,7 +45,7 @@ dotenv = "0.15"
 futures = "0.3"
 proptest = "1"
 proptest-derive = "0.3"
-rustls-pemfile = "0.3"
+rustls-pemfile = "1.0"
 rdkafka = { version = "0.28", default-features = false, features = ["libz", "tokio", "zstd"] }
 tokio = { version = "1.14", features = ["macros", "rt-multi-thread"] }
 tracing-log = "0.1"
