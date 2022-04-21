@@ -6,7 +6,7 @@ use crate::{
     backoff::BackoffConfig,
     build_info::DEFAULT_CLIENT_ID,
     client::partition::PartitionClient,
-    connection::{BrokerConnector, MetadataLookupMode, TlsConfig},
+    connection::{BrokerConnector, TlsConfig},
     protocol::primitives::Boolean,
     topic::Topic,
 };
@@ -21,6 +21,8 @@ pub mod producer;
 use error::{Error, Result};
 
 use self::{controller::ControllerClient, partition::UnknownTopicHandling};
+
+pub use crate::connection::SaslConfig;
 
 #[derive(Debug, Error)]
 pub enum ProduceError {
@@ -45,6 +47,7 @@ pub struct ClientBuilder {
     socks5_proxy: Option<String>,
     tls_config: TlsConfig,
     backoff_config: Arc<BackoffConfig>,
+    sasl_config: Option<SaslConfig>,
 }
 
 impl ClientBuilder {
@@ -57,6 +60,7 @@ impl ClientBuilder {
             socks5_proxy: None,
             tls_config: TlsConfig::default(),
             backoff_config: Default::default(),
+            sasl_config: None,
         }
     }
 
@@ -96,6 +100,12 @@ impl ClientBuilder {
         self
     }
 
+    /// Setup SASL username and password. Mechanism is assumed to be PLAIN.
+    pub fn sasl_config(mut self, sasl_config: SaslConfig) -> Self {
+        self.sasl_config = Some(sasl_config);
+        self
+    }
+
     /// Build [`Client`].
     pub async fn build(self) -> Result<Client> {
         let brokers = Arc::new(BrokerConnector::new(
@@ -104,6 +114,7 @@ impl ClientBuilder {
                 .unwrap_or_else(|| Arc::from(DEFAULT_CLIENT_ID)),
             self.tls_config,
             self.socks5_proxy,
+            self.sasl_config,
             self.max_message_size,
             Arc::clone(&self.backoff_config),
         ));

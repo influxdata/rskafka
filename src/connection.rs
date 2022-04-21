@@ -19,6 +19,7 @@ use crate::{
     client::metadata_cache::MetadataCache,
 };
 
+pub use self::transport::SaslConfig;
 pub use self::transport::TlsConfig;
 
 mod topology;
@@ -45,6 +46,9 @@ pub enum Error {
 
     #[error("all retries failed: {0}")]
     RetryFailed(BackoffError),
+
+    #[error("Sasl handshake failed: {0}")]
+    SaslFailed(#[from] crate::messenger::SaslError),
 }
 
 pub type Result<T, E = Error> = std::result::Result<T, E>;
@@ -59,6 +63,7 @@ trait ConnectionHandler {
         client_id: Arc<str>,
         tls_config: TlsConfig,
         socks5_proxy: Option<String>,
+        sasl_config: Option<SaslConfig>,
         max_message_size: usize,
     ) -> Result<Arc<Self::R>>;
 }
@@ -121,6 +126,7 @@ impl ConnectionHandler for BrokerRepresentation {
         client_id: Arc<str>,
         tls_config: TlsConfig,
         socks5_proxy: Option<String>,
+        sasl_config: Option<SaslConfig>,
         max_message_size: usize,
     ) -> Result<Arc<Self::R>> {
         let url = self.url();
@@ -138,6 +144,11 @@ impl ConnectionHandler for BrokerRepresentation {
 
         let mut messenger = Messenger::new(BufStream::new(transport), max_message_size, client_id);
         messenger.sync_versions().await?;
+        if let Some(sasl_config) = sasl_config {
+            messenger
+                .sasl_handshake(sasl_config.mechanism(), sasl_config.auth_bytes())
+                .await?;
+        }
         Ok(Arc::new(messenger))
     }
 }
@@ -177,6 +188,9 @@ pub struct BrokerConnector {
     /// SOCKS5 proxy.
     socks5_proxy: Option<String>,
 
+    /// SASL Configuration
+    sasl_config: Option<SaslConfig>,
+
     /// Maximum message size for framing protocol.
     max_message_size: usize,
 }
@@ -187,6 +201,7 @@ impl BrokerConnector {
         client_id: Arc<str>,
         tls_config: TlsConfig,
         socks5_proxy: Option<String>,
+        sasl_config: Option<SaslConfig>,
         max_message_size: usize,
         backoff_config: Arc<BackoffConfig>,
     ) -> Self {
@@ -199,6 +214,7 @@ impl BrokerConnector {
             backoff_config,
             tls_config,
             socks5_proxy,
+            sasl_config,
             max_message_size,
         }
     }
@@ -294,6 +310,7 @@ impl BrokerConnector {
                         Arc::clone(&self.client_id),
                         self.tls_config.clone(),
                         self.socks5_proxy.clone(),
+                        self.sasl_config.clone(),
                         self.max_message_size,
                     )
                     .await?;
@@ -405,6 +422,7 @@ impl BrokerCache for &BrokerConnector {
             &self.backoff_config,
             self.tls_config.clone(),
             self.socks5_proxy.clone(),
+            self.sasl_config.clone(),
             self.max_message_size,
         )
         .await?;
@@ -440,6 +458,7 @@ async fn connect_to_a_broker_with_retry<B>(
     backoff_config: &BackoffConfig,
     tls_config: TlsConfig,
     socks5_proxy: Option<String>,
+    sasl_config: Option<SaslConfig>,
     max_message_size: usize,
 ) -> Result<Arc<B::R>>
 where
@@ -457,6 +476,7 @@ where
                         Arc::clone(&client_id),
                         tls_config.clone(),
                         socks5_proxy.clone(),
+                        sasl_config.clone(),
                         max_message_size,
                     )
                     .await;
@@ -773,6 +793,7 @@ mod tests {
             _client_id: Arc<str>,
             _tls_config: TlsConfig,
             _socks5_proxy: Option<String>,
+            _sasl_config: Option<SaslConfig>,
             _max_message_size: usize,
         ) -> Result<Arc<Self::R>> {
             (self.conn)()
@@ -798,6 +819,7 @@ mod tests {
             brokers,
             Arc::from(DEFAULT_CLIENT_ID),
             &Default::default(),
+            Default::default(),
             Default::default(),
             Default::default(),
             Default::default(),

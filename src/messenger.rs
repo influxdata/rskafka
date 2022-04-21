@@ -23,6 +23,17 @@ use tokio::{
 };
 use tracing::{debug, info, warn};
 
+use crate::protocol::{
+    api_key::ApiKey,
+    api_version::ApiVersion,
+    error::Error as ApiError,
+    frame::{AsyncMessageRead, AsyncMessageWrite},
+    messages::{
+        ReadVersionedError, ReadVersionedType, RequestBody, RequestHeader, ResponseHeader,
+        SaslAuthenticateRequest, SaslHandshakeRequest, WriteVersionedError, WriteVersionedType,
+    },
+    primitives::{Int16, Int32, NullableString, TaggedFields},
+};
 use crate::protocol::{api_version::ApiVersionRange, primitives::CompactString};
 use crate::protocol::{messages::ApiVersionsRequest, traits::ReadType};
 use crate::{
@@ -176,6 +187,15 @@ pub enum SyncVersionsError {
         min: ApiVersion,
         max: ApiVersion,
     },
+}
+
+#[derive(Error, Debug)]
+pub enum SaslError {
+    #[error("Request error: {0}")]
+    RequestError(#[from] RequestError),
+
+    #[error("API error: {0}")]
+    ApiError(#[from] ApiError),
 }
 
 impl<RW> Messenger<RW>
@@ -519,6 +539,27 @@ where
         }
 
         Err(SyncVersionsError::NoWorkingVersion)
+    }
+
+    pub async fn sasl_handshake(
+        &self,
+        mechanism: &str,
+        auth_bytes: Vec<u8>,
+    ) -> Result<(), SaslError> {
+        let req = SaslHandshakeRequest::new(mechanism);
+        let resp = self.request(req).await?;
+        if let Some(err) = resp.error_code {
+            return Err(SaslError::ApiError(err));
+        }
+        let req = SaslAuthenticateRequest::new(auth_bytes);
+        let resp = self.request(req).await?;
+        if let Some(err) = resp.error_code {
+            if let Some(s) = resp.error_message.0 {
+                debug!("Sasl auth error message: {s}");
+            }
+            return Err(SaslError::ApiError(err));
+        }
+        Ok(())
     }
 }
 

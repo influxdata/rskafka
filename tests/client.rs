@@ -9,10 +9,10 @@ use rskafka::{
     record::{Record, RecordAndOffset},
     BackoffConfig,
 };
-use std::{collections::BTreeMap, str::FromStr, sync::Arc, time::Duration};
+use std::{collections::BTreeMap, env, str::FromStr, sync::Arc, time::Duration};
 
 mod test_helpers;
-use test_helpers::{maybe_start_logging, random_topic_name, record, TEST_TIMEOUT};
+use test_helpers::{maybe_start_logging, random_topic_name, record, BrokerImpl, TEST_TIMEOUT};
 
 #[tokio::test]
 async fn test_plain() {
@@ -20,6 +20,31 @@ async fn test_plain() {
 
     let test_cfg = maybe_skip_kafka_integration!();
     ClientBuilder::new(test_cfg.bootstrap_brokers)
+        .build()
+        .await
+        .unwrap();
+}
+
+#[tokio::test]
+async fn test_sasl() {
+    maybe_start_logging();
+    if env::var("TEST_INTEGRATION").is_err() {
+        return;
+    }
+    if env::var("KAFKA_SASL_CONNECT").is_err() {
+        eprintln!("Skipping sasl test.");
+        return;
+    }
+    let test_cfg = maybe_skip_kafka_integration!();
+    // Redpanda broker doesn't support SASL/PLAIN at this moment.
+    if test_cfg.broker_impl != BrokerImpl::Kafka {
+        return;
+    }
+    ClientBuilder::new(vec![env::var("KAFKA_SASL_CONNECT").unwrap()])
+        .sasl_config(rskafka::client::SaslConfig::Plain {
+            username: "admin".to_string(),
+            password: "admin-secret".to_string(),
+        })
         .build()
         .await
         .unwrap();
