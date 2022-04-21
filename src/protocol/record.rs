@@ -632,9 +632,19 @@ where
 
                     let mut buf_version = [0u8; 4];
                     cursor.read_exact(&mut buf_version)?;
+                    if buf_version != [0, 0, 0, 1] {
+                        return Err(ReadError::Malformed(
+                            format!("Detected Java-specific Snappy compression, but got unknown version: {buf_version:?}").into(),
+                        ));
+                    }
 
                     let mut buf_compatible = [0u8; 4];
                     cursor.read_exact(&mut buf_compatible)?;
+                    if buf_compatible != [0, 0, 0, 1] {
+                        return Err(ReadError::Malformed(
+                            format!("Detected Java-specific Snappy compression, but got unknown compat flags: {buf_compatible:?}").into(),
+                        ));
+                    }
 
                     let mut output = vec![];
                     while cursor.position() < cursor.get_ref().len() as u64 {

@@ -72,6 +72,9 @@ pub async fn produce(
         let k = String::from_utf8(record.key.unwrap()).unwrap();
         let v = String::from_utf8(record.value.unwrap()).unwrap();
 
+        // We need something that implements `org.apache.kafka.common.header.Headers` without writing any Java code,
+        // so we abuse the following internal data structure:
+        // https://github.com/a0x8o/kafka/blob/f9127f0687117fc7f1bb6d431ad4bfd6f5caed47/clients/src/main/java/org/apache/kafka/common/header/internals/RecordHeaders.java#L30
         let headers = jvm
             .create_instance(
                 "org.apache.kafka.common.header.internals.RecordHeaders",
@@ -119,16 +122,20 @@ pub async fn produce(
     for fut in futures {
         // https://docs.oracle.com/en/java/javase/17/docs/api/java.base/java/util/concurrent/Future.html#get()
         let record_metadata = jvm.invoke(&fut, "get", &[]).expect("polling future");
+
+        // future returns `java.lang.Object`, cast that to the known result type
         let record_metadata = jvm
             .cast(
                 &record_metadata,
                 "org.apache.kafka.clients.producer.RecordMetadata",
             )
             .expect("cast to RecordMetadata");
+
         // https://kafka.apache.org/31/javadoc/org/apache/kafka/clients/producer/RecordMetadata.html#offset()
         let offset = jvm
             .invoke(&record_metadata, "offset", &[])
             .expect("getting offset");
+
         let offset: i64 = jvm.to_rust(offset).expect("converting offset to Rust");
         offsets.push(offset);
     }
@@ -161,6 +168,7 @@ pub async fn consume(
                 "org.apache.kafka.common.serialization.StringDeserializer",
             ),
             ("auto.offset.reset", "earliest"),
+            ("enable.auto.commit", "false"),
         ],
     );
 
@@ -185,19 +193,14 @@ pub async fn consume(
             ],
         )
         .expect("creating TopicPartition");
+
     let partitions = jvm
-        .create_java_array(
+        .create_java_list(
             "org.apache.kafka.common.TopicPartition",
             &[InvocationArg::from(topic_partition)],
         )
         .expect("creating partitions array");
-    let partitions = jvm
-        .invoke_static(
-            "java.util.Arrays",
-            "asList",
-            &[InvocationArg::from(partitions)],
-        )
-        .expect("partitions asList");
+
     // https://kafka.apache.org/31/javadoc/org/apache/kafka/clients/consumer/KafkaConsumer.html#assign(java.util.Collection)
     jvm.invoke(&consumer, "assign", &[InvocationArg::from(partitions)])
         .expect("assign");
@@ -221,6 +224,7 @@ pub async fn consume(
             .invoke(&consumer_records, "iterator", &[])
             .expect("iterator");
         for consumer_record in JavaIterator::new(&jvm, it) {
+            // iterator returns `java.lang.Object` which we need to cast to the known type
             let consumer_record = jvm
                 .cast(
                     &consumer_record,
