@@ -34,6 +34,8 @@ mod metadata;
 pub use metadata::*;
 mod produce;
 pub use produce::*;
+mod sasl_auth;
+pub use sasl_auth::*;
 #[cfg(test)]
 mod test_utils;
 

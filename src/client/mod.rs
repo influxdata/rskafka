@@ -7,6 +7,7 @@ use crate::{
     connection::{BrokerConnector, TlsConfig},
     protocol::primitives::Boolean,
     topic::Topic,
+    protocol::messages::SaslConfig,
 };
 
 pub mod consumer;
@@ -40,6 +41,7 @@ pub struct ClientBuilder {
     max_message_size: usize,
     socks5_proxy: Option<String>,
     tls_config: TlsConfig,
+    sasl_config: Option<SaslConfig>,
 }
 
 impl ClientBuilder {
@@ -50,6 +52,7 @@ impl ClientBuilder {
             max_message_size: 100 * 1024 * 1024, // 100MB
             socks5_proxy: None,
             tls_config: TlsConfig::default(),
+            sasl_config: None,
         }
     }
 
@@ -77,12 +80,19 @@ impl ClientBuilder {
         self
     }
 
+    /// Setup SASL username and password. Mechanism is assumed to be PLAIN.
+    pub fn sasl_config(mut self, username: &str, password: &str) -> Self {
+        self.sasl_config = Some(SaslConfig{username: username.to_string(), password: password.to_string()});
+        self
+    }
+
     /// Build [`Client`].
     pub async fn build(self) -> Result<Client> {
         let brokers = Arc::new(BrokerConnector::new(
             self.bootstrap_brokers,
             self.tls_config,
             self.socks5_proxy,
+            self.sasl_config,
             self.max_message_size,
         ));
         brokers.refresh_metadata().await?;
