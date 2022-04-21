@@ -31,14 +31,14 @@ commands:
             - /usr/local/cargo/registry
           key: cargo-cache-{{ arch }}-{{ .Branch }}-{{ checksum "Cargo.toml" }}
 
-  install_zlib_dev:
-    description: Install zlib-dev
+  install_packages:
+    description: Install openjdk-11-jre and zlib-dev
     steps:
       - run:
-          name: Install zlib-dev
+          name: Install openjdk-11-jre and zlib-dev
           command: |
             sudo apt-get update
-            sudo apt-get install -y zlib1g-dev
+            sudo apt-get install -y openjdk-11-jre zlib1g-dev
 
 jobs:
   fmt:
@@ -190,6 +190,7 @@ jobs:
       RUST_LOG: "trace"
       # Run integration tests
       TEST_INTEGRATION: 1
+      TEST_JAVA_INTEROPT: 1
       # Don't use the first node here since this is likely the controller and we want to ensure that we automatically
       # pick the controller for certain actions (e.g. topic creation) and don't just get lucky.
       KAFKA_CONNECT: "redpanda-1:9092"
@@ -197,7 +198,7 @@ jobs:
       - checkout
       - rust_components
       - cache_restore
-      - install_zlib_dev
+      - install_packages
       - run:
           name: Cargo test
           command: cargo test --all-features --all-targets
@@ -258,6 +259,7 @@ jobs:
       TEST_INTEGRATION: 1
       # Kafka support DeleteRecords
       TEST_DELETE_RECORDS: 1
+      TEST_JAVA_INTEROPT: 1
       # Don't use the first node here since this is likely the controller and we want to ensure that we automatically
       # pick the controller for certain actions (e.g. topic creation) and don't just get lucky.
       KAFKA_CONNECT: "kafka-1:9093"
@@ -265,7 +267,7 @@ jobs:
       - checkout
       - rust_components
       - cache_restore
-      - install_zlib_dev
+      - install_packages
       - run:
           name: Cargo test
           command: cargo test --all-features --all-targets
