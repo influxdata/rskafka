@@ -10,11 +10,10 @@ use crate::backoff::{Backoff, BackoffConfig, BackoffError};
 use crate::connection::topology::{Broker, BrokerTopology};
 use crate::connection::transport::Transport;
 use crate::messenger::{Messenger, RequestError};
-use crate::protocol::messages::{
-    MetadataRequest, MetadataRequestTopic, MetadataResponse, SaslConfig,
-};
+use crate::protocol::messages::{MetadataRequest, MetadataRequestTopic, MetadataResponse};
 use crate::protocol::primitives::String_;
 
+pub use self::transport::SaslConfig;
 pub use self::transport::TlsConfig;
 
 mod topology;
@@ -110,7 +109,9 @@ impl ConnectionHandler for BrokerRepresentation {
         let messenger = Arc::new(Messenger::new(BufStream::new(transport), max_message_size));
         messenger.sync_versions().await?;
         if let Some(sasl_config) = sasl_config {
-            messenger.sasl_handshake(&sasl_config).await?;
+            messenger
+                .sasl_handshake(sasl_config.mechanism(), sasl_config.auth_bytes())
+                .await?;
         }
         Ok(messenger)
     }
@@ -642,6 +643,7 @@ mod tests {
             &self,
             _tls_config: TlsConfig,
             _socks5_proxy: Option<String>,
+            _sasl_config: Option<SaslConfig>,
             _max_message_size: usize,
         ) -> Result<Arc<Self::R>> {
             (self.conn)()
@@ -666,6 +668,7 @@ mod tests {
         let conn = connect_to_a_broker_with_retry(
             brokers,
             &Default::default(),
+            Default::default(),
             Default::default(),
             Default::default(),
             Default::default(),

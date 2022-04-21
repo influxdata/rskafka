@@ -10,22 +10,19 @@ use crate::protocol::{
     traits::{ReadType, WriteType},
 };
 
-#[derive(Debug, Clone)]
-pub struct SaslConfig {
-    pub username: String,
-    pub password: String,
-}
-
 use std::io::{Read, Write};
 #[derive(Debug)]
 pub struct SaslHandshakeRequest {
+    /// The SASL mechanism chosen by the client. e.g. PLAIN
+    ///
+    /// Added in version 0.
     pub mechanism: String_,
 }
 
 impl SaslHandshakeRequest {
-    pub fn new() -> Self {
+    pub fn new(mechanism: &str) -> Self {
         return Self {
-            mechanism: String_("PLAIN".to_string()),
+            mechanism: String_(mechanism.to_string()),
         };
     }
 }
@@ -36,7 +33,7 @@ where
 {
     fn read_versioned(reader: &mut R, version: ApiVersion) -> Result<Self, ReadVersionedError> {
         let v = version.0 .0;
-        assert!(v <= 1);
+        assert!(v == 1);
         Ok(Self {
             mechanism: String_::read(reader)?,
         })
@@ -69,7 +66,14 @@ impl RequestBody for SaslHandshakeRequest {
 
 #[derive(Debug)]
 pub struct SaslHandshakeResponse {
+    /// The error code, or 0 if there was no error.
+    ///
+    /// Added in version 0.
     pub error_code: Option<ApiError>,
+
+    /// The mechanisms enabled in the server.
+    ///
+    /// Added in version 0.
     pub mechanisms: Array<String_>,
 }
 
@@ -102,19 +106,21 @@ where
 
 #[derive(Debug)]
 pub struct SaslAuthenticateRequest {
+    /// The SASL authentication bytes from the client, as defined by the SASL mechanism.
+    /// 
+    /// Added in version 0.
     pub auth_bytes: CompactBytes,
+    
+    /// The tagged fields
+    /// 
+    /// Added in version 2. 
     pub tagged_fields: Option<TaggedFields>,
 }
 
 impl SaslAuthenticateRequest {
-    pub fn new(sasl_config: &SaslConfig) -> Self {
-        let mut auth: Vec<u8> = Vec::new();
-        auth.push(0);
-        auth.extend(sasl_config.username.bytes());
-        auth.push(0);
-        auth.extend(sasl_config.password.bytes());
+    pub fn new(auth_bytes: Vec<u8>) -> Self {
         return Self {
-            auth_bytes: CompactBytes(auth),
+            auth_bytes: CompactBytes(auth_bytes),
             tagged_fields: Some(TaggedFields::default()),
         };
     }
@@ -168,10 +174,29 @@ impl RequestBody for SaslAuthenticateRequest {
 
 #[derive(Debug)]
 pub struct SaslAuthenticateResponse {
+    /// The error code, or 0 if there was no error.
+    /// 
+    /// Added in version 0.
     pub error_code: Option<ApiError>,
+    
+    /// The error code, or 0 if there was no error.
+    /// 
+    /// Added in version 0
     pub error_message: CompactNullableString,
+    
+    /// The SASL authentication bytes from the server, as defined by the SASL mechanism.
+    /// 
+    /// Added in version 0
     pub auth_bytes: CompactBytes,
+    
+    /// The SASL authentication bytes from the server, as defined by the SASL mechanism.
+    /// 
+    /// Added in version 1.
     pub session_lifetime_ms: Int64,
+    
+    /// The tagged fields.
+    /// 
+    /// Added in version 2.
     pub tagged_fields: Option<TaggedFields>,
 }
 

@@ -478,7 +478,11 @@ where
     }
 }
 
-#[derive(Debug)]
+/// Represents a raw sequence of bytes.
+///
+/// First the length N is given as an INT32. Then N bytes follow.
+#[derive(Debug, Eq, PartialEq)]
+#[cfg_attr(test, derive(proptest_derive::Arbitrary))]
 pub struct Bytes(pub Vec<u8>);
 impl<R> ReadType<R> for Bytes
 where
@@ -505,7 +509,11 @@ where
     }
 }
 
-#[derive(Debug)]
+/// Represents a raw sequence of bytes.
+/// 
+/// First the length N+1 is given as an UNSIGNED_VARINT.Then N bytes follow.
+#[derive(Debug, Eq, PartialEq)]
+#[cfg_attr(test, derive(proptest_derive::Arbitrary))]
 pub struct CompactBytes(pub Vec<u8>);
 impl<R> ReadType<R> for CompactBytes
 where
@@ -932,6 +940,10 @@ mod tests {
         let err = CompactNullableString::read(&mut buf).unwrap_err();
         assert_matches!(err, ReadError::IO(_));
     }
+
+    test_roundtrip!(Bytes, test_bytes_roundtrip);
+
+    test_roundtrip!(CompactBytes, test_compact_bytes_roundtrip);
 
     test_roundtrip!(NullableBytes, test_nullable_bytes_roundtrip);
 
