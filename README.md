@@ -136,6 +136,10 @@ $ TEST_INTEGRATION=1 TEST_DELETE_RECORDS=1 KAFKA_CONNECT=localhost:9094 cargo te
 in another session. Note that Apache Kafka supports a different set of features then redpanda, so we pass other
 environment variables.
 
+### Java Interopt
+To test if RSKafka can produce/consume records to/from the official Java client, you need to have Java installed and the
+`TEST_JAVA_INTEROPT=1` environment variable set.
+
 ### Fuzzing
 RSKafka offers fuzz targets for certain protocol parsing steps. To build them make sure you have [cargo-fuzz] installed.
 Select one of the following fuzzers:
