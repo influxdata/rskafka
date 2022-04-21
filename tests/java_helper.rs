@@ -58,6 +58,7 @@ pub async fn produce(
         ],
     );
 
+    // https://kafka.apache.org/31/javadoc/org/apache/kafka/clients/producer/KafkaProducer.html#%3Cinit%3E(java.util.Map)
     let producer = jvm
         .create_instance(
             "org.apache.kafka.clients.producer.KafkaProducer",
@@ -89,6 +90,7 @@ pub async fn produce(
             .expect("add header");
         }
 
+        // https://kafka.apache.org/31/javadoc/org/apache/kafka/clients/producer/ProducerRecord.html#%3Cinit%3E(java.lang.String,java.lang.Integer,K,V,java.lang.Iterable)
         let jvm_record = jvm
             .create_instance(
                 "org.apache.kafka.clients.producer.ProducerRecord",
@@ -103,16 +105,19 @@ pub async fn produce(
             )
             .expect("creating KafkaProducer");
 
+        // https://kafka.apache.org/31/javadoc/org/apache/kafka/clients/producer/KafkaProducer.html#send(org.apache.kafka.clients.producer.ProducerRecord)
         let fut = jvm
             .invoke(&producer, "send", &[InvocationArg::from(jvm_record)])
             .expect("flush");
         futures.push(fut);
     }
 
+    // https://kafka.apache.org/31/javadoc/org/apache/kafka/clients/producer/KafkaProducer.html#flush()
     jvm.invoke(&producer, "flush", &[]).expect("flush");
 
     let mut offsets = vec![];
     for fut in futures {
+        // https://docs.oracle.com/en/java/javase/17/docs/api/java.base/java/util/concurrent/Future.html#get()
         let record_metadata = jvm.invoke(&fut, "get", &[]).expect("polling future");
         let record_metadata = jvm
             .cast(
@@ -120,6 +125,7 @@ pub async fn produce(
                 "org.apache.kafka.clients.producer.RecordMetadata",
             )
             .expect("cast to RecordMetadata");
+        // https://kafka.apache.org/31/javadoc/org/apache/kafka/clients/producer/RecordMetadata.html#offset()
         let offset = jvm
             .invoke(&record_metadata, "offset", &[])
             .expect("getting offset");
@@ -127,6 +133,7 @@ pub async fn produce(
         offsets.push(offset);
     }
 
+    // https://kafka.apache.org/31/javadoc/org/apache/kafka/clients/producer/KafkaProducer.html#close()
     jvm.invoke(&producer, "close", &[]).expect("close");
 
     offsets
@@ -157,6 +164,7 @@ pub async fn consume(
         ],
     );
 
+    // https://kafka.apache.org/31/javadoc/org/apache/kafka/clients/consumer/KafkaConsumer.html#%3Cinit%3E(java.util.Map)
     let consumer = jvm
         .create_instance(
             "org.apache.kafka.clients.consumer.KafkaConsumer",
@@ -164,6 +172,7 @@ pub async fn consume(
         )
         .expect("creating KafkaConsumer");
 
+    // https://kafka.apache.org/31/javadoc/org/apache/kafka/common/TopicPartition.html#%3Cinit%3E(java.lang.String,int)
     let topic_partition = jvm
         .create_instance(
             "org.apache.kafka.common.TopicPartition",
@@ -189,11 +198,13 @@ pub async fn consume(
             &[InvocationArg::from(partitions)],
         )
         .expect("partitions asList");
+    // https://kafka.apache.org/31/javadoc/org/apache/kafka/clients/consumer/KafkaConsumer.html#assign(java.util.Collection)
     jvm.invoke(&consumer, "assign", &[InvocationArg::from(partitions)])
         .expect("assign");
 
     let mut results = vec![];
     while results.len() < n {
+        // https://kafka.apache.org/31/javadoc/org/apache/kafka/clients/consumer/KafkaConsumer.html#poll(long)
         let consumer_records = jvm
             .invoke(
                 &consumer,
@@ -205,6 +216,7 @@ pub async fn consume(
             )
             .expect("poll");
 
+        // https://kafka.apache.org/31/javadoc/org/apache/kafka/clients/consumer/ConsumerRecords.html#iterator()
         let it = jvm
             .invoke(&consumer_records, "iterator", &[])
             .expect("iterator");
@@ -216,6 +228,7 @@ pub async fn consume(
                 )
                 .expect("cast to ConsumerRecord");
 
+            // https://kafka.apache.org/31/javadoc/org/apache/kafka/clients/consumer/ConsumerRecord.html
             let key = jvm.invoke(&consumer_record, "key", &[]).expect("key");
             let key: String = jvm.to_rust(key).expect("key to Rust");
 
@@ -269,6 +282,7 @@ pub async fn consume(
         }
     }
 
+    // https://kafka.apache.org/31/javadoc/org/apache/kafka/clients/consumer/KafkaConsumer.html#close()
     jvm.invoke(&consumer, "close", &[]).expect("close");
 
     results
@@ -388,9 +402,11 @@ impl<'a> Iterator for JavaIterator<'a> {
     type Item = Instance;
 
     fn next(&mut self) -> Option<Self::Item> {
+        // https://docs.oracle.com/en/java/javase/17/docs/api/java.base/java/util/Iterator.html#hasNext()
         let has_next = self.jvm.invoke(&self.it, "hasNext", &[]).expect("hasNext");
         let has_next: bool = self.jvm.to_rust(has_next).expect("hasNext to Rust");
         if has_next {
+            // https://docs.oracle.com/en/java/javase/17/docs/api/java.base/java/util/Iterator.html#next()
             Some(self.jvm.invoke(&self.it, "next", &[]).expect("next"))
         } else {
             None
