@@ -53,7 +53,7 @@ rdkafka = { version = "0.28", default-features = false, features = ["libz", "tok
 tokio = { version = "1.14", features = ["macros", "rt-multi-thread"] }
 tracing-log = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
-uuid = { version = "0.8", features = ["v4"] }
+uuid = { version = "1.0", features = ["v4"] }
 
 [features]
 default = [
