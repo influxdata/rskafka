@@ -510,7 +510,7 @@ where
 }
 
 /// Represents a raw sequence of bytes.
-/// 
+///
 /// First the length N+1 is given as an UNSIGNED_VARINT.Then N bytes follow.
 #[derive(Debug, Eq, PartialEq)]
 #[cfg_attr(test, derive(proptest_derive::Arbitrary))]
@@ -534,12 +534,29 @@ where
     W: Write,
 {
     fn write(&self, writer: &mut W) -> Result<(), WriteError> {
-        let l = u64::try_from(self.0.len() + 1).map_err(|e| WriteError::Malformed(Box::new(e)))?;
-        UnsignedVarint(l).write(writer)?;
-        writer.write_all(&self.0)?;
+        CompactBytesRef(&self.0).write(writer)
+    }
+}
+
+/// Same as [`CompactBytes`] but contains referenced data.
+///
+/// This only supports writing.
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct CompactBytesRef<'a>(pub &'a [u8]);
+
+impl<'a, W> WriteType<W> for CompactBytesRef<'a>
+where
+    W: Write,
+{
+    fn write(&self, writer: &mut W) -> Result<(), WriteError> {
+        let len = u64::try_from(self.0.len() + 1).map_err(WriteError::Overflow)?;
+        UnsignedVarint(len).write(writer)?;
+        writer.write_all(self.0)?;
         Ok(())
     }
 }
+
+
 
 /// Represents a raw sequence of bytes or null.
 ///

@@ -6,7 +6,10 @@ use crate::protocol::{
     api_key::ApiKey,
     api_version::{ApiVersion, ApiVersionRange},
     error::Error as ApiError,
-    primitives::{Array, CompactBytes, CompactNullableString, Int16, Int64, String_, TaggedFields},
+    primitives::{
+        Array, Bytes, CompactBytes, CompactBytesRef, CompactNullableString, Int16, Int64, String_,
+        TaggedFields, NullableString,
+    },
     traits::{ReadType, WriteType},
 };
 
@@ -107,20 +110,20 @@ where
 #[derive(Debug)]
 pub struct SaslAuthenticateRequest {
     /// The SASL authentication bytes from the client, as defined by the SASL mechanism.
-    /// 
-    /// Added in version 0.
-    pub auth_bytes: CompactBytes,
-    
+    ///
+    /// Added in version 0. The type changes to CompactBytes in version 2.
+    pub auth_bytes: Bytes,
+
     /// The tagged fields
-    /// 
-    /// Added in version 2. 
+    ///
+    /// Added in version 2.
     pub tagged_fields: Option<TaggedFields>,
 }
 
 impl SaslAuthenticateRequest {
     pub fn new(auth_bytes: Vec<u8>) -> Self {
         return Self {
-            auth_bytes: CompactBytes(auth_bytes),
+            auth_bytes: Bytes(auth_bytes),
             tagged_fields: Some(TaggedFields::default()),
         };
     }
@@ -132,11 +135,15 @@ where
 {
     fn read_versioned(reader: &mut R, version: ApiVersion) -> Result<Self, ReadVersionedError> {
         let v = version.0 .0;
-        assert!(v == 2);
-        Ok(Self {
-            auth_bytes: CompactBytes::read(reader)?,
-            tagged_fields: (v >= 2).then(|| TaggedFields::read(reader)).transpose()?,
-        })
+        assert!(v <= 2);
+        if v == 0 || v == 1 {
+            Ok(SaslAuthenticateRequest::new(Bytes::read(reader)?.0))
+        } else {
+            Ok(Self {
+                auth_bytes: Bytes(CompactBytes::read(reader)?.0),
+                tagged_fields: Some(TaggedFields::read(reader)?),
+            })
+        }
     }
 }
 
@@ -150,15 +157,19 @@ where
         version: ApiVersion,
     ) -> Result<(), WriteVersionedError> {
         let v = version.0 .0;
-        assert!(v == 2);
-        self.auth_bytes.write(writer)?;
-        match self.tagged_fields.as_ref() {
-            Some(tagged_fields) => {
-                tagged_fields.write(writer)?;
-            }
-            None => {
-                TaggedFields::default().write(writer)?;
-            }
+        assert!(v <= 2);
+        if v == 0 || v == 1 {
+            self.auth_bytes.write(writer)?;
+        } else {
+            CompactBytesRef(&self.auth_bytes.0[..]).write(writer)?;
+            match self.tagged_fields.as_ref() {
+                Some(tagged_fields) => {
+                    tagged_fields.write(writer)?;
+                }
+                None => {
+                    TaggedFields::default().write(writer)?;
+                }
+            };
         }
         Ok(())
     }
@@ -168,34 +179,34 @@ impl RequestBody for SaslAuthenticateRequest {
     type ResponseBody = SaslAuthenticateResponse;
     const API_KEY: ApiKey = ApiKey::SaslAuthenticate;
     const API_VERSION_RANGE: ApiVersionRange =
-        ApiVersionRange::new(ApiVersion(Int16(2)), ApiVersion(Int16(2)));
+        ApiVersionRange::new(ApiVersion(Int16(0)), ApiVersion(Int16(2)));
     const FIRST_TAGGED_FIELD_IN_REQUEST_VERSION: ApiVersion = ApiVersion(Int16(2));
 }
 
 #[derive(Debug)]
 pub struct SaslAuthenticateResponse {
     /// The error code, or 0 if there was no error.
-    /// 
+    ///
     /// Added in version 0.
     pub error_code: Option<ApiError>,
-    
-    /// The error code, or 0 if there was no error.
-    /// 
-    /// Added in version 0
-    pub error_message: CompactNullableString,
-    
+
+    /// The error message, or none if there was no error.
+    ///
+    /// Added in version 0. Type changed to CompactNullableString in version 2.
+    pub error_message: NullableString,
+
     /// The SASL authentication bytes from the server, as defined by the SASL mechanism.
-    /// 
-    /// Added in version 0
-    pub auth_bytes: CompactBytes,
-    
+    ///
+    /// Added in version 0. Type changed to CompactBytes in version 2.
+    pub auth_bytes: Bytes,
+
     /// The SASL authentication bytes from the server, as defined by the SASL mechanism.
-    /// 
+    ///
     /// Added in version 1.
-    pub session_lifetime_ms: Int64,
-    
+    pub session_lifetime_ms: Option<Int64>,
+
     /// The tagged fields.
-    /// 
+    ///
     /// Added in version 2.
     pub tagged_fields: Option<TaggedFields>,
 }
@@ -206,14 +217,32 @@ where
 {
     fn read_versioned(reader: &mut R, version: ApiVersion) -> Result<Self, ReadVersionedError> {
         let v = version.0 .0;
-        assert!(v == 2);
-        Ok(Self {
-            error_code: ApiError::new(Int16::read(reader)?.0),
-            error_message: CompactNullableString::read(reader)?,
-            auth_bytes: CompactBytes::read(reader)?,
-            session_lifetime_ms: Int64::read(reader)?,
-            tagged_fields: (v >= 2).then(|| TaggedFields::read(reader)).transpose()?,
-        })
+        assert!(v <= 2);
+        if v == 0 {
+            Ok(Self {
+                error_code: ApiError::new(Int16::read(reader)?.0),
+                error_message: NullableString::read(reader)?,
+                auth_bytes: Bytes::read(reader)?,
+                session_lifetime_ms: None,
+                tagged_fields: None,
+            })
+        } else if v == 1 {
+            Ok(Self {
+                error_code: ApiError::new(Int16::read(reader)?.0),
+                error_message: NullableString::read(reader)?,
+                auth_bytes: Bytes::read(reader)?,
+                session_lifetime_ms: Some(Int64::read(reader)?),
+                tagged_fields: None,
+            })
+        } else {
+            Ok(Self {
+                error_code: ApiError::new(Int16::read(reader)?.0),
+                error_message: NullableString(CompactNullableString::read(reader)?.0),
+                auth_bytes: Bytes(CompactBytes::read(reader)?.0),
+                session_lifetime_ms: Some(Int64::read(reader)?),
+                tagged_fields: Some(TaggedFields::read(reader)?),
+            })
+        }
     }
 }
 
