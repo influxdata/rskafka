@@ -4,7 +4,7 @@ pub enum SaslConfig {
 }
 
 impl SaslConfig {
-    pub fn auth_bytes(&self) -> Vec<u8> {
+    pub(crate) fn auth_bytes(&self) -> Vec<u8> {
         match self {
             Self::Plain { username, password } => {
                 let mut auth: Vec<u8> = Vec::new();
@@ -17,7 +17,7 @@ impl SaslConfig {
         }
     }
 
-    pub fn mechanism(&self) -> &str {
+    pub(crate) fn mechanism(&self) -> &str {
         match self {
             Self::Plain { .. } => "PLAIN",
         }

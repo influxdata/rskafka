@@ -4,7 +4,7 @@ use thiserror::Error;
 
 use crate::{
     client::partition::PartitionClient,
-    connection::{BrokerConnector, SaslConfig, TlsConfig},
+    connection::{BrokerConnector, TlsConfig},
     protocol::primitives::Boolean,
     topic::Topic,
 };
@@ -18,6 +18,8 @@ pub mod producer;
 use error::{Error, Result};
 
 use self::controller::ControllerClient;
+
+pub use crate::connection::SaslConfig;
 
 #[derive(Debug, Error)]
 pub enum ProduceError {
@@ -80,11 +82,8 @@ impl ClientBuilder {
     }
 
     /// Setup SASL username and password. Mechanism is assumed to be PLAIN.
-    pub fn sasl_config(mut self, username: &str, password: &str) -> Self {
-        self.sasl_config = Some(SaslConfig::Plain{
-            username: username.to_string(),
-            password: password.to_string(),
-        });
+    pub fn sasl_config(mut self, sasl_config: SaslConfig) -> Self {
+        self.sasl_config = Some(sasl_config);
         self
     }
 

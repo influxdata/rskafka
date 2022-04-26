@@ -17,8 +17,6 @@ use std::io::{Read, Write};
 #[derive(Debug)]
 pub struct SaslHandshakeRequest {
     /// The SASL mechanism chosen by the client. e.g. PLAIN
-    ///
-    /// Added in version 0.
     pub mechanism: String_,
 }
 
@@ -70,13 +68,9 @@ impl RequestBody for SaslHandshakeRequest {
 #[derive(Debug)]
 pub struct SaslHandshakeResponse {
     /// The error code, or 0 if there was no error.
-    ///
-    /// Added in version 0.
     pub error_code: Option<ApiError>,
 
     /// The mechanisms enabled in the server.
-    ///
-    /// Added in version 0.
     pub mechanisms: Array<String_>,
 }
 
@@ -111,7 +105,7 @@ where
 pub struct SaslAuthenticateRequest {
     /// The SASL authentication bytes from the client, as defined by the SASL mechanism.
     ///
-    /// Added in version 0. The type changes to CompactBytes in version 2.
+    /// The type changes to CompactBytes in version 2.
     pub auth_bytes: Bytes,
 
     /// The tagged fields
@@ -186,18 +180,16 @@ impl RequestBody for SaslAuthenticateRequest {
 #[derive(Debug)]
 pub struct SaslAuthenticateResponse {
     /// The error code, or 0 if there was no error.
-    ///
-    /// Added in version 0.
     pub error_code: Option<ApiError>,
 
     /// The error message, or none if there was no error.
     ///
-    /// Added in version 0. Type changed to CompactNullableString in version 2.
+    /// Type changed to CompactNullableString in version 2.
     pub error_message: NullableString,
 
     /// The SASL authentication bytes from the server, as defined by the SASL mechanism.
     ///
-    /// Added in version 0. Type changed to CompactBytes in version 2.
+    /// Type changed to CompactBytes in version 2.
     pub auth_bytes: Bytes,
 
     /// The SASL authentication bytes from the server, as defined by the SASL mechanism.
