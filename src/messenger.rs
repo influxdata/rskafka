@@ -25,8 +25,7 @@ use crate::protocol::{
     frame::{AsyncMessageRead, AsyncMessageWrite},
     messages::{
         ReadVersionedError, ReadVersionedType, RequestBody, RequestHeader, ResponseHeader,
-        SaslAuthenticateRequest, SaslHandshakeRequest, WriteVersionedError,
-        WriteVersionedType,
+        SaslAuthenticateRequest, SaslHandshakeRequest, WriteVersionedError, WriteVersionedType,
     },
     primitives::{Int16, Int32, NullableString, TaggedFields},
 };
@@ -471,7 +470,11 @@ where
         Err(SyncVersionsError::NoWorkingVersion)
     }
 
-    pub async fn sasl_handshake(&self, mechanism: &str, auth_bytes: Vec<u8>) -> Result<(),  RequestError> {
+    pub async fn sasl_handshake(
+        &self,
+        mechanism: &str,
+        auth_bytes: Vec<u8>,
+    ) -> Result<(), RequestError> {
         let req = SaslHandshakeRequest::new(mechanism);
         self.request(req).await?;
         let req = SaslAuthenticateRequest::new(auth_bytes);

@@ -556,8 +556,6 @@ where
     }
 }
 
-
-
 /// Represents a raw sequence of bytes or null.
 ///
 /// For non-null values, first the length N is given as an INT32. Then N bytes follow. A null value is encoded with

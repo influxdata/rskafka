@@ -7,8 +7,8 @@ use crate::protocol::{
     api_version::{ApiVersion, ApiVersionRange},
     error::Error as ApiError,
     primitives::{
-        Array, Bytes, CompactBytes, CompactBytesRef, CompactNullableString, Int16, Int64, String_,
-        TaggedFields, NullableString,
+        Array, Bytes, CompactBytes, CompactBytesRef, CompactNullableString, Int16, Int64,
+        NullableString, String_, TaggedFields,
     },
     traits::{ReadType, WriteType},
 };
