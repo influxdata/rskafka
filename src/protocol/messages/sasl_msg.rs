@@ -22,9 +22,9 @@ pub struct SaslHandshakeRequest {
 
 impl SaslHandshakeRequest {
     pub fn new(mechanism: &str) -> Self {
-        return Self {
+        Self {
             mechanism: String_(mechanism.to_string()),
-        };
+        }
     }
 }
 
@@ -116,10 +116,10 @@ pub struct SaslAuthenticateRequest {
 
 impl SaslAuthenticateRequest {
     pub fn new(auth_bytes: Vec<u8>) -> Self {
-        return Self {
+        Self {
             auth_bytes: Bytes(auth_bytes),
             tagged_fields: Some(TaggedFields::default()),
-        };
+        }
     }
 }
 
@@ -131,7 +131,7 @@ where
         let v = version.0 .0;
         assert!(v <= 2);
         if v == 0 || v == 1 {
-            Ok(SaslAuthenticateRequest::new(Bytes::read(reader)?.0))
+            Ok(Self::new(Bytes::read(reader)?.0))
         } else {
             Ok(Self {
                 auth_bytes: Bytes(CompactBytes::read(reader)?.0),

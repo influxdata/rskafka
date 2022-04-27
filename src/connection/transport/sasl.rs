@@ -7,8 +7,7 @@ impl SaslConfig {
     pub(crate) fn auth_bytes(&self) -> Vec<u8> {
         match self {
             Self::Plain { username, password } => {
-                let mut auth: Vec<u8> = Vec::new();
-                auth.push(0);
+                let mut auth: Vec<u8> = vec![0];
                 auth.extend(username.bytes());
                 auth.push(0);
                 auth.extend(password.bytes());
