@@ -21,6 +21,20 @@ async fn test_plain() {
 }
 
 #[tokio::test]
+async fn test_sasl() {
+    maybe_start_logging();
+    let connection = maybe_skip_kafka_integration!();
+    ClientBuilder::new(vec![connection])
+        .sasl_config(rskafka::client::SaslConfig::Plain {
+            username: "admin".to_string(),
+            password: "admin-password".to_string(),
+        })
+        .build()
+        .await
+        .unwrap();
+}
+
+#[tokio::test]
 async fn test_topic_crud() {
     maybe_start_logging();
 
