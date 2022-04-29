@@ -22,6 +22,7 @@ use tracing::{debug, warn};
 use crate::protocol::{
     api_key::ApiKey,
     api_version::ApiVersion,
+    error::Error as ApiError,
     frame::{AsyncMessageRead, AsyncMessageWrite},
     messages::{
         ReadVersionedError, ReadVersionedType, RequestBody, RequestHeader, ResponseHeader,
@@ -163,6 +164,15 @@ pub enum SyncVersionsError {
         min: ApiVersion,
         max: ApiVersion,
     },
+}
+
+#[derive(Error, Debug)]
+pub enum SaslError {
+    #[error("Request error: {0}")]
+    RequestError(#[from] RequestError),
+
+    #[error("API error: {0}")]
+    ApiError(#[from] ApiError),
 }
 
 impl<RW> Messenger<RW>
@@ -474,11 +484,20 @@ where
         &self,
         mechanism: &str,
         auth_bytes: Vec<u8>,
-    ) -> Result<(), RequestError> {
+    ) -> Result<(), SaslError> {
         let req = SaslHandshakeRequest::new(mechanism);
-        self.request(req).await?;
+        let resp = self.request(req).await?;
+        if let Some(err) = resp.error_code {
+            return Err(SaslError::ApiError(err));
+        }
         let req = SaslAuthenticateRequest::new(auth_bytes);
-        self.request(req).await?;
+        let resp = self.request(req).await?;
+        if let Some(err) = resp.error_code {
+            if let Some(s) = resp.error_message.0 {
+                debug!("Sasl auth error message: {s}");
+            }
+            return Err(SaslError::ApiError(err));
+        }
         Ok(())
     }
 }

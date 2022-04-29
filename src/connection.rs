@@ -39,6 +39,9 @@ pub enum Error {
 
     #[error("all retries failed: {0}")]
     RetryFailed(BackoffError),
+
+    #[error("Sasl handshake failed: {0}")]
+    SaslFailed(#[from] crate::messenger::SaslError),
 }
 
 pub type Result<T, E = Error> = std::result::Result<T, E>;
