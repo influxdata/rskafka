@@ -128,8 +128,14 @@ async fn test_socks5() {
     // e.g. localhost:1080
     let proxy = std::env::var("SOCKS_PROXY").unwrap().to_owned();
 
-    let client = ClientBuilder::new(vec![cluster]).socks5_proxy(proxy).build().await.unwrap();
-    let partition_client = client.partition_client("myorg_mybucket", 0).await.unwrap();
+    let client = ClientBuilder::new(vec![cluster])
+        .socks5_proxy(proxy)
+        .build()
+        .await
+        .unwrap();
+    let partition_client = client.partition_client("myorg_mybucket", 0)
+        .await
+        .unwrap();
     partition_client
         .fetch_records(0, 1..10_000_001, 1_000)
         .await
