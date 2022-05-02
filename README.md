@@ -136,6 +136,14 @@ $ TEST_INTEGRATION=1 TEST_DELETE_RECORDS=1 KAFKA_CONNECT=localhost:9094 cargo te
 in another session. Note that Apache Kafka supports a different set of features then redpanda, so we pass other
 environment variables.
 
+### Using a SOCKS 5 Proxy
+
+To run the integration test via a SOCKS 5 proxy you need to set the environment variable `SOCKS_PROXY`. The following command requires a running proxy on the local machine.
+```console
+$ KAFKA_CONNECT=0.0.0.0:9093 SOCKS_PROXY=localhost:8080 cargo test --features full
+```
+To avoid known issues with the [test library](https://github.com/yanganto/test-with/issues/18) it is recommended to clean up before the first test.
+
 ### Java Interopt
 To test if RSKafka can produce/consume records to/from the official Java client, you need to have Java installed and the
 `TEST_JAVA_INTEROPT=1` environment variable set.
