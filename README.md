@@ -138,11 +138,11 @@ environment variables.
 
 ### Using a SOCKS 5 Proxy
 
-To run the integration test via a SOCKS 5 proxy you need to set the environment variable `SOCKS_PROXY`. The following command requires a running proxy on the local machine.
+To run the integration test via a SOCKS 5 proxy, you need to set the environment variable `SOCKS_PROXY`. The following command requires a running proxy on the local machine.
 ```console
 $ KAFKA_CONNECT=0.0.0.0:9093 SOCKS_PROXY=localhost:8080 cargo test --features full
 ```
-To avoid known issues with the [test library](https://github.com/yanganto/test-with/issues/18) it is recommended to clean up before the first test.
+To avoid known issues with the [test library](https://github.com/yanganto/test-with/issues/18), it is recommended to clean up before the first test.
 
 ### Java Interopt
 To test if RSKafka can produce/consume records to/from the official Java client, you need to have Java installed and the
