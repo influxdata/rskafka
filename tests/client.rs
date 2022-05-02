@@ -116,16 +116,15 @@ async fn test_tls() {
         .unwrap();
 }
 
-// Disabled as currently no SOCKS5 integration tests
 #[cfg(feature = "transport-socks5")]
 #[test_with::env(KAFKA_CONNECT, SOCKS_PROXY)]
 #[tokio::test]
 async fn test_socks5() {
     maybe_start_logging();
 
-    // e.g. my-cluster-kafka-bootstrap:9092
+    // e.g. "my-cluster-kafka-bootstrap:9092"
     let cluster = std::env::var("KAFKA_CONNECT").unwrap();
-    // e.g. localhost:1080
+    // e.g. "localhost:1080"
     let proxy = std::env::var("SOCKS_PROXY").unwrap();
 
     let client = ClientBuilder::new(vec![cluster])
