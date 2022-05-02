@@ -133,10 +133,7 @@ async fn test_socks5() {
         .build()
         .await
         .unwrap();
-
-    let partition_client = client.partition_client("myorg_mybucket", 0)
-        .await
-        .unwrap();
+    let partition_client = client.partition_client("myorg_mybucket", 0).await.unwrap();
     partition_client
         .fetch_records(0, 1..10_000_001, 1_000)
         .await
