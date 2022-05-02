@@ -7,7 +7,7 @@ use rskafka::{
     },
     record::{Record, RecordAndOffset},
 };
-use std::{env, collections::BTreeMap, str::FromStr, sync::Arc, time::Duration};
+use std::{collections::BTreeMap, str::FromStr, sync::Arc, time::Duration};
 
 mod test_helpers;
 use test_helpers::{maybe_start_logging, now, random_topic_name, record};
@@ -118,15 +118,15 @@ async fn test_tls() {
 
 // Disabled as currently no SOCKS5 integration tests
 #[cfg(feature = "transport-socks5")]
-#[test_with::env(KAFKA_CLUSTER, SOCKS_PROXY)]
+#[test_with::env(KAFKA_CONNECT, SOCKS_PROXY)]
 #[tokio::test]
 async fn test_socks5() {
     maybe_start_logging();
 
     // e.g. my-cluster-kafka-bootstrap:9092
-    let cluster = env::var("KAFKA_CLUSTER").unwrap().to_owned();
+    let cluster = std::env::var("KAFKA_CONNECT").unwrap().to_owned();
     // e.g. localhost:1080
-    let proxy = env::var("SOCKS_PROXY").unwrap().to_owned();
+    let proxy = std::env::var("SOCKS_PROXY").unwrap().to_owned();
 
     let client = ClientBuilder::new(vec![cluster]).socks5_proxy(proxy).build().await.unwrap();
     let partition_client = client.partition_client("myorg_mybucket", 0).await.unwrap();
