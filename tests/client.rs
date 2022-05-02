@@ -118,24 +118,27 @@ async fn test_tls() {
 
 // Disabled as currently no SOCKS5 integration tests
 #[cfg(feature = "transport-socks5")]
+#[test_with::env(SOCKS_PROXY)]
 #[tokio::test]
 async fn test_socks5() {
     maybe_start_logging();
 
-    // TODO: as environment vars and skip if not set
-    let kafka_cluster = env::var("my-cluster-kafka-bootstrap:9092");
-    let proxy = env::var("localhost:1080");
+    // e.g. my-cluster-kafka-bootstrap:9092
+    let cluster = env::var("KAFKA_CLUSTER");
+    // e.g. localhost:1080
+    let proxy = env::var("SOCKS_PROXY");
 
-    let client = match (kafka_cluster, proxy) {
-        (Ok(c), Ok(p)) => ClientBuilder::new(vec![c]).socks5_proxy(p).build().await.unwrap(),
-        _ => panic!("Ahhhhhhhhhhhh")
+    match (cluster, proxy) {
+        (Ok(c), Ok(p)) => {
+            let client = ClientBuilder::new(vec![c]).socks5_proxy(p).build().await.unwrap();
+            let partition_client = client.partition_client("myorg_mybucket", 0).await.unwrap();
+            partition_client
+                .fetch_records(0, 1..10_000_001, 1_000)
+                .await
+                .unwrap();
+        },
+        _ => panic!("Can't start test")
     };
-
-    let partition_client = client.partition_client("myorg_mybucket", 0).await.unwrap();
-    partition_client
-        .fetch_records(0, 1..10_000_001, 1_000)
-        .await
-        .unwrap();
 }
 
 #[tokio::test]
