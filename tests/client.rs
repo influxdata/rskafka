@@ -7,7 +7,7 @@ use rskafka::{
     },
     record::{Record, RecordAndOffset},
 };
-use std::{collections::BTreeMap, str::FromStr, sync::Arc, time::Duration};
+use std::{env, collections::BTreeMap, str::FromStr, sync::Arc, time::Duration};
 
 mod test_helpers;
 use test_helpers::{maybe_start_logging, now, random_topic_name, record};
@@ -123,14 +123,14 @@ async fn test_socks5() {
     maybe_start_logging();
 
     // TODO: as environment vars and skip if not set
-    let kafka_cluster = "my-cluster-kafka-bootstrap:9092".to_owned();
-    let proxy = "localhost:1080".to_owned();
+    let kafka_cluster = env::var("my-cluster-kafka-bootstrap:9092");
+    let proxy = env::var("localhost:1080");
 
-    let client = ClientBuilder::new(vec![kafka_cluster])
-        .socks5_proxy(proxy)
-        .build()
-        .await
-        .unwrap();
+    let client = match (kafka_cluster, proxy) {
+        (Ok(c), Ok(p)) => ClientBuilder::new(vec![c]).socks5_proxy(p).build().await.unwrap(),
+        _ => panic!("Ahhhhhhhhhhhh")
+    };
+
     let partition_client = client.partition_client("myorg_mybucket", 0).await.unwrap();
     partition_client
         .fetch_records(0, 1..10_000_001, 1_000)
