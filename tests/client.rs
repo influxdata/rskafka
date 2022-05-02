@@ -124,9 +124,9 @@ async fn test_socks5() {
     maybe_start_logging();
 
     // e.g. my-cluster-kafka-bootstrap:9092
-    let cluster = std::env::var("KAFKA_CONNECT").unwrap().to_owned();
+    let cluster = std::env::var("KAFKA_CONNECT").unwrap();
     // e.g. localhost:1080
-    let proxy = std::env::var("SOCKS_PROXY").unwrap().to_owned();
+    let proxy = std::env::var("SOCKS_PROXY").unwrap();
 
     let client = ClientBuilder::new(vec![cluster])
         .socks5_proxy(proxy)
