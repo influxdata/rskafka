@@ -68,6 +68,28 @@ macro_rules! maybe_skip_delete {
     };
 }
 
+/// Get the Socks Proxy environment variable.
+///
+/// If `SOCKS_PROXY` is not set, fail the tests and provide
+/// guidance for setting `SOCKS_PROXY`.
+#[macro_export]
+macro_rules! maybe_skip_socks_proxy {
+    () => {{
+        use std::env;
+        dotenv::dotenv().ok();
+
+        match (env::var("SOCKS_PROXY").ok()) {
+            Some(proxy) => proxy,
+            _ => {
+                eprintln!(
+                    "skipping integration tests with Proxy - set SOCKS_PROXY to run"
+                );
+                return;
+            }
+        }
+    }};
+}
+
 /// Generated random topic name for testing.
 pub fn random_topic_name() -> String {
     format!("test_topic_{}", uuid::Uuid::new_v4())

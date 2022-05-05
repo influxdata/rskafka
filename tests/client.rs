@@ -79,7 +79,7 @@ async fn test_tls() {
 
     let mut root_store = rustls::RootCertStore::empty();
 
-    let file = std::fs::File::open("/tmp/cluster-ca.crt").unwrap();
+    let file = std::fs::File::open("/tmp/connection-ca.crt").unwrap();
     let mut reader = std::io::BufReader::new(file);
     match rustls_pemfile::read_one(&mut reader).unwrap().unwrap() {
         rustls_pemfile::Item::X509Certificate(key) => {
@@ -117,17 +117,16 @@ async fn test_tls() {
 }
 
 #[cfg(feature = "transport-socks5")]
-#[test_with::env(KAFKA_CONNECT, SOCKS_PROXY)]
 #[tokio::test]
 async fn test_socks5() {
     maybe_start_logging();
 
-    // e.g. "my-cluster-kafka-bootstrap:9092"
-    let cluster = std::env::var("KAFKA_CONNECT").unwrap();
+    // e.g. "my-connection-kafka-bootstrap:9092"
+    let connection = maybe_skip_kafka_integration!();
     // e.g. "localhost:1080"
-    let proxy = std::env::var("SOCKS_PROXY").unwrap();
+    let proxy = maybe_skip_socks_proxy!();
 
-    let client = ClientBuilder::new(vec![cluster])
+    let client = ClientBuilder::new(vec![connection])
         .socks5_proxy(proxy)
         .build()
         .await
