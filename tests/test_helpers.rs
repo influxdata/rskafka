@@ -81,9 +81,7 @@ macro_rules! maybe_skip_socks_proxy {
         match (env::var("SOCKS_PROXY").ok()) {
             Some(proxy) => proxy,
             _ => {
-                eprintln!(
-                    "skipping integration tests with Proxy - set SOCKS_PROXY to run"
-                );
+                eprintln!("skipping integration tests with Proxy - set SOCKS_PROXY to run");
                 return;
             }
         }
