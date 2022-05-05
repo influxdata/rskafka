@@ -79,7 +79,7 @@ async fn test_tls() {
 
     let mut root_store = rustls::RootCertStore::empty();
 
-    let file = std::fs::File::open("/tmp/connection-ca.crt").unwrap();
+    let file = std::fs::File::open("/tmp/cluster-ca.crt").unwrap();
     let mut reader = std::io::BufReader::new(file);
     match rustls_pemfile::read_one(&mut reader).unwrap().unwrap() {
         rustls_pemfile::Item::X509Certificate(key) => {
