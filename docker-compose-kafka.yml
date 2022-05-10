@@ -77,8 +77,7 @@ services:
       - '--bootstrap-server-mapping=kafka-0:9092,0.0.0.0:32400'
       - '--bootstrap-server-mapping=kafka-1:9092,0.0.0.0:32401'
       - '--bootstrap-server-mapping=kafka-2:9092,0.0.0.0:32402'
-      - '--forward-proxy=socks5://localhost:1080'
-      - '--debug-enabled'
+      - '--forward-proxy=socks5://proxy-tools:1080'
 
 volumes:
   zookeeper_data:
