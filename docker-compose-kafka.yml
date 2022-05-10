@@ -1,4 +1,4 @@
-version: "2"
+version: "3"
 
 services:
   zookeeper:
@@ -57,6 +57,28 @@ services:
       - kafka_2_data:/bitnami/kafka
     depends_on:
       - zookeeper
+  proxy-tools:
+    image: grepplabs/kafka-proxy:v0.3.1-all
+    ports:
+      - "1080:1080"
+    command:
+      - 'tools'
+      - 'socks5-proxy'
+      - '--addr'
+      - '0.0.0.0:1080'
+  proxy-server:
+    image: grepplabs/kafka-proxy:v0.3.1-all
+    ports:
+      - "32400:32400"
+      - "32401:32401"
+      - "32402:32402"
+    command:
+      - 'server'
+      - '--bootstrap-server-mapping=kafka-0:9092,0.0.0.0:32400'
+      - '--bootstrap-server-mapping=kafka-1:9092,0.0.0.0:32401'
+      - '--bootstrap-server-mapping=kafka-2:9092,0.0.0.0:32402'
+      - '--forward-proxy=socks5://localhost:1080'
+      - '--debug-enabled'
 
 volumes:
   zookeeper_data:
