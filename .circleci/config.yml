@@ -177,6 +177,8 @@ jobs:
           - --kafka-addr redpanda-2:9092
           - --rpc-addr redpanda-2:33145
           - --seeds redpanda-0:33145
+      - image: serjs/go-socks5-proxy
+        name: proxy
     resource_class: xlarge  # use of a smaller executor tends crashes on link
     environment:
       # Disable incremental compilation to avoid overhead. We are not preserving these files anyway.
@@ -193,7 +195,8 @@ jobs:
       TEST_JAVA_INTEROPT: 1
       # Don't use the first node here since this is likely the controller and we want to ensure that we automatically
       # pick the controller for certain actions (e.g. topic creation) and don't just get lucky.
-      KAFKA_CONNECT: "redpanda-1:9092"
+      KAFKA_CONNECT: "invalid:9092,redpanda-1:9092"
+      SOCKS_PROXY: "proxy:1080"
     steps:
       - checkout
       - rust_components
@@ -244,6 +247,8 @@ jobs:
           - KAFKA_CFG_LISTENERS=CLIENT://:9092,EXTERNAL://:9093
           - KAFKA_CFG_ADVERTISED_LISTENERS=CLIENT://kafka-2:9092,EXTERNAL://kafka-2:9093
           - KAFKA_INTER_BROKER_LISTENER_NAME=CLIENT
+      - image: serjs/go-socks5-proxy
+        name: proxy
     resource_class: xlarge  # use of a smaller executor tends crashes on link
     environment:
       # Disable incremental compilation to avoid overhead. We are not preserving these files anyway.
@@ -262,7 +267,8 @@ jobs:
       TEST_JAVA_INTEROPT: 1
       # Don't use the first node here since this is likely the controller and we want to ensure that we automatically
       # pick the controller for certain actions (e.g. topic creation) and don't just get lucky.
-      KAFKA_CONNECT: "kafka-1:9093"
+      KAFKA_CONNECT: "invalid:9093,kafka-1:9093"
+      SOCKS_PROXY: "proxy:1080"
     steps:
       - checkout
       - rust_components

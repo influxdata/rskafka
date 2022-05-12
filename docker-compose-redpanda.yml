@@ -4,7 +4,7 @@ services:
     image: vectorized/redpanda:v21.11.2
     container_name: redpanda-0
     ports:
-      - '9092:9092'
+      - '9010:9010'
     command:
       - redpanda
       - start
@@ -14,15 +14,15 @@ services:
       - --overprovisioned
       - --node-id 0
       - --check=false
-      - --kafka-addr 0.0.0.0:9092
-      - --advertise-kafka-addr 127.0.0.1:9092
+      - --kafka-addr EXTERNAL://0.0.0.0:9010,FOR_PROXY://0.0.0.0:9020
+      - --advertise-kafka-addr EXTERNAL://127.0.0.1:9010,FOR_PROXY://redpanda-0:9020
       - --rpc-addr 0.0.0.0:33145
       - --advertise-rpc-addr redpanda-0:33145
   redpanda-1:
     image: vectorized/redpanda:v21.11.2
     container_name: redpanda-1
     ports:
-      - '9093:9093'
+      - '9011:9011'
     command:
       - redpanda
       - start
@@ -33,15 +33,15 @@ services:
       - --node-id 1
       - --seeds "redpanda-0:33145"
       - --check=false
-      - --kafka-addr 0.0.0.0:9093
-      - --advertise-kafka-addr 127.0.0.1:9093
+      - --kafka-addr EXTERNAL://0.0.0.0:9011,FOR_PROXY://0.0.0.0:9021
+      - --advertise-kafka-addr EXTERNAL://127.0.0.1:9011,FOR_PROXY://redpanda-1:9021
       - --rpc-addr 0.0.0.0:33146
       - --advertise-rpc-addr redpanda-1:33146
   redpanda-2:
     image: vectorized/redpanda:v21.11.2
     container_name: redpanda-2
     ports:
-      - '9094:9094'
+      - '9012:9012'
     command:
       - redpanda
       - start
@@ -52,7 +52,15 @@ services:
       - --node-id 2
       - --seeds "redpanda-0:33145"
       - --check=false
-      - --kafka-addr 0.0.0.0:9094
-      - --advertise-kafka-addr 127.0.0.1:9094
+      - --kafka-addr EXTERNAL://0.0.0.0:9012,FOR_PROXY://0.0.0.0:9022
+      - --advertise-kafka-addr EXTERNAL://127.0.0.1:9012,FOR_PROXY://redpanda-2:9022
       - --rpc-addr 0.0.0.0:33147
       - --advertise-rpc-addr redpanda-2:33147
+  proxy:
+    image: serjs/go-socks5-proxy
+    ports:
+      - "1080:1080"
+    depends_on:
+      - redpanda-0
+      - redpanda-1
+      - redpanda-2
