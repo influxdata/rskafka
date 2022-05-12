@@ -45,7 +45,7 @@ let client = ClientBuilder::new(vec![connection]).build().await.unwrap();
 
 // create a topic
 let topic = "my_topic";
-let controller_client = client.controller_client().await.unwrap();
+let controller_client = client.controller_client().unwrap();
 controller_client.create_topic(
     topic,
     2,      // partitions
@@ -59,7 +59,6 @@ let partition_client = client
         topic.to_owned(),
         0,  // partition
      )
-    .await
     .unwrap();
 
 // produce some data

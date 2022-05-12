@@ -110,12 +110,12 @@ pub struct Client {
 
 impl Client {
     /// Returns a client for performing certain cluster-wide operations.
-    pub async fn controller_client(&self) -> Result<ControllerClient> {
+    pub fn controller_client(&self) -> Result<ControllerClient> {
         Ok(ControllerClient::new(Arc::clone(&self.brokers)))
     }
 
     /// Returns a client for performing operations on a specific partition
-    pub async fn partition_client(
+    pub fn partition_client(
         &self,
         topic: impl Into<String> + Send,
         partition: i32,

@@ -26,7 +26,7 @@ async fn test_topic_crud() {
 
     let connection = maybe_skip_kafka_integration!();
     let client = ClientBuilder::new(vec![connection]).build().await.unwrap();
-    let controller_client = client.controller_client().await.unwrap();
+    let controller_client = client.controller_client().unwrap();
     let topics = client.list_topics().await.unwrap();
 
     let prefix = "test_topic_crud_";
@@ -128,7 +128,7 @@ async fn test_socks5() {
         .build()
         .await
         .unwrap();
-    let partition_client = client.partition_client("myorg_mybucket", 0).await.unwrap();
+    let partition_client = client.partition_client("myorg_mybucket", 0).unwrap();
     partition_client
         .fetch_records(0, 1..10_000_001, 1_000)
         .await
@@ -144,13 +144,13 @@ async fn test_produce_empty() {
     let n_partitions = 2;
 
     let client = ClientBuilder::new(vec![connection]).build().await.unwrap();
-    let controller_client = client.controller_client().await.unwrap();
+    let controller_client = client.controller_client().unwrap();
     controller_client
         .create_topic(&topic_name, n_partitions, 1, 5_000)
         .await
         .unwrap();
 
-    let partition_client = client.partition_client(&topic_name, 1).await.unwrap();
+    let partition_client = client.partition_client(&topic_name, 1).unwrap();
     partition_client
         .produce(vec![], Compression::NoCompression)
         .await
@@ -166,13 +166,13 @@ async fn test_consume_empty() {
     let n_partitions = 2;
 
     let client = ClientBuilder::new(vec![connection]).build().await.unwrap();
-    let controller_client = client.controller_client().await.unwrap();
+    let controller_client = client.controller_client().unwrap();
     controller_client
         .create_topic(&topic_name, n_partitions, 1, 5_000)
         .await
         .unwrap();
 
-    let partition_client = client.partition_client(&topic_name, 1).await.unwrap();
+    let partition_client = client.partition_client(&topic_name, 1).unwrap();
     let (records, watermark) = partition_client
         .fetch_records(0, 1..10_000, 1_000)
         .await
@@ -190,13 +190,13 @@ async fn test_consume_offset_out_of_range() {
     let n_partitions = 2;
 
     let client = ClientBuilder::new(vec![connection]).build().await.unwrap();
-    let controller_client = client.controller_client().await.unwrap();
+    let controller_client = client.controller_client().unwrap();
     controller_client
         .create_topic(&topic_name, n_partitions, 1, 5_000)
         .await
         .unwrap();
 
-    let partition_client = client.partition_client(&topic_name, 1).await.unwrap();
+    let partition_client = client.partition_client(&topic_name, 1).unwrap();
     let record = record(b"");
     let offsets = partition_client
         .produce(vec![record], Compression::NoCompression)
@@ -226,16 +226,13 @@ async fn test_get_offset() {
         .build()
         .await
         .unwrap();
-    let controller_client = client.controller_client().await.unwrap();
+    let controller_client = client.controller_client().unwrap();
     controller_client
         .create_topic(&topic_name, n_partitions, 1, 5_000)
         .await
         .unwrap();
 
-    let partition_client = client
-        .partition_client(topic_name.clone(), 0)
-        .await
-        .unwrap();
+    let partition_client = client.partition_client(topic_name.clone(), 0).unwrap();
 
     assert_eq!(
         partition_client
@@ -290,13 +287,13 @@ async fn test_produce_consume_size_cutoff() {
     let topic_name = random_topic_name();
 
     let client = ClientBuilder::new(vec![connection]).build().await.unwrap();
-    let controller_client = client.controller_client().await.unwrap();
+    let controller_client = client.controller_client().unwrap();
     controller_client
         .create_topic(&topic_name, 1, 1, 5_000)
         .await
         .unwrap();
 
-    let partition_client = Arc::new(client.partition_client(&topic_name, 0).await.unwrap());
+    let partition_client = Arc::new(client.partition_client(&topic_name, 0).unwrap());
 
     let record_1 = large_record();
     let record_2 = large_record();
@@ -363,13 +360,13 @@ async fn test_consume_midbatch() {
     let topic_name = random_topic_name();
 
     let client = ClientBuilder::new(vec![connection]).build().await.unwrap();
-    let controller_client = client.controller_client().await.unwrap();
+    let controller_client = client.controller_client().unwrap();
     controller_client
         .create_topic(&topic_name, 1, 1, 5_000)
         .await
         .unwrap();
 
-    let partition_client = client.partition_client(&topic_name, 0).await.unwrap();
+    let partition_client = client.partition_client(&topic_name, 0).unwrap();
 
     // produce two records into a single batch
     let record_1 = record(b"x");
@@ -408,13 +405,13 @@ async fn test_delete_records() {
     let topic_name = random_topic_name();
 
     let client = ClientBuilder::new(vec![connection]).build().await.unwrap();
-    let controller_client = client.controller_client().await.unwrap();
+    let controller_client = client.controller_client().unwrap();
     controller_client
         .create_topic(&topic_name, 1, 1, 5_000)
         .await
         .unwrap();
 
-    let partition_client = client.partition_client(&topic_name, 0).await.unwrap();
+    let partition_client = client.partition_client(&topic_name, 0).unwrap();
 
     // produce the following record batches:
     // - record_1
