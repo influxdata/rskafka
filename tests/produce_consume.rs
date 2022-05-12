@@ -253,17 +253,12 @@ async fn assert_produce_consume<F1, G1, F2, G2>(
         .build()
         .await
         .unwrap();
-    let controller_client = client.controller_client().await.unwrap();
+    let controller_client = client.controller_client().unwrap();
     controller_client
         .create_topic(&topic_name, n_partitions, 1, 5_000)
         .await
         .unwrap();
-    let partition_client = Arc::new(
-        client
-            .partition_client(topic_name.clone(), 1)
-            .await
-            .unwrap(),
-    );
+    let partition_client = Arc::new(client.partition_client(topic_name.clone(), 1).unwrap());
 
     let record_1 = {
         let record = record(b"");
