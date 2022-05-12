@@ -279,13 +279,12 @@ async fn setup_rskafka(connection: String) -> PartitionClient {
     let client = ClientBuilder::new(vec![connection]).build().await.unwrap();
     client
         .controller_client()
-        .await
         .unwrap()
         .create_topic(topic_name.clone(), 1, 1, 5_000)
         .await
         .unwrap();
 
-    client.partition_client(topic_name, 0).await.unwrap()
+    client.partition_client(topic_name, 0).unwrap()
 }
 
 criterion_group!(benches, criterion_benchmark);
