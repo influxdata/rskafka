@@ -619,6 +619,8 @@ where
             }
             #[cfg(feature = "compression-snappy")]
             RecordBatchCompression::Snappy => {
+                use crate::protocol::vec_builder::DEFAULT_BLOCK_SIZE;
+
                 // Construct the input for the raw decoder.
                 let mut input = vec![];
                 reader.read_to_end(&mut input)?;
@@ -655,13 +657,13 @@ where
                         let mut chunk_data = vec![0u8; chunk_length];
                         cursor.read_exact(&mut chunk_data)?;
 
-                        let mut buf = carefully_decompress_snappy(&chunk_data)?;
+                        let mut buf = carefully_decompress_snappy(&chunk_data, DEFAULT_BLOCK_SIZE)?;
                         output.append(&mut buf);
                     }
 
                     output
                 } else {
-                    carefully_decompress_snappy(&input)?
+                    carefully_decompress_snappy(&input, DEFAULT_BLOCK_SIZE)?
                 };
 
                 // Read uncompressed records.
@@ -889,10 +891,20 @@ where
     }
 }
 
+/// Try to decompress a snappy message without blindly believing the uncompressed size encoded at the start of the
+/// message (and therefore potentially OOMing).
 #[cfg(feature = "compression-snappy")]
-fn carefully_decompress_snappy(input: &[u8]) -> Result<Vec<u8>, ReadError> {
-    use crate::protocol::vec_builder::DEFAULT_BLOCK_SIZE;
+fn carefully_decompress_snappy(
+    input: &[u8],
+    start_block_size: usize,
+) -> Result<Vec<u8>, ReadError> {
+    use crate::protocol::primitives::UnsignedVarint;
     use snap::raw::{decompress_len, Decoder};
+
+    // early exit, otherwise `uncompressed_size_encoded_length` will be 1 even though there was no input
+    if input.is_empty() {
+        return Err(ReadError::Malformed(Box::new(snap::Error::Empty)));
+    }
 
     // The snappy compression used here is unframed aka "raw". So we first need to figure out the
     // uncompressed length. See
@@ -901,27 +913,81 @@ fn carefully_decompress_snappy(input: &[u8]) -> Result<Vec<u8>, ReadError> {
     // - https://github.com/edenhill/librdkafka/blob/747f77c98fbddf7dc6508f76398e0fc9ee91450f/src/snappy.c#L779
     let uncompressed_size = decompress_len(input).map_err(|e| ReadError::Malformed(Box::new(e)))?;
 
+    // figure out how long the encoded size was
+    let uncompressed_size_encoded_length = {
+        let mut buf = Vec::with_capacity(100);
+        UnsignedVarint(uncompressed_size as u64)
+            .write(&mut buf)
+            .expect("this write should never fail");
+        buf.len()
+    };
+
     // Decode snappy payload.
     // The uncompressed length is unchecked and can be up to 2^32-1 bytes. To avoid a DDoS vector we try to
     // limit it to a small size and if that fails we double that size;
-    let mut max_uncompressed_size = DEFAULT_BLOCK_SIZE;
+    let mut max_uncompressed_size = start_block_size;
 
+    // Try to decode the message with growing output buffers.
     loop {
         let try_uncompressed_size = uncompressed_size.min(max_uncompressed_size);
 
+        // We need to lie to the snap decoder about the target length, otherwise it will reject our shortened test
+        // straight away. Luckily that's rather easy and we just need fake the length stored right at the beginning of
+        // the message.
+        let try_input = {
+            let mut buf = Cursor::new(Vec::with_capacity(input.len()));
+            UnsignedVarint(try_uncompressed_size as u64)
+                .write(&mut buf)
+                .expect("this write should never fail");
+            buf.write_all(&input[uncompressed_size_encoded_length..])
+                .expect("this write should never fail");
+            buf.into_inner()
+        };
+
         let mut decoder = Decoder::new();
         let mut output = vec![0; try_uncompressed_size];
-        let actual_uncompressed_size = match decoder.decompress(input, &mut output) {
+        let actual_uncompressed_size = match decoder.decompress(&try_input, &mut output) {
             Ok(size) => size,
-            Err(snap::Error::BufferTooSmall { .. })
-                if max_uncompressed_size < uncompressed_size =>
-            {
-                // try larger buffer
-                max_uncompressed_size *= 2;
-                continue;
-            }
             Err(e) => {
-                return Err(ReadError::Malformed(Box::new(e)));
+                let looks_like_dst_too_small = match e {
+                    // `CopyWrite` only occurs when the dst buffer is too small.
+                    snap::Error::CopyWrite { .. } => true,
+
+                    // `Literal` may occur due to src or dst errors, so need to check
+                    snap::Error::Literal {
+                        len,
+                        dst_len,
+                        src_len,
+                    } => (dst_len < len) && (src_len >= len),
+
+                    // `HeaderMismatch` may also occur when the output was smaller than we predicted, in which case the
+                    // header would actually be broken
+                    snap::Error::HeaderMismatch {
+                        expected_len,
+                        got_len,
+                    } => expected_len < got_len,
+
+                    // `BufferTooSmall` cannot happed by construction, because we just allocated the right buffer
+                    snap::Error::BufferTooSmall { .. } => {
+                        unreachable!("Just allocated a correctly-sized output buffer.")
+                    }
+
+                    // `Offset` does NOT occur due undersized dst but due to invalid offset calculations. Instead
+                    // `CopyWrite` would be used.
+                    snap::Error::Offset { .. } => false,
+
+                    // All other errors are real errors
+                    _ => false,
+                };
+                let used_smaller_dst = max_uncompressed_size < uncompressed_size;
+
+                if looks_like_dst_too_small && used_smaller_dst {
+                    // try larger buffer
+                    max_uncompressed_size *= 2;
+                    continue;
+                } else {
+                    return Err(ReadError::Malformed(Box::new(e)));
+                }
             }
         };
         if actual_uncompressed_size != uncompressed_size {
@@ -1129,86 +1195,34 @@ mod tests {
     }
 
     #[cfg(feature = "compression-snappy")]
-    #[test]
-    fn test_decode_fixture_snappy() {
-        // This data was obtained by watching rdkafka.
-        let data = [
-            b"\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x58\x00\x00\x00\x00".to_vec(),
-            b"\x02\xad\x86\xf4\xf4\x00\x02\x00\x00\x00\x00\x00\x00\x01\x7e\xb6".to_vec(),
-            b"\x45\x0e\x52\x00\x00\x01\x7e\xb6\x45\x0e\x52\xff\xff\xff\xff\xff".to_vec(),
-            b"\xff\xff\xff\xff\xff\xff\xff\xff\xff\x00\x00\x00\x01\x80\x01\x1c".to_vec(),
-            b"\xfc\x01\x00\x00\x00\xc8\x01\x78\xfe\x01\x00\x8a\x01\x00\x50\x16".to_vec(),
-            b"\x68\x65\x6c\x6c\x6f\x20\x6b\x61\x66\x6b\x61\x02\x06\x66\x6f\x6f".to_vec(),
-            b"\x06\x62\x61\x72".to_vec(),
-        ]
-        .concat();
+    mod snappy {
+        use super::*;
 
-        let actual = RecordBatch::read(&mut Cursor::new(data)).unwrap();
-        let expected = RecordBatch {
-            base_offset: 0,
-            partition_leader_epoch: 0,
-            last_offset_delta: 0,
-            first_timestamp: 1643735486034,
-            max_timestamp: 1643735486034,
-            producer_id: -1,
-            producer_epoch: -1,
-            base_sequence: -1,
-            records: ControlBatchOrRecords::Records(vec![Record {
-                timestamp_delta: 0,
-                offset_delta: 0,
-                key: Some(vec![b'x'; 100]),
-                value: Some(b"hello kafka".to_vec()),
-                headers: vec![RecordHeader {
-                    key: "foo".to_owned(),
-                    value: b"bar".to_vec(),
-                }],
-            }]),
-            compression: RecordBatchCompression::Snappy,
-            is_transactional: false,
-            timestamp_type: RecordBatchTimestampType::CreateTime,
-        };
-        assert_eq!(actual, expected);
+        #[test]
+        fn test_decode_fixture_snappy() {
+            // This data was obtained by watching rdkafka.
+            let data = [
+                b"\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x58\x00\x00\x00\x00".to_vec(),
+                b"\x02\xad\x86\xf4\xf4\x00\x02\x00\x00\x00\x00\x00\x00\x01\x7e\xb6".to_vec(),
+                b"\x45\x0e\x52\x00\x00\x01\x7e\xb6\x45\x0e\x52\xff\xff\xff\xff\xff".to_vec(),
+                b"\xff\xff\xff\xff\xff\xff\xff\xff\xff\x00\x00\x00\x01\x80\x01\x1c".to_vec(),
+                b"\xfc\x01\x00\x00\x00\xc8\x01\x78\xfe\x01\x00\x8a\x01\x00\x50\x16".to_vec(),
+                b"\x68\x65\x6c\x6c\x6f\x20\x6b\x61\x66\x6b\x61\x02\x06\x66\x6f\x6f".to_vec(),
+                b"\x06\x62\x61\x72".to_vec(),
+            ]
+            .concat();
 
-        let mut data2 = vec![];
-        actual.write(&mut data2).unwrap();
-
-        // don't compare if the data is equal because compression encoder might work slightly differently, use another
-        // roundtrip instead
-        let actual2 = RecordBatch::read(&mut Cursor::new(data2)).unwrap();
-        assert_eq!(actual2, expected);
-    }
-
-    #[cfg(feature = "compression-snappy")]
-    #[test]
-    fn test_decode_fixture_snappy_java() {
-        // This data was obtained by watching Kafka returning a recording to rskafka that was produced by the official
-        // Java client.
-        let data = [
-            b"\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x8c\x00\x00\x00\x00".to_vec(),
-            b"\x02\x79\x1e\x2d\xce\x00\x02\x00\x00\x00\x01\x00\x00\x01\x7f\x07".to_vec(),
-            b"\x25\x7a\xb1\x00\x00\x01\x7f\x07\x25\x7a\xb1\xff\xff\xff\xff\xff".to_vec(),
-            b"\xff\xff\xff\xff\xff\xff\xff\xff\xff\x00\x00\x00\x02\x82\x53\x4e".to_vec(),
-            b"\x41\x50\x50\x59\x00\x00\x00\x00\x01\x00\x00\x00\x01\x00\x00\x00".to_vec(),
-            b"\x47\xff\x01\x1c\xfc\x01\x00\x00\x00\xc8\x01\x78\xfe\x01\x00\x8a".to_vec(),
-            b"\x01\x00\x64\x16\x68\x65\x6c\x6c\x6f\x20\x6b\x61\x66\x6b\x61\x02".to_vec(),
-            b"\x06\x66\x6f\x6f\x06\x62\x61\x72\xfa\x01\x00\x00\x02\xfe\x80\x00".to_vec(),
-            b"\x96\x80\x00\x4c\x14\x73\x6f\x6d\x65\x20\x76\x61\x6c\x75\x65\x02".to_vec(),
-            b"\x06\x66\x6f\x6f\x06\x62\x61\x72".to_vec(),
-        ]
-        .concat();
-
-        let actual = RecordBatch::read(&mut Cursor::new(data)).unwrap();
-        let expected = RecordBatch {
-            base_offset: 0,
-            partition_leader_epoch: 0,
-            last_offset_delta: 1,
-            first_timestamp: 1645092371121,
-            max_timestamp: 1645092371121,
-            producer_id: -1,
-            producer_epoch: -1,
-            base_sequence: -1,
-            records: ControlBatchOrRecords::Records(vec![
-                Record {
+            let actual = RecordBatch::read(&mut Cursor::new(data)).unwrap();
+            let expected = RecordBatch {
+                base_offset: 0,
+                partition_leader_epoch: 0,
+                last_offset_delta: 0,
+                first_timestamp: 1643735486034,
+                max_timestamp: 1643735486034,
+                producer_id: -1,
+                producer_epoch: -1,
+                base_sequence: -1,
+                records: ControlBatchOrRecords::Records(vec![Record {
                     timestamp_delta: 0,
                     offset_delta: 0,
                     key: Some(vec![b'x'; 100]),
@@ -1217,31 +1231,119 @@ mod tests {
                         key: "foo".to_owned(),
                         value: b"bar".to_vec(),
                     }],
-                },
-                Record {
-                    timestamp_delta: 0,
-                    offset_delta: 1,
-                    key: Some(vec![b'x'; 100]),
-                    value: Some(b"some value".to_vec()),
-                    headers: vec![RecordHeader {
-                        key: "foo".to_owned(),
-                        value: b"bar".to_vec(),
-                    }],
-                },
-            ]),
-            compression: RecordBatchCompression::Snappy,
-            is_transactional: false,
-            timestamp_type: RecordBatchTimestampType::CreateTime,
-        };
-        assert_eq!(actual, expected);
+                }]),
+                compression: RecordBatchCompression::Snappy,
+                is_transactional: false,
+                timestamp_type: RecordBatchTimestampType::CreateTime,
+            };
+            assert_eq!(actual, expected);
 
-        let mut data2 = vec![];
-        actual.write(&mut data2).unwrap();
+            let mut data2 = vec![];
+            actual.write(&mut data2).unwrap();
 
-        // don't compare if the data is equal because compression encoder might work slightly differently, use another
-        // roundtrip instead
-        let actual2 = RecordBatch::read(&mut Cursor::new(data2)).unwrap();
-        assert_eq!(actual2, expected);
+            // don't compare if the data is equal because compression encoder might work slightly differently, use another
+            // roundtrip instead
+            let actual2 = RecordBatch::read(&mut Cursor::new(data2)).unwrap();
+            assert_eq!(actual2, expected);
+        }
+
+        #[test]
+        fn test_decode_fixture_snappy_java() {
+            // This data was obtained by watching Kafka returning a recording to rskafka that was produced by the official
+            // Java client.
+            let data = [
+                b"\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x8c\x00\x00\x00\x00".to_vec(),
+                b"\x02\x79\x1e\x2d\xce\x00\x02\x00\x00\x00\x01\x00\x00\x01\x7f\x07".to_vec(),
+                b"\x25\x7a\xb1\x00\x00\x01\x7f\x07\x25\x7a\xb1\xff\xff\xff\xff\xff".to_vec(),
+                b"\xff\xff\xff\xff\xff\xff\xff\xff\xff\x00\x00\x00\x02\x82\x53\x4e".to_vec(),
+                b"\x41\x50\x50\x59\x00\x00\x00\x00\x01\x00\x00\x00\x01\x00\x00\x00".to_vec(),
+                b"\x47\xff\x01\x1c\xfc\x01\x00\x00\x00\xc8\x01\x78\xfe\x01\x00\x8a".to_vec(),
+                b"\x01\x00\x64\x16\x68\x65\x6c\x6c\x6f\x20\x6b\x61\x66\x6b\x61\x02".to_vec(),
+                b"\x06\x66\x6f\x6f\x06\x62\x61\x72\xfa\x01\x00\x00\x02\xfe\x80\x00".to_vec(),
+                b"\x96\x80\x00\x4c\x14\x73\x6f\x6d\x65\x20\x76\x61\x6c\x75\x65\x02".to_vec(),
+                b"\x06\x66\x6f\x6f\x06\x62\x61\x72".to_vec(),
+            ]
+            .concat();
+
+            let actual = RecordBatch::read(&mut Cursor::new(data)).unwrap();
+            let expected = RecordBatch {
+                base_offset: 0,
+                partition_leader_epoch: 0,
+                last_offset_delta: 1,
+                first_timestamp: 1645092371121,
+                max_timestamp: 1645092371121,
+                producer_id: -1,
+                producer_epoch: -1,
+                base_sequence: -1,
+                records: ControlBatchOrRecords::Records(vec![
+                    Record {
+                        timestamp_delta: 0,
+                        offset_delta: 0,
+                        key: Some(vec![b'x'; 100]),
+                        value: Some(b"hello kafka".to_vec()),
+                        headers: vec![RecordHeader {
+                            key: "foo".to_owned(),
+                            value: b"bar".to_vec(),
+                        }],
+                    },
+                    Record {
+                        timestamp_delta: 0,
+                        offset_delta: 1,
+                        key: Some(vec![b'x'; 100]),
+                        value: Some(b"some value".to_vec()),
+                        headers: vec![RecordHeader {
+                            key: "foo".to_owned(),
+                            value: b"bar".to_vec(),
+                        }],
+                    },
+                ]),
+                compression: RecordBatchCompression::Snappy,
+                is_transactional: false,
+                timestamp_type: RecordBatchTimestampType::CreateTime,
+            };
+            assert_eq!(actual, expected);
+
+            let mut data2 = vec![];
+            actual.write(&mut data2).unwrap();
+
+            // don't compare if the data is equal because compression encoder might work slightly differently, use another
+            // roundtrip instead
+            let actual2 = RecordBatch::read(&mut Cursor::new(data2)).unwrap();
+            assert_eq!(actual2, expected);
+        }
+
+        #[test]
+        fn test_carefully_decompress_snappy_empty_input() {
+            let err = carefully_decompress_snappy(&[], 1).unwrap_err();
+            assert_matches!(err, ReadError::Malformed(_));
+        }
+
+        #[test]
+        fn test_carefully_decompress_snappy_empty_payload() {
+            let compressed = compress(&[]);
+            let data = carefully_decompress_snappy(&compressed, 1).unwrap();
+            assert!(data.is_empty());
+        }
+
+        proptest! {
+            #![proptest_config(ProptestConfig{cases: 200, ..Default::default()})]
+            #[test]
+            fn test_carefully_decompress_snappy(input in prop::collection::vec(any::<u8>(), 0..10_000)) {
+                let compressed = compress(&input);
+                let input2 = carefully_decompress_snappy(&compressed, 1).unwrap();
+                assert_eq!(input, input2);
+            }
+        }
+
+        fn compress(data: &[u8]) -> Vec<u8> {
+            use snap::raw::{max_compress_len, Encoder};
+
+            let mut encoder = Encoder::new();
+            let mut output = vec![0; max_compress_len(data.len())];
+            let l = encoder.compress(data, &mut output).unwrap();
+
+            output[..l].to_vec()
+        }
     }
 
     #[cfg(feature = "compression-zstd")]

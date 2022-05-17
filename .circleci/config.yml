@@ -1,6 +1,9 @@
 ---
 version: 2.1
 
+orbs:
+  slack: circleci/slack@4.10.1
+
 commands:
   rust_components:
     description: Verify installed components
@@ -370,6 +373,56 @@ jobs:
           command: cargo +nightly fuzz build
       - cache_save
 
+  # Runs fuzzing
+  run-fuzz:
+    docker:
+      - image: quay.io/influxdb/rust:ci
+    resource_class: xlarge  # use of a smaller executor tends crashes on link
+    environment:
+      # Disable incremental compilation to avoid overhead. We are not preserving these files anyway.
+      CARGO_INCREMENTAL: "0"
+      # Disable full debug symbol generation to speed up CI build
+      # "1" means line tables only, which is useful for panic tracebacks.
+      RUSTFLAGS: "-C debuginfo=1"
+      # https://github.com/rust-lang/cargo/issues/10280
+      CARGO_NET_GIT_FETCH_WITH_CLI: "true"
+    steps:
+      - checkout
+      - rust_components
+      - cache_restore
+      - restore_cache:
+          name: Restoring artifacts & corpus
+          keys:
+            - fuzz-state
+      - run:
+          name: Install cargo-fuzz
+          command: cargo install cargo-fuzz
+      - run:
+          name: Install nightly toolchain
+          command: rustup toolchain install nightly-x86_64-unknown-linux-gnu
+      - run:
+          name: Cargo fuzz build
+          command: cargo +nightly fuzz build
+      - run:
+          name: Run fuzzers
+          command: |
+            for f in ./fuzz/fuzz_targets/*.rs; do
+              cargo +nightly fuzz run "$(basename "$f" .rs)" -- -runs=100000
+            done
+      - save_cache:
+          name: Save artifacts & corpus
+          paths:
+            - fuzz/artifacts
+            - fuzz/corpus
+          key: fuzz-state-{{ epoch }}
+          when: always
+      - store_artifacts:
+          path: fuzz/artifacts
+      - cache_save
+      - slack/notify:
+          event: fail
+          template: basic_fail_1
+
 workflows:
   version: 2
 
@@ -386,3 +439,15 @@ workflows:
       - build-all-features
       - build-fuzz
       - doc
+
+  # Run fuzzers every 30mins
+  fuzz:
+    triggers:
+      - schedule:
+          cron: "0,30 * * * *"
+          filters:
+            branches:
+              only:
+                - main
+    jobs:
+      - run-fuzz
