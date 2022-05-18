@@ -19,6 +19,8 @@ use error::{Error, Result};
 
 use self::controller::ControllerClient;
 
+pub use crate::connection::SaslConfig;
+
 #[derive(Debug, Error)]
 pub enum ProduceError {
     #[error("Broker error: {0}")]
@@ -40,6 +42,7 @@ pub struct ClientBuilder {
     max_message_size: usize,
     socks5_proxy: Option<String>,
     tls_config: TlsConfig,
+    sasl_config: Option<SaslConfig>,
 }
 
 impl ClientBuilder {
@@ -50,6 +53,7 @@ impl ClientBuilder {
             max_message_size: 100 * 1024 * 1024, // 100MB
             socks5_proxy: None,
             tls_config: TlsConfig::default(),
+            sasl_config: None,
         }
     }
 
@@ -77,12 +81,19 @@ impl ClientBuilder {
         self
     }
 
+    /// Setup SASL username and password. Mechanism is assumed to be PLAIN.
+    pub fn sasl_config(mut self, sasl_config: SaslConfig) -> Self {
+        self.sasl_config = Some(sasl_config);
+        self
+    }
+
     /// Build [`Client`].
     pub async fn build(self) -> Result<Client> {
         let brokers = Arc::new(BrokerConnector::new(
             self.bootstrap_brokers,
             self.tls_config,
             self.socks5_proxy,
+            self.sasl_config,
             self.max_message_size,
         ));
         brokers.refresh_metadata().await?;

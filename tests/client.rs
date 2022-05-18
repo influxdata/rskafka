@@ -7,7 +7,7 @@ use rskafka::{
     },
     record::{Record, RecordAndOffset},
 };
-use std::{collections::BTreeMap, str::FromStr, sync::Arc, time::Duration};
+use std::{collections::BTreeMap, env, str::FromStr, sync::Arc, time::Duration};
 
 mod test_helpers;
 use test_helpers::{maybe_start_logging, now, random_topic_name, record};
@@ -18,6 +18,26 @@ async fn test_plain() {
 
     let connection = maybe_skip_kafka_integration!();
     ClientBuilder::new(vec![connection]).build().await.unwrap();
+}
+
+#[tokio::test]
+async fn test_sasl() {
+    maybe_start_logging();
+    if env::var("TEST_INTEGRATION").is_err() {
+        return;
+    }
+    if env::var("KAFKA_SASL_CONNECT").is_err() {
+        eprintln!("Skipping sasl test.");
+        return;
+    }
+    ClientBuilder::new(vec![env::var("KAFKA_SASL_CONNECT").unwrap()])
+        .sasl_config(rskafka::client::SaslConfig::Plain {
+            username: "admin".to_string(),
+            password: "admin-secret".to_string(),
+        })
+        .build()
+        .await
+        .unwrap();
 }
 
 #[tokio::test]
