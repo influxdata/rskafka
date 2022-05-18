@@ -95,5 +95,9 @@ members = [
 [profile.bench]
 debug = true
 
+# tune release profile for fuzzing
+[profile.release]
+debug = true
+
 [package.metadata.docs.rs]
 all-features = true
