@@ -22,7 +22,11 @@ macro_rules! maybe_skip_kafka_integration {
             env::var("TEST_INTEGRATION").is_ok(),
             env::var("KAFKA_CONNECT").ok(),
         ) {
-            (true, Some(kafka_connection)) => kafka_connection,
+            (true, Some(kafka_connection)) => {
+                let kafka_connection: Vec<String> =
+                    kafka_connection.split(",").map(|s| s.to_owned()).collect();
+                kafka_connection
+            }
             (true, None) => {
                 panic!(
                     "TEST_INTEGRATION is set which requires running integration tests, but \
@@ -66,6 +70,26 @@ macro_rules! maybe_skip_delete {
             Err(e) => panic!("Cannot delete: {e}"),
         }
     };
+}
+
+/// Get the Socks Proxy environment variable.
+///
+/// If `SOCKS_PROXY` is not set, fail the tests and provide
+/// guidance for setting `SOCKS_PROXY`.
+#[macro_export]
+macro_rules! maybe_skip_SOCKS_PROXY {
+    () => {{
+        use std::env;
+        dotenv::dotenv().ok();
+
+        match (env::var("SOCKS_PROXY").ok()) {
+            Some(proxy) => proxy,
+            _ => {
+                eprintln!("skipping integration tests with Proxy - set SOCKS_PROXY to run");
+                return;
+            }
+        }
+    }};
 }
 
 /// Generated random topic name for testing.

@@ -16,13 +16,13 @@ use time::OffsetDateTime;
 
 /// Produce.
 pub async fn produce(
-    connection: &str,
+    connection: &[String],
     records: Vec<(String, i32, Record)>,
     compression: Compression,
 ) -> Vec<i64> {
     // create client
     let mut cfg = ClientConfig::new();
-    cfg.set("bootstrap.servers", connection);
+    cfg.set("bootstrap.servers", connection.join(","));
     match compression {
         Compression::NoCompression => {}
         #[cfg(feature = "compression-gzip")]
@@ -73,7 +73,7 @@ pub async fn produce(
 
 /// Consume
 pub async fn consume(
-    connection: &str,
+    connection: &[String],
     topic_name: &str,
     partition_index: i32,
     n: usize,
@@ -82,7 +82,7 @@ pub async fn consume(
         loop {
             // create client
             let mut cfg = ClientConfig::new();
-            cfg.set("bootstrap.servers", connection);
+            cfg.set("bootstrap.servers", connection.join(","));
             cfg.set("message.timeout.ms", "5000");
             cfg.set("group.id", "foo");
             cfg.set("auto.offset.reset", "smallest");

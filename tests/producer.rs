@@ -14,7 +14,7 @@ async fn test_batch_producer() {
     maybe_start_logging();
 
     let connection = maybe_skip_kafka_integration!();
-    let client = ClientBuilder::new(vec![connection]).build().await.unwrap();
+    let client = ClientBuilder::new(connection).build().await.unwrap();
     let controller_client = client.controller_client().unwrap();
 
     let topic = random_topic_name();

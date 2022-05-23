@@ -238,9 +238,9 @@ async fn assert_produce_consume<F1, G1, F2, G2>(
     f_consume: F2,
     compression: Compression,
 ) where
-    F1: Fn(Arc<PartitionClient>, String, String, i32, Vec<Record>, Compression) -> G1,
+    F1: Fn(Arc<PartitionClient>, Vec<String>, String, i32, Vec<Record>, Compression) -> G1,
     G1: std::future::Future<Output = Vec<i64>>,
-    F2: Fn(Arc<PartitionClient>, String, String, i32, usize) -> G2,
+    F2: Fn(Arc<PartitionClient>, Vec<String>, String, i32, usize) -> G2,
     G2: std::future::Future<Output = Vec<RecordAndOffset>>,
 {
     maybe_start_logging();
@@ -249,7 +249,7 @@ async fn assert_produce_consume<F1, G1, F2, G2>(
     let topic_name = random_topic_name();
     let n_partitions = 2;
 
-    let client = ClientBuilder::new(vec![connection.clone()])
+    let client = ClientBuilder::new(connection.clone())
         .build()
         .await
         .unwrap();
@@ -327,7 +327,7 @@ async fn assert_produce_consume<F1, G1, F2, G2>(
 
 async fn produce_java(
     _partition_client: Arc<PartitionClient>,
-    connection: String,
+    connection: Vec<String>,
     topic_name: String,
     partition_index: i32,
     records: Vec<Record>,
@@ -346,7 +346,7 @@ async fn produce_java(
 
 async fn produce_rdkafka(
     _partition_client: Arc<PartitionClient>,
-    connection: String,
+    connection: Vec<String>,
     topic_name: String,
     partition_index: i32,
     records: Vec<Record>,
@@ -365,7 +365,7 @@ async fn produce_rdkafka(
 
 async fn produce_rskafka(
     partition_client: Arc<PartitionClient>,
-    _connection: String,
+    _connection: Vec<String>,
     _topic_name: String,
     _partition_index: i32,
     records: Vec<Record>,
@@ -379,7 +379,7 @@ async fn produce_rskafka(
 
 async fn consume_java(
     _partition_client: Arc<PartitionClient>,
-    connection: String,
+    connection: Vec<String>,
     topic_name: String,
     partition_index: i32,
     n: usize,
@@ -389,7 +389,7 @@ async fn consume_java(
 
 async fn consume_rdkafka(
     _partition_client: Arc<PartitionClient>,
-    connection: String,
+    connection: Vec<String>,
     topic_name: String,
     partition_index: i32,
     n: usize,
@@ -399,7 +399,7 @@ async fn consume_rdkafka(
 
 async fn consume_rskafka(
     partition_client: Arc<PartitionClient>,
-    _connection: String,
+    _connection: Vec<String>,
     _topic_name: String,
     _partition_index: i32,
     n: usize,

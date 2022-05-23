@@ -23,7 +23,7 @@ macro_rules! maybe_skip_java_interopt {
 
 /// Produce.
 pub async fn produce(
-    connection: &str,
+    connection: &[String],
     records: Vec<(String, i32, Record)>,
     compression: Compression,
 ) -> Vec<i64> {
@@ -44,7 +44,7 @@ pub async fn produce(
     let props = create_properties(
         &jvm,
         &[
-            ("bootstrap.servers", connection),
+            ("bootstrap.servers", &connection.join(",")),
             (
                 "key.serializer",
                 "org.apache.kafka.common.serialization.StringSerializer",
@@ -148,7 +148,7 @@ pub async fn produce(
 
 /// Consume
 pub async fn consume(
-    connection: &str,
+    connection: &[String],
     topic_name: &str,
     partition_index: i32,
     n: usize,
@@ -158,7 +158,7 @@ pub async fn consume(
     let props = create_properties(
         &jvm,
         &[
-            ("bootstrap.servers", connection),
+            ("bootstrap.servers", &connection.join(",")),
             (
                 "key.deserializer",
                 "org.apache.kafka.common.serialization.StringDeserializer",

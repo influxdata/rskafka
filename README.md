@@ -113,7 +113,7 @@ $ docker-compose -f docker-compose-redpanda.yml up
 in one session, and then run:
 
 ```console
-$ TEST_INTEGRATION=1 KAFKA_CONNECT=0.0.0.0:9093 cargo test
+$ TEST_INTEGRATION=1 KAFKA_CONNECT=0.0.0.0:9011 cargo test
 ```
 
 in another session.
@@ -129,11 +129,23 @@ $ docker-compose -f docker-compose-kafka.yml up
 in one session, and then run:
 
 ```console
-$ TEST_INTEGRATION=1 TEST_DELETE_RECORDS=1 KAFKA_CONNECT=localhost:9094 cargo test
+$ TEST_INTEGRATION=1 TEST_DELETE_RECORDS=1 KAFKA_CONNECT=localhost:9011 cargo test
 ```
 
 in another session. Note that Apache Kafka supports a different set of features then redpanda, so we pass other
 environment variables.
+
+### Using a SOCKS5 Proxy
+
+To run the integration test via a SOCKS5 proxy, you need to set the environment variable `SOCKS_PROXY`. The following
+command requires a running proxy on the local machine.
+
+```console
+$ KAFKA_CONNECT=0.0.0.0:9011,kafka-1:9021,redpanda-1:9021 SOCKS_PROXY=localhost:1080 cargo test --features full
+```
+
+The SOCKS5 proxy will automatically be started by the docker compose files. Note that `KAFKA_CONNECT` was extended by
+addresses that are reachable via the proxy.
 
 ### Java Interopt
 To test if RSKafka can produce/consume records to/from the official Java client, you need to have Java installed and the
@@ -217,14 +229,14 @@ execution that hooks right into the place where it is about to exit:
 Install [cargo-criterion], make sure you have some Kafka cluster running, and then you can run all benchmarks with:
 
 ```console
-$ TEST_INTEGRATION=1 KAFKA_CONNECT=localhost:9093 cargo criterion --all-features
+$ TEST_INTEGRATION=1 KAFKA_CONNECT=localhost:9011 cargo criterion --all-features
 ```
 
 If you find a benchmark that is too slow, you can may want to profile it. Get [cargo-with], and [perf], then run (here
 for the `parallel/rskafka` benchmark):
 
 ```console
-$ TEST_INTEGRATION=1 KAFKA_CONNECT=localhost:9093 cargo with 'perf record --call-graph dwarf -- {bin}' -- \
+$ TEST_INTEGRATION=1 KAFKA_CONNECT=localhost:9011 cargo with 'perf record --call-graph dwarf -- {bin}' -- \
     bench --all-features --bench write_throughput -- \
     --bench --noplot parallel/rskafka
 ```

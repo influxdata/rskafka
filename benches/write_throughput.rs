@@ -183,7 +183,11 @@ macro_rules! maybe_skip_kafka_integration {
             env::var("TEST_INTEGRATION").is_ok(),
             env::var("KAFKA_CONNECT").ok(),
         ) {
-            (true, Some(kafka_connection)) => kafka_connection,
+            (true, Some(kafka_connection)) => {
+                let kafka_connection: Vec<String> =
+                    kafka_connection.split(",").map(|s| s.to_owned()).collect();
+                kafka_connection
+            }
             (true, None) => {
                 panic!(
                     "TEST_INTEGRATION is set which requires running integration tests, but \
@@ -227,7 +231,7 @@ fn random_topic_name() -> String {
     format!("test_topic_{}", uuid::Uuid::new_v4())
 }
 
-async fn setup_rdkafka(connection: String, buffering: bool) -> (FutureProducer, String) {
+async fn setup_rdkafka(connection: Vec<String>, buffering: bool) -> (FutureProducer, String) {
     use rdkafka::{
         admin::{AdminClient, AdminOptions, NewTopic, TopicReplication},
         producer::FutureRecord,
@@ -239,7 +243,7 @@ async fn setup_rdkafka(connection: String, buffering: bool) -> (FutureProducer, 
 
     // configure clients
     let mut cfg = ClientConfig::new();
-    cfg.set("bootstrap.servers", connection);
+    cfg.set("bootstrap.servers", connection.join(","));
     cfg.set("message.timeout.ms", "5000");
     if buffering {
         cfg.set("batch.num.messages", PARALLEL_BATCH_SIZE.to_string()); // = loads
@@ -273,10 +277,10 @@ async fn setup_rdkafka(connection: String, buffering: bool) -> (FutureProducer, 
     (producer_client, topic_name)
 }
 
-async fn setup_rskafka(connection: String) -> PartitionClient {
+async fn setup_rskafka(connection: Vec<String>) -> PartitionClient {
     let topic_name = random_topic_name();
 
-    let client = ClientBuilder::new(vec![connection]).build().await.unwrap();
+    let client = ClientBuilder::new(connection).build().await.unwrap();
     client
         .controller_client()
         .unwrap()
