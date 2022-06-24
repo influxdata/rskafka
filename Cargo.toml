@@ -83,7 +83,7 @@ transport-tls = ["rustls", "tokio-rustls"]
 unstable-fuzzing = []
 
 [[bench]]
-name = "write_throughput"
+name = "throughput"
 harness = false
 
 [workspace]
