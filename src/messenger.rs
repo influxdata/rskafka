@@ -8,12 +8,13 @@ use std::{
     },
 };
 
+use parking_lot::Mutex;
 use thiserror::Error;
 use tokio::{
     io::{AsyncRead, AsyncWrite, AsyncWriteExt, WriteHalf},
     sync::{
         oneshot::{channel, Sender},
-        Mutex,
+        Mutex as AsyncMutex,
     },
     task::JoinHandle,
 };
@@ -57,7 +58,7 @@ enum MessengerState {
 }
 
 impl MessengerState {
-    async fn poison(&mut self, err: RequestError) -> Arc<RequestError> {
+    fn poison(&mut self, err: RequestError) -> Arc<RequestError> {
         match self {
             Self::RequestMap(map) => {
                 let err = Arc::new(err);
@@ -91,7 +92,7 @@ pub struct Messenger<RW> {
     /// The half of the stream that we use to send data TO the broker.
     ///
     /// This will be used by [`request`](Self::request) to queue up messages.
-    stream_write: Arc<Mutex<WriteHalf<RW>>>,
+    stream_write: Arc<AsyncMutex<WriteHalf<RW>>>,
 
     /// The next correlation ID.
     ///
@@ -195,7 +196,7 @@ where
                                 }
                             };
 
-                        let active_request = match state_captured.lock().await.deref_mut() {
+                        let active_request = match state_captured.lock().deref_mut() {
                             MessengerState::RequestMap(map) => {
                                 if let Some(active_request) = map.remove(&header.correlation_id.0) {
                                     active_request
@@ -240,9 +241,7 @@ where
                     Err(e) => {
                         state_captured
                             .lock()
-                            .await
-                            .poison(RequestError::ReadFramedMessageError(e))
-                            .await;
+                            .poison(RequestError::ReadFramedMessageError(e));
                         return;
                     }
                 }
@@ -250,7 +249,7 @@ where
         });
 
         Self {
-            stream_write: Arc::new(Mutex::new(stream_write)),
+            stream_write: Arc::new(AsyncMutex::new(stream_write)),
             correlation_id: AtomicI32::new(0),
             version_ranges: RwLock::new(HashMap::new()),
             state,
@@ -315,7 +314,12 @@ where
 
         let (tx, rx) = channel();
 
-        match self.state.lock().await.deref_mut() {
+        // to prevent stale data in inner state, ensure that we would remove the request again if we are cancelled while
+        // sending the request
+        let cleanup_on_cancel =
+            CleanupRequestStateOnCancel::new(Arc::clone(&self.state), correlation_id);
+
+        match self.state.lock().deref_mut() {
             MessengerState::RequestMap(map) => {
                 map.insert(
                     correlation_id,
@@ -331,6 +335,7 @@ where
         }
 
         self.send_message(buf).await?;
+        cleanup_on_cancel.message_sent();
 
         let mut response = rx.await.expect("Who closed this channel?!")?;
         let body = R::ResponseBody::read_versioned(&mut response.data, body_api_version)?;
@@ -355,8 +360,8 @@ where
             Ok(()) => Ok(()),
             Err(e) => {
                 // need to poison the stream because message framing might be out-of-sync
-                let mut state = self.state.lock().await;
-                Err(RequestError::Poisoned(state.poison(e).await))
+                let mut state = self.state.lock();
+                Err(RequestError::Poisoned(state.poison(e)))
             }
         }
     }
@@ -492,6 +497,41 @@ fn match_versions(range_a: ApiVersionRange, range_b: ApiVersionRange) -> Option<
         Some(range_a.max().min(range_b.max()))
     } else {
         None
+    }
+}
+
+/// Helper that ensures that a request is removed when a request is cancelled before it was actually sent out.
+struct CleanupRequestStateOnCancel {
+    state: Arc<Mutex<MessengerState>>,
+    correlation_id: i32,
+    message_sent: bool,
+}
+
+impl CleanupRequestStateOnCancel {
+    /// Create new helper.
+    ///
+    /// You must call [`message_sent`](Self::message_sent) when the request was sent.
+    fn new(state: Arc<Mutex<MessengerState>>, correlation_id: i32) -> Self {
+        Self {
+            state,
+            correlation_id,
+            message_sent: false,
+        }
+    }
+
+    /// Request was sent. Do NOT clean the state any longer.
+    fn message_sent(mut self) {
+        self.message_sent = true;
+    }
+}
+
+impl Drop for CleanupRequestStateOnCancel {
+    fn drop(&mut self) {
+        if !self.message_sent {
+            if let MessengerState::RequestMap(map) = self.state.lock().deref_mut() {
+                map.remove(&self.correlation_id);
+            }
+        }
     }
 }
 
