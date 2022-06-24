@@ -1,14 +1,18 @@
 use std::{
     collections::HashMap,
+    future::Future,
     io::Cursor,
     ops::DerefMut,
     sync::{
         atomic::{AtomicI32, Ordering},
         Arc, RwLock,
     },
+    task::Poll,
 };
 
+use futures::future::BoxFuture;
 use parking_lot::Mutex;
+use pin_project_lite::pin_project;
 use thiserror::Error;
 use tokio::{
     io::{AsyncRead, AsyncWrite, AsyncWriteExt, WriteHalf},
@@ -369,14 +373,14 @@ where
     async fn send_message_inner(&self, msg: Vec<u8>) -> Result<(), RequestError> {
         let mut stream_write = Arc::clone(&self.stream_write).lock_owned().await;
 
-        // use a task so that cancelation doesn't cancel the send operation and leaves half-send messages on the wire
-        let handle = tokio::spawn(async move {
+        // use a wrapper so that cancelation doesn't cancel the send operation and leaves half-send messages on the wire
+        let fut = CancellationSafeFuture::new(async move {
             stream_write.write_message(&msg).await?;
             stream_write.flush().await?;
             Ok(())
         });
 
-        handle.await.expect("background task died")
+        fut.await
     }
 
     pub async fn sync_versions(&self) -> Result<(), SyncVersionsError> {
@@ -531,6 +535,72 @@ impl Drop for CleanupRequestStateOnCancel {
             if let MessengerState::RequestMap(map) = self.state.lock().deref_mut() {
                 map.remove(&self.correlation_id);
             }
+        }
+    }
+}
+
+pin_project! {
+    struct CancellationSafeFuture<F>
+    where
+        // https://github.com/taiki-e/pin-project-lite/issues/2#issuecomment-745190950
+        F: Future,
+        F: Send,
+        F: 'static,
+    {
+        // Mark if the inner future finished. If not, we must spawn a helper task on drop.
+        done: bool,
+
+        // Inner future.
+        //
+        // Wrapped in an `Option` so we can extract it during drop. Inside that option however we also need a pinned
+        // box because once this wrapper is polled, it will be pinned in memory -- even during drop. Now the inner
+        // future does not necessarily implement `Unpin`, so we need a heap allocation to pin it in memory even when we
+        // move it out of this option.
+        #[pin]
+        inner: Option<BoxFuture<'static, F::Output>>,
+    }
+
+    impl<F> PinnedDrop for CancellationSafeFuture<F>
+    where
+        F: Future,
+        F: Send,
+        F: 'static,
+    {
+        fn drop(mut this: Pin<&mut Self>) {
+            if !this.done {
+                let inner = this.inner.take().expect("Double-drop?");
+                tokio::task::spawn(async move {inner.await;});
+            }
+        }
+    }
+}
+
+impl<F> CancellationSafeFuture<F>
+where
+    F: Future + Send,
+{
+    fn new(fut: F) -> Self {
+        Self {
+            done: false,
+            inner: Some(Box::pin(fut)),
+        }
+    }
+}
+
+impl<F> Future for CancellationSafeFuture<F>
+where
+    F: Future + Send,
+{
+    type Output = F::Output;
+
+    fn poll(self: std::pin::Pin<&mut Self>, cx: &mut std::task::Context<'_>) -> Poll<Self::Output> {
+        let this = self.project();
+        match this.inner.as_pin_mut().expect("no dropped").poll(cx) {
+            Poll::Ready(res) => {
+                *this.done = true;
+                Poll::Ready(res)
+            }
+            Poll::Pending => Poll::Pending,
         }
     }
 }
