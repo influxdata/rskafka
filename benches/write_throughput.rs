@@ -1,6 +1,9 @@
 use std::{
     collections::BTreeMap,
+    future::Future,
+    pin::Pin,
     sync::Arc,
+    task::Poll,
     time::{Duration, Instant},
 };
 
@@ -8,7 +11,11 @@ use criterion::{
     criterion_group, criterion_main, measurement::WallTime, BenchmarkGroup, Criterion, SamplingMode,
 };
 use futures::{stream::FuturesUnordered, StreamExt};
-use rdkafka::producer::FutureProducer;
+use pin_project_lite::pin_project;
+use rdkafka::{
+    producer::{FutureProducer, FutureRecord},
+    util::Timeout,
+};
 use rskafka::{
     client::{
         partition::{Compression, PartitionClient},
@@ -26,68 +33,56 @@ const PARALLEL_LINGER_MS: u64 = 10;
 pub fn criterion_benchmark(c: &mut Criterion) {
     let connection = maybe_skip_kafka_integration!();
 
-    let key = vec![b'k'; 10];
-    let value = vec![b'x'; 10_000];
+    let record = Record {
+        key: Some(vec![b'k'; 10]),
+        value: Some(vec![b'x'; 10_000]),
+        headers: BTreeMap::default(),
+        timestamp: OffsetDateTime::now_utc(),
+    };
 
     {
         let mut group_sequential = benchark_group(c, "sequential");
 
         group_sequential.bench_function("rdkafka", |b| {
-            let connection = connection.clone();
-            let key = key.clone();
-            let value = value.clone();
-
             b.to_async(runtime()).iter_custom(|iters| {
                 let connection = connection.clone();
-                let key = key.clone();
-                let value = value.clone();
+                let record = record.clone();
 
                 async move {
-                    use rdkafka::{producer::FutureRecord, util::Timeout};
-
                     let (client, topic) = setup_rdkafka(connection, false).await;
 
-                    let start = Instant::now();
-
-                    for _ in 0..iters {
-                        let f_record = FutureRecord::to(&topic).key(&key).payload(&value);
-                        client.send(f_record, Timeout::Never).await.unwrap();
-                    }
-
-                    start.elapsed()
+                    exec_sequential(
+                        || async {
+                            let f_record = record.to_rdkafka(&topic);
+                            client.send(f_record, Timeout::Never).await.unwrap();
+                        },
+                        iters,
+                    )
+                    .time_it()
+                    .await
                 }
             });
         });
 
         group_sequential.bench_function("rskafka", |b| {
-            let connection = connection.clone();
-            let key = key.clone();
-            let value = value.clone();
-
             b.to_async(runtime()).iter_custom(|iters| {
                 let connection = connection.clone();
-                let key = key.clone();
-                let value = value.clone();
+                let record = record.clone();
 
                 async move {
                     let client = setup_rskafka(connection).await;
-                    let record = Record {
-                        key: Some(key),
-                        value: Some(value),
-                        headers: BTreeMap::default(),
-                        timestamp: OffsetDateTime::now_utc(),
-                    };
 
-                    let start = Instant::now();
-
-                    for _ in 0..iters {
-                        client
-                            .produce(vec![record.clone()], Compression::NoCompression)
-                            .await
-                            .unwrap();
-                    }
-
-                    start.elapsed()
+                    exec_sequential(
+                        || async {
+                            client
+                                .produce(vec![record.clone()], Compression::NoCompression)
+                                .await
+                                .unwrap();
+                        },
+                        iters,
+                    )
+                    .time_it()
+                    .await
                 }
             });
         });
@@ -97,70 +92,130 @@ pub fn criterion_benchmark(c: &mut Criterion) {
         let mut group_parallel = benchark_group(c, "parallel");
 
         group_parallel.bench_function("rdkafka", |b| {
-            let connection = connection.clone();
-            let key = key.clone();
-            let value = value.clone();
-
             b.to_async(runtime()).iter_custom(|iters| {
                 let connection = connection.clone();
-                let key = key.clone();
-                let value = value.clone();
+                let record = record.clone();
 
                 async move {
-                    use rdkafka::{producer::FutureRecord, util::Timeout};
-
                     let (client, topic) = setup_rdkafka(connection, true).await;
 
-                    let start = Instant::now();
-
-                    let mut tasks: FuturesUnordered<_> = (0..iters)
-                        .map(|_| async {
-                            let f_record = FutureRecord::to(&topic).key(&key).payload(&value);
+                    exec_parallel(
+                        || async {
+                            let f_record = record.to_rdkafka(&topic);
                             client.send(f_record, Timeout::Never).await.unwrap();
-                        })
-                        .collect();
-                    while tasks.next().await.is_some() {}
-
-                    start.elapsed()
+                        },
+                        iters,
+                    )
+                    .time_it()
+                    .await
                 }
             });
         });
 
         group_parallel.bench_function("rskafka", |b| {
-            let connection = connection.clone();
-            let key = key.clone();
-            let value = value.clone();
-
             b.to_async(runtime()).iter_custom(|iters| {
                 let connection = connection.clone();
-                let key = key.clone();
-                let value = value.clone();
+                let record = record.clone();
 
                 async move {
                     let client = setup_rskafka(connection).await;
-                    let record = Record {
-                        key: Some(key),
-                        value: Some(value),
-                        headers: BTreeMap::default(),
-                        timestamp: OffsetDateTime::now_utc(),
-                    };
                     let producer = BatchProducerBuilder::new(Arc::new(client))
                         .with_linger(Duration::from_millis(PARALLEL_LINGER_MS))
                         .build(RecordAggregator::new(PARALLEL_BATCH_SIZE));
 
-                    let start = Instant::now();
-
-                    let mut tasks: FuturesUnordered<_> = (0..iters)
-                        .map(|_| async {
+                    exec_parallel(
+                        || async {
                             producer.produce(record.clone()).await.unwrap();
-                        })
-                        .collect();
-                    while tasks.next().await.is_some() {}
-
-                    start.elapsed()
+                        },
+                        iters,
+                    )
+                    .time_it()
+                    .await
                 }
             });
         });
+    }
+}
+
+async fn exec_sequential<F, Fut>(f: F, iters: u64)
+where
+    F: Fn() -> Fut,
+    Fut: Future<Output = ()>,
+{
+    for _ in 0..iters {
+        f().await;
+    }
+}
+
+async fn exec_parallel<F, Fut>(f: F, iters: u64)
+where
+    F: Fn() -> Fut,
+    Fut: Future<Output = ()>,
+{
+    let mut tasks: FuturesUnordered<_> = (0..iters).map(|_| f()).collect();
+    while tasks.next().await.is_some() {}
+}
+
+/// "Time it" extension for futures.
+trait FutureTimeItExt {
+    type TimeItFut: Future<Output = Duration>;
+
+    /// Measures time it takes to execute given async block once
+    fn time_it(self) -> Self::TimeItFut;
+}
+
+impl<F> FutureTimeItExt for F
+where
+    F: Future<Output = ()>,
+{
+    type TimeItFut = TimeIt<F>;
+
+    fn time_it(self) -> Self::TimeItFut {
+        TimeIt {
+            t_start: Instant::now(),
+            inner: self,
+        }
+    }
+}
+
+pin_project! {
+    struct TimeIt<F> {
+        t_start: Instant,
+        #[pin]
+        inner: F,
+    }
+}
+
+impl<F> Future for TimeIt<F>
+where
+    F: Future<Output = ()>,
+{
+    type Output = Duration;
+
+    fn poll(self: Pin<&mut Self>, cx: &mut std::task::Context<'_>) -> Poll<Self::Output> {
+        let this = self.project();
+        match this.inner.poll(cx) {
+            Poll::Ready(_) => Poll::Ready(this.t_start.elapsed()),
+            Poll::Pending => Poll::Pending,
+        }
+    }
+}
+
+/// Extension to convert rdkafka to rskafka records.
+trait RecordExt {
+    fn to_rdkafka<'a>(&'a self, topic: &'a str) -> FutureRecord<'a, Vec<u8>, Vec<u8>>;
+}
+
+impl RecordExt for Record {
+    fn to_rdkafka<'a>(&'a self, topic: &'a str) -> FutureRecord<'a, Vec<u8>, Vec<u8>> {
+        let mut record = FutureRecord::to(topic);
+        if let Some(key) = self.key.as_ref() {
+            record = record.key(key);
+        }
+        if let Some(value) = self.value.as_ref() {
+            record = record.payload(value);
+        }
+        record
     }
 }
 
@@ -234,8 +289,6 @@ fn random_topic_name() -> String {
 async fn setup_rdkafka(connection: Vec<String>, buffering: bool) -> (FutureProducer, String) {
     use rdkafka::{
         admin::{AdminClient, AdminOptions, NewTopic, TopicReplication},
-        producer::FutureRecord,
-        util::Timeout,
         ClientConfig,
     };
 
