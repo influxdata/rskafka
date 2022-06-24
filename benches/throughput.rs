@@ -13,12 +13,14 @@ use criterion::{
 use futures::{stream::FuturesUnordered, StreamExt, TryStreamExt};
 use pin_project_lite::pin_project;
 use rdkafka::{
+    consumer::{Consumer, StreamConsumer as RdStreamConsumer},
     producer::{FutureProducer, FutureRecord},
-    util::Timeout, consumer::{StreamConsumer as RdStreamConsumer, Consumer}, TopicPartitionList,
+    util::Timeout,
+    ClientConfig, TopicPartitionList,
 };
 use rskafka::{
     client::{
-        consumer::{StreamConsumerBuilder as RsStreamConsumerBuilder, StartOffset},
+        consumer::{StartOffset, StreamConsumerBuilder as RsStreamConsumerBuilder},
         partition::{Compression, PartitionClient},
         producer::{aggregator::RecordAggregator, BatchProducerBuilder},
         ClientBuilder,
@@ -50,11 +52,12 @@ pub fn criterion_benchmark(c: &mut Criterion) {
                 let record = record.clone();
 
                 async move {
-                    let (producer, consumer, topic) = setup_rdkafka(connection, false).await;
+                    let rd = RdKafka::setup(connection, false).await;
+                    let producer = rd.producer(false).await;
 
                     exec_sequential(
                         || async {
-                            let f_record = record.to_rdkafka(&topic);
+                            let f_record = record.to_rdkafka(&rd.topic_name);
                             producer.send(f_record, Timeout::Never).await.unwrap();
                         },
                         iters,
@@ -62,8 +65,18 @@ pub fn criterion_benchmark(c: &mut Criterion) {
                     .await;
 
                     async {
-                        consumer.stream().take(iters as usize).try_collect::<Vec<_>>().await.unwrap();
-                    }.time_it().await
+                        // rdkafka fetches data in the background, so we need include the client setup into the
+                        // measurement
+                        let consumer = rd.consumer().await;
+                        consumer
+                            .stream()
+                            .take(iters as usize)
+                            .try_collect::<Vec<_>>()
+                            .await
+                            .unwrap();
+                    }
+                    .time_it()
+                    .await
                 }
             });
         });
@@ -88,9 +101,17 @@ pub fn criterion_benchmark(c: &mut Criterion) {
                     .await;
 
                     async {
-                        let consumer = RsStreamConsumerBuilder::new(Arc::new(client), StartOffset::Earliest).build();
-                        consumer.take(iters as usize).try_collect::<Vec<_>>().await.unwrap();
-                    }.time_it().await
+                        let consumer =
+                            RsStreamConsumerBuilder::new(Arc::new(client), StartOffset::Earliest)
+                                .build();
+                        consumer
+                            .take(iters as usize)
+                            .try_collect::<Vec<_>>()
+                            .await
+                            .unwrap();
+                    }
+                    .time_it()
+                    .await
                 }
             });
         });
@@ -105,12 +126,13 @@ pub fn criterion_benchmark(c: &mut Criterion) {
                 let record = record.clone();
 
                 async move {
-                    let (client, _, topic) = setup_rdkafka(connection, false).await;
+                    let rd = RdKafka::setup(connection, false).await;
+                    let producer = rd.producer(true).await;
 
                     exec_sequential(
                         || async {
-                            let f_record = record.to_rdkafka(&topic);
-                            client.send(f_record, Timeout::Never).await.unwrap();
+                            let f_record = record.to_rdkafka(&rd.topic_name);
+                            producer.send(f_record, Timeout::Never).await.unwrap();
                         },
                         iters,
                     )
@@ -153,12 +175,13 @@ pub fn criterion_benchmark(c: &mut Criterion) {
                 let record = record.clone();
 
                 async move {
-                    let (client, _, topic) = setup_rdkafka(connection, true).await;
+                    let rd = RdKafka::setup(connection, true).await;
+                    let producer = rd.producer(true).await;
 
                     exec_parallel(
                         || async {
-                            let f_record = record.to_rdkafka(&topic);
-                            client.send(f_record, Timeout::Never).await.unwrap();
+                            let f_record = record.to_rdkafka(&rd.topic_name);
+                            producer.send(f_record, Timeout::Never).await.unwrap();
                         },
                         iters,
                     )
@@ -342,55 +365,72 @@ fn random_topic_name() -> String {
     format!("test_topic_{}", uuid::Uuid::new_v4())
 }
 
-async fn setup_rdkafka(connection: Vec<String>, buffering: bool) -> (FutureProducer, RdStreamConsumer, String) {
-    use rdkafka::{
-        admin::{AdminClient, AdminOptions, NewTopic, TopicReplication},
-        ClientConfig,
-    };
+struct RdKafka {
+    cfg: ClientConfig,
+    topic_name: String,
+}
 
-    let topic_name = random_topic_name();
+impl RdKafka {
+    async fn setup(connection: Vec<String>, buffering: bool) -> Self {
+        use rdkafka::admin::{AdminClient, AdminOptions, NewTopic, TopicReplication};
 
-    // configure clients
-    let mut cfg = ClientConfig::new();
-    cfg.set("bootstrap.servers", connection.join(","));
-    cfg.set("message.timeout.ms", "5000");
-    cfg.set("group.id", "foo");
-    cfg.set("auto.offset.reset", "smallest");
-    if buffering {
-        cfg.set("batch.num.messages", PARALLEL_BATCH_SIZE.to_string()); // = loads
-        cfg.set("batch.size", 1_000_000.to_string());
-        cfg.set("queue.buffering.max.ms", PARALLEL_LINGER_MS.to_string());
-    } else {
-        cfg.set("batch.num.messages", "1");
-        cfg.set("queue.buffering.max.ms", "0");
+        let topic_name = random_topic_name();
+
+        // configure clients
+        let mut cfg = ClientConfig::new();
+        cfg.set("bootstrap.servers", connection.join(","));
+        cfg.set("message.timeout.ms", "5000");
+        cfg.set("group.id", "foo");
+        cfg.set("auto.offset.reset", "smallest");
+        if buffering {
+            cfg.set("batch.num.messages", PARALLEL_BATCH_SIZE.to_string()); // = loads
+            cfg.set("batch.size", 1_000_000.to_string());
+            cfg.set("queue.buffering.max.ms", PARALLEL_LINGER_MS.to_string());
+        } else {
+            cfg.set("batch.num.messages", "1");
+            cfg.set("queue.buffering.max.ms", "0");
+        }
+
+        // create topic
+        let admin_client: AdminClient<_> = cfg.create().unwrap();
+        let topic = NewTopic::new(&topic_name, 1, TopicReplication::Fixed(1));
+        let opts = AdminOptions::default();
+        let mut results = admin_client.create_topics([&topic], &opts).await.unwrap();
+        assert_eq!(results.len(), 1, "created exactly one topic");
+        let result = results.pop().expect("just checked the vector length");
+        result.unwrap();
+
+        Self { cfg, topic_name }
     }
 
-    // create topic
-    let admin_client: AdminClient<_> = cfg.create().unwrap();
-    let topic = NewTopic::new(&topic_name, 1, TopicReplication::Fixed(1));
-    let opts = AdminOptions::default();
-    let mut results = admin_client.create_topics([&topic], &opts).await.unwrap();
-    assert_eq!(results.len(), 1, "created exactly one topic");
-    let result = results.pop().expect("just checked the vector length");
-    result.unwrap();
+    async fn producer(&self, warmup: bool) -> FutureProducer {
+        let producer_client: FutureProducer = self.cfg.create().unwrap();
 
-    let producer_client: FutureProducer = cfg.create().unwrap();
-    let consumer_client: RdStreamConsumer = cfg.create().unwrap();
-    let mut assignment = TopicPartitionList::new();
-    assignment.add_partition(&topic_name, 0);
-    consumer_client.assign(&assignment).unwrap();
+        // warm up connection
+        if warmup {
+            let key = vec![b'k'; 1];
+            let payload = vec![b'x'; 10];
+            let f_record = FutureRecord::to(&self.topic_name)
+                .key(&key)
+                .payload(&payload);
+            producer_client
+                .send(f_record, Timeout::Never)
+                .await
+                .unwrap();
+        }
 
-    // warm up connection
-    let key = vec![b'k'; 1];
-    let payload = vec![b'x'; 10];
-    let f_record = FutureRecord::to(&topic_name).key(&key).payload(&payload);
-    producer_client
-        .send(f_record, Timeout::Never)
-        .await
-        .unwrap();
-    consumer_client.stream().next().await.unwrap().unwrap();
+        producer_client
+    }
 
-    (producer_client, consumer_client, topic_name)
+    async fn consumer(&self) -> RdStreamConsumer {
+        let consumer_client: RdStreamConsumer = self.cfg.create().unwrap();
+
+        let mut assignment = TopicPartitionList::new();
+        assignment.add_partition(&self.topic_name, 0);
+        consumer_client.assign(&assignment).unwrap();
+
+        consumer_client
+    }
 }
 
 async fn setup_rskafka(connection: Vec<String>) -> PartitionClient {
