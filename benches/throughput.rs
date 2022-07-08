@@ -68,12 +68,13 @@ pub fn criterion_benchmark(c: &mut Criterion) {
                         // rdkafka fetches data in the background, so we need include the client setup into the
                         // measurement
                         let consumer = rd.consumer().await;
-                        consumer
+                        let messages = consumer
                             .stream()
                             .take(iters as usize)
                             .try_collect::<Vec<_>>()
                             .await
                             .unwrap();
+                        assert_eq!(messages.len(), iters as usize);
                     }
                     .time_it()
                     .await
@@ -104,11 +105,12 @@ pub fn criterion_benchmark(c: &mut Criterion) {
                         let consumer =
                             RsStreamConsumerBuilder::new(Arc::new(client), StartOffset::Earliest)
                                 .build();
-                        consumer
+                        let messages = consumer
                             .take(iters as usize)
                             .try_collect::<Vec<_>>()
                             .await
                             .unwrap();
+                        assert_eq!(messages.len(), iters as usize);
                     }
                     .time_it()
                     .await
