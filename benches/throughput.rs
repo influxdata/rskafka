@@ -11,6 +11,7 @@ use criterion::{
     criterion_group, criterion_main, measurement::WallTime, BenchmarkGroup, Criterion, SamplingMode,
 };
 use futures::{stream::FuturesUnordered, StreamExt, TryStreamExt};
+use parking_lot::Once;
 use pin_project_lite::pin_project;
 use rdkafka::{
     consumer::{Consumer, StreamConsumer as RdStreamConsumer},
@@ -34,6 +35,7 @@ const PARALLEL_BATCH_SIZE: usize = 1_000_000;
 const PARALLEL_LINGER_MS: u64 = 10;
 
 pub fn criterion_benchmark(c: &mut Criterion) {
+    maybe_start_logging();
     let connection = maybe_skip_kafka_integration!();
 
     let record = Record {
@@ -447,6 +449,34 @@ async fn setup_rskafka(connection: Vec<String>) -> PartitionClient {
         .unwrap();
 
     client.partition_client(topic_name, 0).unwrap()
+}
+
+static LOG_SETUP: Once = Once::new();
+
+/// Enables debug logging if the `RUST_LOG` environment variable is
+/// set. Does nothing if `RUST_LOG` is not set.
+pub fn maybe_start_logging() {
+    if std::env::var("RUST_LOG").is_ok() {
+        start_logging()
+    }
+}
+
+/// Start logging.
+pub fn start_logging() {
+    use tracing_log::LogTracer;
+    use tracing_subscriber::{filter::EnvFilter, FmtSubscriber};
+
+    LOG_SETUP.call_once(|| {
+        LogTracer::init().unwrap();
+
+        let subscriber = FmtSubscriber::builder()
+            .with_env_filter(EnvFilter::from_default_env())
+            .with_test_writer()
+            .finish();
+
+        tracing::subscriber::set_global_default(subscriber)
+            .expect("setting default subscriber failed");
+    });
 }
 
 criterion_group!(benches, criterion_benchmark);
