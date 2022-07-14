@@ -93,7 +93,7 @@ pub struct Messenger<RW> {
     /// This will be used by [`request`](Self::request) to queue up messages.
     stream_write: Arc<Mutex<WriteHalf<RW>>>,
 
-    /// The next correction ID.
+    /// The next correlation ID.
     ///
     /// This is used to map responses to active requests.
     correlation_id: AtomicI32,
