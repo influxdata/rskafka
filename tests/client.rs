@@ -125,17 +125,35 @@ async fn test_socks5() {
     let connection = maybe_skip_kafka_integration!();
     // e.g. "localhost:1080"
     let proxy = maybe_skip_SOCKS_PROXY!();
+    let topic_name = random_topic_name();
 
     let client = ClientBuilder::new(connection)
         .socks5_proxy(proxy)
         .build()
         .await
         .unwrap();
-    let partition_client = client.partition_client("myorg_mybucket", 0).unwrap();
+
+    let controller_client = client.controller_client().unwrap();
+    controller_client
+        .create_topic(&topic_name, 1, 1, 5_000)
+        .await
+        .unwrap();
+
+    let partition_client = client.partition_client(topic_name, 0).unwrap();
+
+    let record = record(b"");
     partition_client
+        .produce(vec![record.clone()], Compression::NoCompression)
+        .await
+        .unwrap();
+
+    let (mut records, _watermark) = partition_client
         .fetch_records(0, 1..10_000_001, 1_000)
         .await
         .unwrap();
+    assert_eq!(records.len(), 1);
+    let record2 = records.remove(0).record;
+    assert_eq!(record, record2);
 }
 
 #[tokio::test]
