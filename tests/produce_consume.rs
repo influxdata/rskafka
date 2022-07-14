@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::{sync::Arc, time::Duration};
 
 use rskafka::{
     client::{
@@ -260,8 +260,16 @@ async fn assert_produce_consume<F1, G1, F2, G2>(
         .unwrap();
     let partition_client = Arc::new(client.partition_client(topic_name.clone(), 1).unwrap());
 
+    // timestamps for records. We'll reorder the messages though to ts2, ts1, ts3
+    let ts1 = now();
+    let ts2 = ts1 + Duration::from_millis(1);
+    let ts3 = ts2 + Duration::from_millis(1);
+
     let record_1 = {
-        let record = record(b"");
+        let record = Record {
+            timestamp: ts2,
+            ..record(b"")
+        };
         match compression {
             Compression::NoCompression => record,
             #[allow(unreachable_patterns)]
@@ -277,12 +285,12 @@ async fn assert_produce_consume<F1, G1, F2, G2>(
     };
     let record_2 = Record {
         value: Some(b"some value".to_vec()),
-        timestamp: now(),
+        timestamp: ts1,
         ..record_1.clone()
     };
     let record_3 = Record {
         value: Some(b"more value".to_vec()),
-        timestamp: now(),
+        timestamp: ts3,
         ..record_1.clone()
     };
 
@@ -322,7 +330,11 @@ async fn assert_produce_consume<F1, G1, F2, G2>(
         .zip([record_1, record_2, record_3])
         .map(|(offset, record)| RecordAndOffset { record, offset })
         .collect();
-    assert_eq!(actual, expected);
+    assert_eq!(
+        actual, expected,
+        "Records are different.\n\nActual:\n{:#?}\n\nExpected:\n{:#?}",
+        actual, expected,
+    );
 }
 
 async fn produce_java(
