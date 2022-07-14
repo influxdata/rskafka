@@ -399,7 +399,6 @@ fn build_produce_request(
 
     // TODO: Retry on failure
 
-    // TODO: Verify this is the first timestamp in the batch and not the min
     let first_timestamp = records.first().unwrap().timestamp;
     let mut max_timestamp = first_timestamp;
 
