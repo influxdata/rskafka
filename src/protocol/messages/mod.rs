@@ -110,7 +110,7 @@ pub trait RequestBody {
         Self::FIRST_TAGGED_FIELD_IN_REQUEST_VERSION;
 }
 
-impl<'a, T: RequestBody> RequestBody for &T {
+impl<T: RequestBody> RequestBody for &T {
     type ResponseBody = T::ResponseBody;
     const API_KEY: ApiKey = T::API_KEY;
     const API_VERSION_RANGE: ApiVersionRange = T::API_VERSION_RANGE;
