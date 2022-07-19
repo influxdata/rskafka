@@ -70,6 +70,26 @@ async fn test_topic_crud() {
     }
 }
 
+#[tokio::test]
+async fn test_partition_client() {
+    maybe_start_logging();
+
+    let connection = maybe_skip_kafka_integration!();
+    let topic_name = random_topic_name();
+
+    let client = ClientBuilder::new(connection).build().await.unwrap();
+
+    let controller_client = client.controller_client().unwrap();
+    controller_client
+        .create_topic(&topic_name, 1, 1, 5_000)
+        .await
+        .unwrap();
+
+    let partition_client = client.partition_client(topic_name.clone(), 0).unwrap();
+    assert_eq!(partition_client.topic(), &topic_name);
+    assert_eq!(partition_client.partition(), 0);
+}
+
 // Disabled as currently no TLS integration tests
 #[ignore]
 #[tokio::test]
