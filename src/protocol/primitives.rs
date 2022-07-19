@@ -637,6 +637,74 @@ where
     }
 }
 
+/// Represents a sequence of objects of a given type T.
+///
+/// Type T can be either a primitive type (e.g. STRING) or a structure. First, the length N + 1 is given as an
+/// UNSIGNED_VARINT. Then N instances of type T follow. A null array is represented with a length of 0. In protocol
+/// documentation an array of T instances is referred to as `[T]`.
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[cfg_attr(test, derive(proptest_derive::Arbitrary))]
+pub struct CompactArray<T>(pub Option<Vec<T>>);
+
+impl<R, T> ReadType<R> for CompactArray<T>
+where
+    R: Read,
+    T: ReadType<R>,
+{
+    fn read(reader: &mut R) -> Result<Self, ReadError> {
+        let len = UnsignedVarint::read(reader)?.0;
+        match len {
+            0 => Ok(Self(None)),
+            n => {
+                let len = usize::try_from(n - 1).map_err(ReadError::Overflow)?;
+                let mut builder = VecBuilder::new(len);
+                for _ in 0..len {
+                    builder.push(T::read(reader)?);
+                }
+                Ok(Self(Some(builder.into())))
+            }
+        }
+    }
+}
+
+impl<W, T> WriteType<W> for CompactArray<T>
+where
+    W: Write,
+    T: WriteType<W>,
+{
+    fn write(&self, writer: &mut W) -> Result<(), WriteError> {
+        CompactArrayRef(self.0.as_deref()).write(writer)
+    }
+}
+
+/// Same as [`CompactArray`] but contains referenced data.
+///
+/// This only supports writing.
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct CompactArrayRef<'a, T>(pub Option<&'a [T]>);
+
+impl<'a, W, T> WriteType<W> for CompactArrayRef<'a, T>
+where
+    W: Write,
+    T: WriteType<W>,
+{
+    fn write(&self, writer: &mut W) -> Result<(), WriteError> {
+        match self.0 {
+            None => UnsignedVarint(0).write(writer),
+            Some(inner) => {
+                let len = u64::try_from(inner.len() + 1).map_err(WriteError::from)?;
+                UnsignedVarint(len).write(writer)?;
+
+                for element in inner {
+                    element.write(writer)?;
+                }
+
+                Ok(())
+            }
+        }
+    }
+}
+
 /// Represents a sequence of Kafka records as NULLABLE_BYTES.
 ///
 /// This primitive actually depends on the message version and evolved twice in [KIP-32] and [KIP-98]. We only support
@@ -933,23 +1001,19 @@ mod tests {
         Int32(i32::MAX).write(&mut buf).unwrap();
         buf.set_position(0);
 
-        // Use a rather large struct here to trigger OOM
-        #[derive(Debug)]
-        struct Large {
-            _inner: [u8; 1024],
-        }
-
-        impl<R> ReadType<R> for Large
-        where
-            R: Read,
-        {
-            fn read(reader: &mut R) -> Result<Self, ReadError> {
-                Int32::read(reader)?;
-                unreachable!()
-            }
-        }
-
         let err = Array::<Large>::read(&mut buf).unwrap_err();
+        assert_matches!(err, ReadError::IO(_));
+    }
+
+    test_roundtrip!(CompactArray<Int32>, test_compact_array_roundtrip);
+
+    #[test]
+    fn test_compact_array_blowup_memory() {
+        let mut buf = Cursor::new(Vec::<u8>::new());
+        UnsignedVarint(u64::MAX).write(&mut buf).unwrap();
+        buf.set_position(0);
+
+        let err = CompactArray::<Large>::read(&mut buf).unwrap_err();
         assert_matches!(err, ReadError::IO(_));
     }
 
@@ -987,6 +1051,22 @@ mod tests {
             compression: RecordBatchCompression::NoCompression,
             is_transactional: false,
             timestamp_type: RecordBatchTimestampType::CreateTime,
+        }
+    }
+
+    /// A rather large struct here to trigger OOM.
+    #[derive(Debug)]
+    struct Large {
+        _inner: [u8; 1024],
+    }
+
+    impl<R> ReadType<R> for Large
+    where
+        R: Read,
+    {
+        fn read(reader: &mut R) -> Result<Self, ReadError> {
+            Int32::read(reader)?;
+            unreachable!()
         }
     }
 }
