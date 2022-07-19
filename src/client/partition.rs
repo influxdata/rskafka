@@ -101,6 +101,16 @@ impl PartitionClient {
         }
     }
 
+    /// Topic
+    pub fn topic(&self) -> &str {
+        &self.topic
+    }
+
+    /// Partition
+    pub fn partition(&self) -> i32 {
+        self.partition
+    }
+
     /// Produce a batch of records to the partition
     pub async fn produce(
         &self,
