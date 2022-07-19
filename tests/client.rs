@@ -1,7 +1,8 @@
 use assert_matches::assert_matches;
 use rskafka::{
     client::{
-        error::{Error as ClientError, ProtocolError},
+        controller::ElectionType,
+        error::{Error as ClientError, ProtocolError, RequestError},
         partition::{Compression, OffsetAt},
         ClientBuilder,
     },
@@ -538,6 +539,36 @@ async fn test_delete_records() {
         partition_client.get_offset(OffsetAt::Latest).await.unwrap(),
         offset_4 + 1
     );
+}
+
+#[tokio::test]
+async fn test_elect_leaders() {
+    maybe_start_logging();
+
+    let connection = maybe_skip_kafka_integration!();
+    let topic_name = random_topic_name();
+
+    let client = ClientBuilder::new(connection).build().await.unwrap();
+
+    let controller_client = client.controller_client().unwrap();
+    controller_client
+        .create_topic(&topic_name, 1, 3, 5_000)
+        .await
+        .unwrap();
+
+    let res = controller_client
+        .elect_leaders(&topic_name, 0, ElectionType::Preferred, 5_000)
+        .await;
+    match res {
+        Ok(()) => {}
+        Err(ClientError::ServerError(ProtocolError::ElectionNotNeeded, _)) => {}
+        Err(ClientError::Request(RequestError::NoVersionMatch { .. }))
+            if std::env::var("TEST_ELECT_LEADERS").is_err() =>
+        {
+            println!("Skip test_elect_leaders");
+        }
+        Err(e) => panic!("Unexpected error: {e}"),
+    }
 }
 
 pub fn large_record() -> Record {
