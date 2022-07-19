@@ -542,6 +542,35 @@ async fn test_delete_records() {
 }
 
 #[tokio::test]
+async fn test_reassign_partitions() {
+    maybe_start_logging();
+
+    let connection = maybe_skip_kafka_integration!();
+    let topic_name = random_topic_name();
+
+    let client = ClientBuilder::new(connection).build().await.unwrap();
+
+    let controller_client = client.controller_client().unwrap();
+    controller_client
+        .create_topic(&topic_name, 1, 1, 5_000)
+        .await
+        .unwrap();
+
+    let res = controller_client
+        .reassign_partitions(&topic_name, 0, vec![0, 1], 5_000)
+        .await;
+    match res {
+        Ok(()) => {}
+        Err(ClientError::Request(RequestError::NoVersionMatch { .. }))
+            if std::env::var("TEST_REASSIGN_PARTITIONS").is_err() =>
+        {
+            println!("Skip test_elect_leaders");
+        }
+        Err(e) => panic!("Unexpected error: {e}"),
+    }
+}
+
+#[tokio::test]
 async fn test_elect_leaders() {
     maybe_start_logging();
 

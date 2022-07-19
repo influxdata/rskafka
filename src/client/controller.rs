@@ -12,9 +12,14 @@ use crate::{
     protocol::{
         error::Error as ProtocolError,
         messages::{
-            CreateTopicRequest, CreateTopicsRequest, ElectLeadersRequest, ElectLeadersTopicRequest,
+            AlterPartitionReassignmentsPartitionRequest, AlterPartitionReassignmentsRequest,
+            AlterPartitionReassignmentsTopicRequest, CreateTopicRequest, CreateTopicsRequest,
+            ElectLeadersRequest, ElectLeadersTopicRequest,
         },
-        primitives::{Array, Int16, Int32, Int8, NullableString, String_},
+        primitives::{
+            Array, CompactArray, CompactString, Int16, Int32, Int8, NullableString, String_,
+            TaggedFields,
+        },
     },
     validation::ExactlyOne,
 };
@@ -90,6 +95,62 @@ impl ControllerClient {
                 },
             }
         })
+        .await
+    }
+
+    /// Re-assign partitions.
+    pub async fn reassign_partitions(
+        &self,
+        topic: impl Into<String> + Send,
+        partition: i32,
+        replicas: Vec<i32>,
+        timeout_ms: i32,
+    ) -> Result<()> {
+        let request = &AlterPartitionReassignmentsRequest {
+            topics: vec![AlterPartitionReassignmentsTopicRequest {
+                name: CompactString(topic.into()),
+                partitions: vec![AlterPartitionReassignmentsPartitionRequest {
+                    partition_index: Int32(partition),
+                    replicas: CompactArray(Some(replicas.into_iter().map(Int32).collect())),
+                    tagged_fields: TaggedFields::default(),
+                }],
+                tagged_fields: TaggedFields::default(),
+            }],
+            timeout_ms: Int32(timeout_ms),
+            tagged_fields: TaggedFields::default(),
+        };
+
+        maybe_retry(
+            &self.backoff_config,
+            self,
+            "reassign_partitions",
+            || async move {
+                let broker = self.get().await?;
+                let response = broker.request(request).await?;
+
+                if let Some(protocol_error) = response.error {
+                    return Err(Error::ServerError(protocol_error, Default::default()));
+                }
+
+                let topic = response
+                    .responses
+                    .exactly_one()
+                    .map_err(Error::exactly_one_topic)?;
+
+                let partition = topic
+                    .partitions
+                    .exactly_one()
+                    .map_err(Error::exactly_one_partition)?;
+
+                match partition.error {
+                    None => Ok(()),
+                    Some(protocol_error) => Err(Error::ServerError(
+                        protocol_error,
+                        partition.error_message.0.unwrap_or_default(),
+                    )),
+                }
+            },
+        )
         .await
     }
 

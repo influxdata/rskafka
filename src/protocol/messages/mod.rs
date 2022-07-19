@@ -16,6 +16,8 @@ use super::{
     vec_builder::VecBuilder,
 };
 
+mod alter_partition_reassignments;
+pub use alter_partition_reassignments::*;
 mod api_versions;
 pub use api_versions::*;
 mod constants;

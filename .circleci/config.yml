@@ -269,6 +269,8 @@ jobs:
       TEST_DELETE_RECORDS: 1
       # Kafka supports ElectLeaders
       TEST_ELECT_LEADERS: 1
+      # Kafka supports ReassignPartitions
+      TEST_REASSIGN_PARTITIONS: 1
       TEST_JAVA_INTEROPT: 1
       # Don't use the first node here since this is likely the controller and we want to ensure that we automatically
       # pick the controller for certain actions (e.g. topic creation) and don't just get lucky.
