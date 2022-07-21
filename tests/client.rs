@@ -542,6 +542,40 @@ async fn test_delete_records() {
 }
 
 #[tokio::test]
+async fn test_metadata() {
+    maybe_start_logging();
+
+    let connection = maybe_skip_kafka_integration!();
+    let topic_name = random_topic_name();
+
+    let client = ClientBuilder::new(connection).build().await.unwrap();
+
+    let controller_client = client.controller_client().unwrap();
+    controller_client
+        .create_topic(&topic_name, 1, 1, 5_000)
+        .await
+        .unwrap();
+
+    let md = client.metadata().await.unwrap();
+    assert!(!md.brokers.is_empty());
+
+    // topic metadata might take a while to converge
+    tokio::time::timeout(Duration::from_millis(1_000), async {
+        loop {
+            let md = client.metadata().await.unwrap();
+            let topic = md.topics.into_iter().find(|topic| topic.name == topic_name);
+            if topic.is_some() {
+                return;
+            }
+
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .unwrap();
+}
+
+#[tokio::test]
 async fn test_reassign_partitions() {
     maybe_start_logging();
 
