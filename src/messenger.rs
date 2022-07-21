@@ -12,7 +12,6 @@ use std::{
 
 use futures::future::BoxFuture;
 use parking_lot::Mutex;
-use pin_project_lite::pin_project;
 use thiserror::Error;
 use tokio::{
     io::{AsyncRead, AsyncWrite, AsyncWriteExt, WriteHalf},
@@ -539,38 +538,35 @@ impl Drop for CleanupRequestStateOnCancel {
     }
 }
 
-pin_project! {
-    struct CancellationSafeFuture<F>
-    where
-        // https://github.com/taiki-e/pin-project-lite/issues/2#issuecomment-745190950
-        F: Future,
-        F: Send,
-        F: 'static,
-    {
-        // Mark if the inner future finished. If not, we must spawn a helper task on drop.
-        done: bool,
+/// Wrapper around a future that cannot be cancelled.
+///
+/// When the future is dropped/cancelled, we'll spawn a tokio task to _rescue_ it.
+struct CancellationSafeFuture<F>
+where
+    F: Future + Send + 'static,
+{
+    /// Mark if the inner future finished. If not, we must spawn a helper task on drop.
+    done: bool,
 
-        // Inner future.
-        //
-        // Wrapped in an `Option` so we can extract it during drop. Inside that option however we also need a pinned
-        // box because once this wrapper is polled, it will be pinned in memory -- even during drop. Now the inner
-        // future does not necessarily implement `Unpin`, so we need a heap allocation to pin it in memory even when we
-        // move it out of this option.
-        #[pin]
-        inner: Option<BoxFuture<'static, F::Output>>,
-    }
+    /// Inner future.
+    ///
+    /// Wrapped in an `Option` so we can extract it during drop. Inside that option however we also need a pinned
+    /// box because once this wrapper is polled, it will be pinned in memory -- even during drop. Now the inner
+    /// future does not necessarily implement `Unpin`, so we need a heap allocation to pin it in memory even when we
+    /// move it out of this option.
+    inner: Option<BoxFuture<'static, F::Output>>,
+}
 
-    impl<F> PinnedDrop for CancellationSafeFuture<F>
-    where
-        F: Future,
-        F: Send,
-        F: 'static,
-    {
-        fn drop(mut this: Pin<&mut Self>) {
-            if !this.done {
-                let inner = this.inner.take().expect("Double-drop?");
-                tokio::task::spawn(async move {inner.await;});
-            }
+impl<F> Drop for CancellationSafeFuture<F>
+where
+    F: Future + Send + 'static,
+{
+    fn drop(&mut self) {
+        if !self.done {
+            let inner = self.inner.take().expect("Double-drop?");
+            tokio::task::spawn(async move {
+                inner.await;
+            });
         }
     }
 }
@@ -593,11 +589,13 @@ where
 {
     type Output = F::Output;
 
-    fn poll(self: std::pin::Pin<&mut Self>, cx: &mut std::task::Context<'_>) -> Poll<Self::Output> {
-        let this = self.project();
-        match this.inner.as_pin_mut().expect("no dropped").poll(cx) {
+    fn poll(
+        mut self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> Poll<Self::Output> {
+        match self.inner.as_mut().expect("no dropped").as_mut().poll(cx) {
             Poll::Ready(res) => {
-                *this.done = true;
+                self.done = true;
                 Poll::Ready(res)
             }
             Poll::Pending => Poll::Pending,
