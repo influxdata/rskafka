@@ -43,6 +43,15 @@ commands:
             sudo apt-get update
             sudo apt-get install -y openjdk-11-jre zlib1g-dev
 
+  install_cargo-llvm-cov:
+    description: Install cargo-llvm-cov for code coverage
+    steps:
+      - run:
+          name: Install cargo-llvm-cov for code coverage
+          command: |
+            rustup component add llvm-tools-preview
+            cargo install cargo-llvm-cov
+
 jobs:
   fmt:
     docker:
@@ -205,12 +214,15 @@ jobs:
       - rust_components
       - cache_restore
       - install_packages
+      - install_cargo-llvm-cov
       - run:
           name: Cargo test
-          command: cargo test --all-features --all-targets
+          command: cargo llvm-cov --all-features --all-targets --html
       - cache_save
       - store_artifacts:
           path: proptest-regressions
+      - store_artifacts:
+          path: target/llvm-cov
 
   test-kafka:
     # setup multiple docker images (see https://circleci.com/docs/2.0/configuration-reference/#docker)
