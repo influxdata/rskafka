@@ -16,6 +16,8 @@ use super::{
     vec_builder::VecBuilder,
 };
 
+mod alter_partition_reassignments;
+pub use alter_partition_reassignments::*;
 mod api_versions;
 pub use api_versions::*;
 mod constants;
@@ -24,6 +26,8 @@ mod create_topics;
 pub use create_topics::*;
 mod delete_records;
 pub use delete_records::*;
+mod elect_leaders;
+pub use elect_leaders::*;
 mod fetch;
 pub use fetch::*;
 mod header;

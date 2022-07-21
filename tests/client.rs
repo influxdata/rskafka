@@ -1,7 +1,8 @@
 use assert_matches::assert_matches;
 use rskafka::{
     client::{
-        error::{Error as ClientError, ProtocolError},
+        controller::ElectionType,
+        error::{Error as ClientError, ProtocolError, RequestError},
         partition::{Compression, OffsetAt},
         ClientBuilder,
     },
@@ -538,6 +539,99 @@ async fn test_delete_records() {
         partition_client.get_offset(OffsetAt::Latest).await.unwrap(),
         offset_4 + 1
     );
+}
+
+#[tokio::test]
+async fn test_metadata() {
+    maybe_start_logging();
+
+    let connection = maybe_skip_kafka_integration!();
+    let topic_name = random_topic_name();
+
+    let client = ClientBuilder::new(connection).build().await.unwrap();
+
+    let controller_client = client.controller_client().unwrap();
+    controller_client
+        .create_topic(&topic_name, 1, 1, 5_000)
+        .await
+        .unwrap();
+
+    let md = client.metadata().await.unwrap();
+    assert!(!md.brokers.is_empty());
+
+    // topic metadata might take a while to converge
+    tokio::time::timeout(Duration::from_millis(1_000), async {
+        loop {
+            let md = client.metadata().await.unwrap();
+            let topic = md.topics.into_iter().find(|topic| topic.name == topic_name);
+            if topic.is_some() {
+                return;
+            }
+
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .unwrap();
+}
+
+#[tokio::test]
+async fn test_reassign_partitions() {
+    maybe_start_logging();
+
+    let connection = maybe_skip_kafka_integration!();
+    let topic_name = random_topic_name();
+
+    let client = ClientBuilder::new(connection).build().await.unwrap();
+
+    let controller_client = client.controller_client().unwrap();
+    controller_client
+        .create_topic(&topic_name, 1, 1, 5_000)
+        .await
+        .unwrap();
+
+    let res = controller_client
+        .reassign_partitions(&topic_name, 0, vec![0, 1], 5_000)
+        .await;
+    match res {
+        Ok(()) => {}
+        Err(ClientError::Request(RequestError::NoVersionMatch { .. }))
+            if std::env::var("TEST_REASSIGN_PARTITIONS").is_err() =>
+        {
+            println!("Skip test_elect_leaders");
+        }
+        Err(e) => panic!("Unexpected error: {e}"),
+    }
+}
+
+#[tokio::test]
+async fn test_elect_leaders() {
+    maybe_start_logging();
+
+    let connection = maybe_skip_kafka_integration!();
+    let topic_name = random_topic_name();
+
+    let client = ClientBuilder::new(connection).build().await.unwrap();
+
+    let controller_client = client.controller_client().unwrap();
+    controller_client
+        .create_topic(&topic_name, 1, 3, 5_000)
+        .await
+        .unwrap();
+
+    let res = controller_client
+        .elect_leaders(&topic_name, 0, ElectionType::Preferred, 5_000)
+        .await;
+    match res {
+        Ok(()) => {}
+        Err(ClientError::ServerError(ProtocolError::ElectionNotNeeded, _)) => {}
+        Err(ClientError::Request(RequestError::NoVersionMatch { .. }))
+            if std::env::var("TEST_ELECT_LEADERS").is_err() =>
+        {
+            println!("Skip test_elect_leaders");
+        }
+        Err(e) => panic!("Unexpected error: {e}"),
+    }
 }
 
 pub fn large_record() -> Record {

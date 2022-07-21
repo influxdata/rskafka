@@ -5,6 +5,7 @@ use thiserror::Error;
 use crate::{
     client::partition::PartitionClient,
     connection::{BrokerConnector, TlsConfig},
+    metadata::{Metadata, MetadataBroker, MetadataPartition, MetadataTopic},
     protocol::primitives::Boolean,
     topic::Topic,
 };
@@ -144,5 +145,54 @@ impl Client {
                     .collect(),
             })
             .collect())
+    }
+
+    /// Return cluster-wide metadata.
+    pub async fn metadata(&self) -> Result<Metadata> {
+        let response = self.brokers.request_metadata(None, None).await?;
+
+        Ok(Metadata {
+            brokers: response
+                .brokers
+                .into_iter()
+                .map(|response| MetadataBroker {
+                    node_id: response.node_id.0,
+                    host: response.host.0,
+                    port: response.port.0,
+                    rack: response.rack.and_then(|s| s.0),
+                })
+                .collect(),
+            controller_id: response.controller_id.map(|id| id.0),
+            topics: response
+                .topics
+                .into_iter()
+                .map(|response| MetadataTopic {
+                    name: response.name.0,
+                    is_internal: response.is_internal.map(|b| b.0),
+                    partitions: response
+                        .partitions
+                        .into_iter()
+                        .map(|response| MetadataPartition {
+                            partition_index: response.partition_index.0,
+                            leader_id: response.leader_id.0,
+                            replica_nodes: response
+                                .replica_nodes
+                                .0
+                                .unwrap_or_default()
+                                .into_iter()
+                                .map(|i| i.0)
+                                .collect(),
+                            isr_nodes: response
+                                .isr_nodes
+                                .0
+                                .unwrap_or_default()
+                                .into_iter()
+                                .map(|i| i.0)
+                                .collect(),
+                        })
+                        .collect(),
+                })
+                .collect(),
+        })
     }
 }
