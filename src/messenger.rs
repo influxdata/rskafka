@@ -149,7 +149,7 @@ pub enum RequestError {
     #[error("Cannot read framed message: {0}")]
     ReadFramedMessageError(#[from] crate::protocol::frame::ReadError),
 
-    #[error("Connection is poisened: {0}")]
+    #[error("Connection is poisoned: {0}")]
     Poisoned(Arc<RequestError>),
 }
 
