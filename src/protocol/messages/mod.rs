@@ -38,6 +38,7 @@ pub use produce::*;
 mod test_utils;
 
 #[derive(Error, Debug)]
+#[non_exhaustive]
 pub enum ReadVersionedError {
     #[error("Read error: {0}")]
     ReadError(#[from] ReadError),
@@ -51,6 +52,7 @@ where
 }
 
 #[derive(Error, Debug)]
+#[non_exhaustive]
 pub enum WriteVersionedError {
     #[error("Write error: {0}")]
     WriteError(#[from] WriteError),

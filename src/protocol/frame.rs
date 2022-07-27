@@ -15,6 +15,7 @@ use super::{
 };
 
 #[derive(Error, Debug)]
+#[non_exhaustive]
 pub enum ReadError {
     #[error("Cannot read data: {0}")]
     IO(#[from] std::io::Error),
@@ -74,6 +75,7 @@ where
 }
 
 #[derive(Error, Debug)]
+#[non_exhaustive]
 pub enum WriteError {
     #[error("Cannot write data: {0}")]
     IO(#[from] std::io::Error),

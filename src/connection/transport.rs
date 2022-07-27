@@ -17,6 +17,7 @@ pub type TlsConfig = Option<Arc<rustls::ClientConfig>>;
 pub type TlsConfig = ();
 
 #[derive(Debug, Error)]
+#[non_exhaustive]
 pub enum Error {
     #[error("IO Error: {0}")]
     IO(#[from] std::io::Error),

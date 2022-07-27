@@ -3,6 +3,7 @@ use std::io::{Read, Write};
 use thiserror::Error;
 
 #[derive(Error, Debug)]
+#[non_exhaustive]
 pub enum ReadError {
     #[error("Cannot read data: {0}")]
     IO(#[from] std::io::Error),
@@ -22,6 +23,7 @@ where
 }
 
 #[derive(Error, Debug)]
+#[non_exhaustive]
 pub enum WriteError {
     #[error("Cannot write data: {0}")]
     IO(#[from] std::io::Error),
