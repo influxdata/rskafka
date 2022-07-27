@@ -128,7 +128,10 @@ async fn test_stream_consumer_offset_out_of_range() {
     let error = stream.next().await.expect("stream not empty").unwrap_err();
     assert_matches!(
         error,
-        Error::ServerError(ProtocolError::OffsetOutOfRange, _)
+        Error::ServerError {
+            protocol_error: ProtocolError::OffsetOutOfRange,
+            ..
+        }
     );
 
     // stream ends

@@ -65,7 +65,10 @@ async fn test_topic_crud() {
         .await
         .unwrap_err();
     match err {
-        ClientError::ServerError(ProtocolError::TopicAlreadyExists, _) => {}
+        ClientError::ServerError {
+            protocol_error: ProtocolError::TopicAlreadyExists,
+            ..
+        } => {}
         _ => panic!("Unexpected error: {}", err),
     }
 }
@@ -251,7 +254,10 @@ async fn test_consume_offset_out_of_range() {
         .unwrap_err();
     assert_matches!(
         err,
-        ClientError::ServerError(ProtocolError::OffsetOutOfRange, _)
+        ClientError::ServerError {
+            protocol_error: ProtocolError::OffsetOutOfRange,
+            ..
+        }
     );
 }
 
@@ -495,7 +501,10 @@ async fn test_delete_records() {
         .unwrap_err();
     assert_matches!(
         err,
-        ClientError::ServerError(ProtocolError::OffsetOutOfRange, _)
+        ClientError::ServerError {
+            protocol_error: ProtocolError::OffsetOutOfRange,
+            ..
+        }
     );
     let err = partition_client
         .fetch_records(offset_2, 1..10_000, 1_000)
@@ -503,7 +512,10 @@ async fn test_delete_records() {
         .unwrap_err();
     assert_matches!(
         err,
-        ClientError::ServerError(ProtocolError::OffsetOutOfRange, _)
+        ClientError::ServerError {
+            protocol_error: ProtocolError::OffsetOutOfRange,
+            ..
+        }
     );
 
     // fetching untouched records still works, however the middle record batch is NOT half-deleted and still contains

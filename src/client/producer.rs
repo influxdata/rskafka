@@ -543,7 +543,13 @@ mod tests {
                 tokio::time::sleep(self.delay).await;
 
                 if let Some(e) = self.error {
-                    return Err(ClientError::ServerError(e, "".to_string()));
+                    return Err(ClientError::ServerError {
+                        protocol_error: e,
+                        error_message: None,
+                        context: None,
+                        payload: None,
+                        is_virtual: false,
+                    });
                 }
 
                 if let Some(p) = self.panic.as_ref() {

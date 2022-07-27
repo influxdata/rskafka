@@ -12,10 +12,12 @@ use crate::{
     protocol::{
         error::Error as ProtocolError,
         messages::{CreateTopicRequest, CreateTopicsRequest},
-        primitives::{Int16, Int32, NullableString, String_},
+        primitives::{Int16, Int32, String_},
     },
     validation::ExactlyOne,
 };
+
+use super::error::ServerErrorContext;
 
 #[derive(Debug)]
 pub struct ControllerClient {
@@ -69,10 +71,13 @@ impl ControllerClient {
 
             match topic.error {
                 None => Ok(()),
-                Some(protocol_error) => match topic.error_message {
-                    Some(NullableString(Some(msg))) => Err(Error::ServerError(protocol_error, msg)),
-                    _ => Err(Error::ServerError(protocol_error, Default::default())),
-                },
+                Some(protocol_error) => Err(Error::ServerError {
+                    protocol_error,
+                    error_message: topic.error_message.and_then(|s| s.0),
+                    context: Some(ServerErrorContext::Topic(topic.name.0)),
+                    payload: None,
+                    is_virtual: false,
+                }),
             }
         })
         .await
@@ -151,7 +156,10 @@ where
                 | Error::Connection(_) => broker_cache.invalidate().await,
 
                 // our broker is actually not the controller
-                Error::ServerError(ProtocolError::NotController, _) => {
+                Error::ServerError {
+                    protocol_error: ProtocolError::NotController,
+                    ..
+                } => {
                     broker_cache.invalidate().await;
                 }
 
