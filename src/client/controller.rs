@@ -11,11 +11,31 @@ use crate::{
     messenger::RequestError,
     protocol::{
         error::Error as ProtocolError,
-        messages::{CreateTopicRequest, CreateTopicsRequest},
-        primitives::{Int16, Int32, NullableString, String_},
+        messages::{
+            AlterPartitionReassignmentsPartitionRequest, AlterPartitionReassignmentsRequest,
+            AlterPartitionReassignmentsTopicRequest, CreateTopicRequest, CreateTopicsRequest,
+            ElectLeadersRequest, ElectLeadersTopicRequest,
+        },
+        primitives::{
+            Array, CompactArray, CompactString, Int16, Int32, Int8, NullableString, String_,
+            TaggedFields,
+        },
     },
     validation::ExactlyOne,
 };
+
+/// Election type of [`ControllerClient::elect_leaders`].
+///
+/// The names in this enum are borrowed from the
+/// [Kafka source code](https://github.com/a0x8o/kafka/blob/5383311a5cfbdaf147411004106449e3ad8081fb/core/src/main/scala/kafka/controller/KafkaController.scala#L2186-L2194>).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ElectionType {
+    /// Elects the preferred replica.
+    Preferred,
+
+    /// Elects the first live replica if there are no in-sync replica.
+    Unclean,
+}
 
 #[derive(Debug)]
 pub struct ControllerClient {
@@ -73,6 +93,113 @@ impl ControllerClient {
                     Some(NullableString(Some(msg))) => Err(Error::ServerError(protocol_error, msg)),
                     _ => Err(Error::ServerError(protocol_error, Default::default())),
                 },
+            }
+        })
+        .await
+    }
+
+    /// Re-assign partitions.
+    pub async fn reassign_partitions(
+        &self,
+        topic: impl Into<String> + Send,
+        partition: i32,
+        replicas: Vec<i32>,
+        timeout_ms: i32,
+    ) -> Result<()> {
+        let request = &AlterPartitionReassignmentsRequest {
+            topics: vec![AlterPartitionReassignmentsTopicRequest {
+                name: CompactString(topic.into()),
+                partitions: vec![AlterPartitionReassignmentsPartitionRequest {
+                    partition_index: Int32(partition),
+                    replicas: CompactArray(Some(replicas.into_iter().map(Int32).collect())),
+                    tagged_fields: TaggedFields::default(),
+                }],
+                tagged_fields: TaggedFields::default(),
+            }],
+            timeout_ms: Int32(timeout_ms),
+            tagged_fields: TaggedFields::default(),
+        };
+
+        maybe_retry(
+            &self.backoff_config,
+            self,
+            "reassign_partitions",
+            || async move {
+                let broker = self.get().await?;
+                let response = broker.request(request).await?;
+
+                if let Some(protocol_error) = response.error {
+                    return Err(Error::ServerError(protocol_error, Default::default()));
+                }
+
+                let topic = response
+                    .responses
+                    .exactly_one()
+                    .map_err(Error::exactly_one_topic)?;
+
+                let partition = topic
+                    .partitions
+                    .exactly_one()
+                    .map_err(Error::exactly_one_partition)?;
+
+                match partition.error {
+                    None => Ok(()),
+                    Some(protocol_error) => Err(Error::ServerError(
+                        protocol_error,
+                        partition.error_message.0.unwrap_or_default(),
+                    )),
+                }
+            },
+        )
+        .await
+    }
+
+    /// Elect leaders for given topic and partition.
+    pub async fn elect_leaders(
+        &self,
+        topic: impl Into<String> + Send,
+        partition: i32,
+        election_type: ElectionType,
+        timeout_ms: i32,
+    ) -> Result<()> {
+        let request = &ElectLeadersRequest {
+            election_type: Int8(match election_type {
+                ElectionType::Preferred => 0,
+                ElectionType::Unclean => 1,
+            }),
+            topic_partitions: vec![ElectLeadersTopicRequest {
+                topic: String_(topic.into()),
+                partitions: Array(Some(vec![Int32(partition)])),
+                tagged_fields: None,
+            }],
+            timeout_ms: Int32(timeout_ms),
+            tagged_fields: None,
+        };
+
+        maybe_retry(&self.backoff_config, self, "elect_leaders", || async move {
+            let broker = self.get().await?;
+            let response = broker.request(request).await?;
+
+            if let Some(protocol_error) = response.error {
+                return Err(Error::ServerError(protocol_error, Default::default()));
+            }
+
+            let topic = response
+                .replica_election_results
+                .exactly_one()
+                .map_err(Error::exactly_one_topic)?;
+
+            let partition = topic
+                .partition_results
+                .exactly_one()
+                .map_err(Error::exactly_one_partition)?;
+
+            match partition.error {
+                None => Ok(()),
+                Some(protocol_error) => Err(Error::ServerError(
+                    protocol_error,
+                    partition.error_message.0.unwrap_or_default(),
+                )),
             }
         })
         .await
