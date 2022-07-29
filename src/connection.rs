@@ -23,6 +23,7 @@ pub type BrokerConnection = Arc<MessengerTransport>;
 pub type MessengerTransport = Messenger<BufStream<transport::Transport>>;
 
 #[derive(Debug, Error)]
+#[non_exhaustive]
 pub enum Error {
     #[error("error getting cluster metadata: {0}")]
     Metadata(#[from] RequestError),

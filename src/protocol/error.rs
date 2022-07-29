@@ -7,6 +7,7 @@ use super::primitives::Int16;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[allow(clippy::enum_variant_names)]
+#[non_exhaustive]
 pub enum Error {
     UnknownServerError,
     OffsetOutOfRange,

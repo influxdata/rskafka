@@ -117,6 +117,7 @@ pub struct Messenger<RW> {
 }
 
 #[derive(Error, Debug)]
+#[non_exhaustive]
 pub enum RequestError {
     #[error("Cannot find matching version for: {api_key:?}")]
     NoVersionMatch { api_key: ApiKey },
@@ -154,6 +155,7 @@ pub enum RequestError {
 }
 
 #[derive(Error, Debug)]
+#[non_exhaustive]
 pub enum SyncVersionsError {
     #[error("Did not found a version for ApiVersion that works with that broker")]
     NoWorkingVersion,

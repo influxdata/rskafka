@@ -4,6 +4,7 @@ pub use crate::messenger::RequestError;
 pub use crate::protocol::error::Error as ProtocolError;
 
 #[derive(Error, Debug)]
+#[non_exhaustive]
 pub enum Error {
     #[error("Connection error: {0}")]
     Connection(#[from] crate::connection::Error),
