@@ -67,7 +67,7 @@ pub enum Error {
         error_message: Option<String>,
 
         /// The relevant part of the request that led to the error.
-        request: Option<ServerErrorRequest>,
+        request: ServerErrorRequest,
 
         /// Additional response data that the broker provided and that can be used despite the error state.
         response: Option<ServerErrorResponse>,

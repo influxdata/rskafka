@@ -518,6 +518,7 @@ where
 mod tests {
     use super::aggregator::{Aggregator, RecordAggregatorStatusDeaggregator, StatusDeaggregator};
     use super::*;
+    use crate::client::error::ServerErrorRequest;
     use crate::{
         client::producer::aggregator::RecordAggregator, protocol::error::Error as ProtocolError,
     };
@@ -546,7 +547,7 @@ mod tests {
                     return Err(ClientError::ServerError {
                         protocol_error: e,
                         error_message: None,
-                        request: None,
+                        request: ServerErrorRequest::Partition("foo".into(), 1),
                         response: None,
                         is_virtual: false,
                     });
