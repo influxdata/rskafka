@@ -6,7 +6,7 @@ pub use crate::protocol::error::Error as ProtocolError;
 /// Request context for [`Error::ServerError`].
 #[derive(Debug)]
 #[non_exhaustive]
-pub enum ServerErrorRequest {
+pub enum RequestContext {
     /// Error is specific to a topic.
     Topic(String),
 
@@ -67,7 +67,7 @@ pub enum Error {
         error_message: Option<String>,
 
         /// The relevant part of the request that led to the error.
-        request: ServerErrorRequest,
+        request: RequestContext,
 
         /// Additional response data that the broker provided and that can be used despite the error state.
         response: Option<ServerErrorResponse>,

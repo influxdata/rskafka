@@ -360,7 +360,7 @@ mod tests {
     use tokio::sync::{mpsc, Mutex};
 
     use crate::{
-        client::error::{Error, ProtocolError, ServerErrorRequest},
+        client::error::{Error, ProtocolError, RequestContext},
         record::Record,
     };
 
@@ -633,7 +633,7 @@ mod tests {
         let e = Error::ServerError {
             protocol_error: ProtocolError::OffsetOutOfRange,
             error_message: None,
-            request: ServerErrorRequest::Partition("foo".into(), 1),
+            request: RequestContext::Partition("foo".into(), 1),
             response: None,
             is_virtual: true,
         };
@@ -669,7 +669,7 @@ mod tests {
         let e = Error::ServerError {
             protocol_error: ProtocolError::OffsetOutOfRange,
             error_message: None,
-            request: ServerErrorRequest::Partition("foo".into(), 1),
+            request: RequestContext::Partition("foo".into(), 1),
             response: None,
             is_virtual: true,
         };
@@ -716,7 +716,7 @@ mod tests {
         let e = Error::ServerError {
             protocol_error: ProtocolError::OffsetOutOfRange,
             error_message: None,
-            request: ServerErrorRequest::Partition("foo".into(), 1),
+            request: RequestContext::Partition("foo".into(), 1),
             response: None,
             is_virtual: true,
         };

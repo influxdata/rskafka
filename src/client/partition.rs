@@ -1,6 +1,6 @@
 use crate::{
     backoff::{Backoff, BackoffConfig},
-    client::error::{Error, Result, ServerErrorRequest},
+    client::error::{Error, RequestContext, Result},
     connection::{BrokerCache, BrokerConnection, BrokerConnector, MessengerTransport},
     messenger::RequestError,
     protocol::{
@@ -229,7 +229,7 @@ impl PartitionClient {
             return Err(Error::ServerError {
                 protocol_error: e,
                 error_message: None,
-                request: ServerErrorRequest::Topic(self.topic.clone()),
+                request: RequestContext::Topic(self.topic.clone()),
                 response: None,
                 is_virtual: false,
             });
@@ -251,7 +251,7 @@ impl PartitionClient {
             return Err(Error::ServerError {
                 protocol_error: e,
                 error_message: None,
-                request: ServerErrorRequest::Partition(self.topic.clone(), self.partition),
+                request: RequestContext::Partition(self.topic.clone(), self.partition),
                 response: None,
                 is_virtual: false,
             });
@@ -261,7 +261,7 @@ impl PartitionClient {
             return Err(Error::ServerError {
                 protocol_error: ProtocolError::LeaderNotAvailable,
                 error_message: None,
-                request: ServerErrorRequest::Partition(self.topic.clone(), self.partition),
+                request: RequestContext::Partition(self.topic.clone(), self.partition),
                 response: None,
                 is_virtual: true,
             });
@@ -318,7 +318,7 @@ impl BrokerCache for &PartitionClient {
             return Err(Error::ServerError {
                 protocol_error: ProtocolError::NotLeaderOrFollower,
                 error_message: None,
-                request: ServerErrorRequest::Partition(self.topic.clone(), self.partition),
+                request: RequestContext::Partition(self.topic.clone(), self.partition),
                 response: Some(ServerErrorResponse::LeaderForward {
                     broker: leader,
                     new_leader: leader_self,
@@ -508,7 +508,7 @@ fn process_produce_response(
         Some(e) => Err(Error::ServerError {
             protocol_error: e,
             error_message: None,
-            request: ServerErrorRequest::Partition(topic.to_owned(), partition),
+            request: RequestContext::Partition(topic.to_owned(), partition),
             response: None,
             is_virtual: false,
         }),
@@ -575,7 +575,7 @@ fn process_fetch_response(
         return Err(Error::ServerError {
             protocol_error: err,
             error_message: None,
-            request: ServerErrorRequest::Partition(topic.to_owned(), partition),
+            request: RequestContext::Partition(topic.to_owned(), partition),
             response: Some(ServerErrorResponse::PartitionFetchState {
                 high_watermark: response_partition.high_watermark.0,
                 last_stable_offset: response_partition.last_stable_offset.map(|x| x.0),
@@ -690,7 +690,7 @@ fn process_list_offsets_response(
         Some(err) => Err(Error::ServerError {
             protocol_error: err,
             error_message: None,
-            request: ServerErrorRequest::Partition(topic.to_owned(), partition),
+            request: RequestContext::Partition(topic.to_owned(), partition),
             response: None,
             is_virtual: false,
         }),
@@ -776,7 +776,7 @@ fn process_delete_records_response(
         Some(err) => Err(Error::ServerError {
             protocol_error: err,
             error_message: None,
-            request: ServerErrorRequest::Partition(topic.to_owned(), partition),
+            request: RequestContext::Partition(topic.to_owned(), partition),
             response: None,
             is_virtual: false,
         }),
