@@ -17,7 +17,7 @@ use crate::{
     validation::ExactlyOne,
 };
 
-use super::error::ServerErrorContext;
+use super::error::ServerErrorRequest;
 
 #[derive(Debug)]
 pub struct ControllerClient {
@@ -74,8 +74,8 @@ impl ControllerClient {
                 Some(protocol_error) => Err(Error::ServerError {
                     protocol_error,
                     error_message: topic.error_message.and_then(|s| s.0),
-                    context: Some(ServerErrorContext::Topic(topic.name.0)),
-                    payload: None,
+                    request: Some(ServerErrorRequest::Topic(topic.name.0)),
+                    response: None,
                     is_virtual: false,
                 }),
             }

@@ -633,8 +633,8 @@ mod tests {
         let e = Error::ServerError {
             protocol_error: ProtocolError::OffsetOutOfRange,
             error_message: None,
-            context: None,
-            payload: None,
+            request: None,
+            response: None,
             is_virtual: true,
         };
         let (_sender, receiver) = mpsc::channel(10);
@@ -669,8 +669,8 @@ mod tests {
         let e = Error::ServerError {
             protocol_error: ProtocolError::OffsetOutOfRange,
             error_message: None,
-            context: None,
-            payload: None,
+            request: None,
+            response: None,
             is_virtual: true,
         };
 
@@ -716,8 +716,8 @@ mod tests {
         let e = Error::ServerError {
             protocol_error: ProtocolError::OffsetOutOfRange,
             error_message: None,
-            context: None,
-            payload: None,
+            request: None,
+            response: None,
             is_virtual: true,
         };
 

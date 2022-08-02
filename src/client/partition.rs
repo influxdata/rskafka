@@ -1,6 +1,6 @@
 use crate::{
     backoff::{Backoff, BackoffConfig},
-    client::error::{Error, Result, ServerErrorContext},
+    client::error::{Error, Result, ServerErrorRequest},
     connection::{BrokerCache, BrokerConnection, BrokerConnector, MessengerTransport},
     messenger::RequestError,
     protocol::{
@@ -26,7 +26,7 @@ use time::OffsetDateTime;
 use tokio::sync::Mutex;
 use tracing::{error, info};
 
-use super::error::ServerErrorPayload;
+use super::error::ServerErrorResponse;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Compression {
@@ -229,8 +229,8 @@ impl PartitionClient {
             return Err(Error::ServerError {
                 protocol_error: e,
                 error_message: None,
-                context: Some(ServerErrorContext::Topic(self.topic.clone())),
-                payload: None,
+                request: Some(ServerErrorRequest::Topic(self.topic.clone())),
+                response: None,
                 is_virtual: false,
             });
         }
@@ -251,11 +251,11 @@ impl PartitionClient {
             return Err(Error::ServerError {
                 protocol_error: e,
                 error_message: None,
-                context: Some(ServerErrorContext::Partition(
+                request: Some(ServerErrorRequest::Partition(
                     self.topic.clone(),
                     self.partition,
                 )),
-                payload: None,
+                response: None,
                 is_virtual: false,
             });
         }
@@ -264,11 +264,11 @@ impl PartitionClient {
             return Err(Error::ServerError {
                 protocol_error: ProtocolError::LeaderNotAvailable,
                 error_message: None,
-                context: Some(ServerErrorContext::Partition(
+                request: Some(ServerErrorRequest::Partition(
                     self.topic.clone(),
                     self.partition,
                 )),
-                payload: None,
+                response: None,
                 is_virtual: true,
             });
         }
@@ -324,11 +324,11 @@ impl BrokerCache for &PartitionClient {
             return Err(Error::ServerError {
                 protocol_error: ProtocolError::NotLeaderOrFollower,
                 error_message: None,
-                context: Some(ServerErrorContext::Partition(
+                request: Some(ServerErrorRequest::Partition(
                     self.topic.clone(),
                     self.partition,
                 )),
-                payload: Some(ServerErrorPayload::LeaderForward {
+                response: Some(ServerErrorResponse::LeaderForward {
                     broker: leader,
                     new_leader: leader_self,
                 }),
@@ -517,8 +517,8 @@ fn process_produce_response(
         Some(e) => Err(Error::ServerError {
             protocol_error: e,
             error_message: None,
-            context: Some(ServerErrorContext::Partition(topic.to_owned(), partition)),
-            payload: None,
+            request: Some(ServerErrorRequest::Partition(topic.to_owned(), partition)),
+            response: None,
             is_virtual: false,
         }),
         None => Ok((0..num_records)
@@ -584,8 +584,8 @@ fn process_fetch_response(
         return Err(Error::ServerError {
             protocol_error: err,
             error_message: None,
-            context: Some(ServerErrorContext::Partition(topic.to_owned(), partition)),
-            payload: Some(ServerErrorPayload::FetchState {
+            request: Some(ServerErrorRequest::Partition(topic.to_owned(), partition)),
+            response: Some(ServerErrorResponse::PartitionFetchState {
                 high_watermark: response_partition.high_watermark.0,
                 last_stable_offset: response_partition.last_stable_offset.map(|x| x.0),
             }),
@@ -699,8 +699,8 @@ fn process_list_offsets_response(
         Some(err) => Err(Error::ServerError {
             protocol_error: err,
             error_message: None,
-            context: Some(ServerErrorContext::Partition(topic.to_owned(), partition)),
-            payload: None,
+            request: Some(ServerErrorRequest::Partition(topic.to_owned(), partition)),
+            response: None,
             is_virtual: false,
         }),
         None => Ok(response_partition),
@@ -785,8 +785,8 @@ fn process_delete_records_response(
         Some(err) => Err(Error::ServerError {
             protocol_error: err,
             error_message: None,
-            context: Some(ServerErrorContext::Partition(topic.to_owned(), partition)),
-            payload: None,
+            request: Some(ServerErrorRequest::Partition(topic.to_owned(), partition)),
+            response: None,
             is_virtual: false,
         }),
         None => Ok(response_partition),

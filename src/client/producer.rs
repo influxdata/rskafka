@@ -546,8 +546,8 @@ mod tests {
                     return Err(ClientError::ServerError {
                         protocol_error: e,
                         error_message: None,
-                        context: None,
-                        payload: None,
+                        request: None,
+                        response: None,
                         is_virtual: false,
                     });
                 }
