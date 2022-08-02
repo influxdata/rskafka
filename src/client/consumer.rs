@@ -300,7 +300,10 @@ impl Stream for StreamConsumer {
                 }
                 // if we don't have an offset, try again because fetching the offset is racy
                 (
-                    Err(Error::ServerError(ProtocolError::OffsetOutOfRange, _)),
+                    Err(Error::ServerError {
+                        protocol_error: ProtocolError::OffsetOutOfRange,
+                        ..
+                    }),
                     StartOffset::Earliest | StartOffset::Latest,
                 ) => {
                     // wipe offset and try again
@@ -357,7 +360,7 @@ mod tests {
     use tokio::sync::{mpsc, Mutex};
 
     use crate::{
-        client::error::{Error, ProtocolError},
+        client::error::{Error, ProtocolError, RequestContext},
         record::Record,
     };
 
@@ -627,10 +630,13 @@ mod tests {
 
     #[tokio::test]
     async fn test_consumer_terminate() {
-        let e = Error::ServerError(
-            ProtocolError::OffsetOutOfRange,
-            String::from("offset out of range"),
-        );
+        let e = Error::ServerError {
+            protocol_error: ProtocolError::OffsetOutOfRange,
+            error_message: None,
+            request: RequestContext::Partition("foo".into(), 1),
+            response: None,
+            is_virtual: true,
+        };
         let (_sender, receiver) = mpsc::channel(10);
         let consumer = Arc::new(MockFetch::new(receiver, Some(e), (0, 1_000)));
 
@@ -640,7 +646,10 @@ mod tests {
         let error = stream.next().await.expect("stream not empty").unwrap_err();
         assert_matches!(
             error,
-            Error::ServerError(ProtocolError::OffsetOutOfRange, _)
+            Error::ServerError {
+                protocol_error: ProtocolError::OffsetOutOfRange,
+                ..
+            }
         );
 
         // stream ends
@@ -657,10 +666,13 @@ mod tests {
         };
 
         // Simulate an error on first fetch to encourage an offset update
-        let e = Error::ServerError(
-            ProtocolError::OffsetOutOfRange,
-            String::from("offset out of range"),
-        );
+        let e = Error::ServerError {
+            protocol_error: ProtocolError::OffsetOutOfRange,
+            error_message: None,
+            request: RequestContext::Partition("foo".into(), 1),
+            response: None,
+            is_virtual: true,
+        };
 
         let (sender, receiver) = mpsc::channel(10);
         let consumer = Arc::new(MockFetch::new(receiver, Some(e), (2, 1_000)));
@@ -701,10 +713,13 @@ mod tests {
         };
 
         // Simulate an error on first fetch to encourage an offset update
-        let e = Error::ServerError(
-            ProtocolError::OffsetOutOfRange,
-            String::from("offset out of range"),
-        );
+        let e = Error::ServerError {
+            protocol_error: ProtocolError::OffsetOutOfRange,
+            error_message: None,
+            request: RequestContext::Partition("foo".into(), 1),
+            response: None,
+            is_virtual: true,
+        };
 
         let (sender, receiver) = mpsc::channel(10);
         let consumer = Arc::new(MockFetch::new(receiver, Some(e), (0, 2)));

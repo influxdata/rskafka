@@ -1,6 +1,6 @@
 use crate::{
     backoff::{Backoff, BackoffConfig},
-    client::error::{Error, Result},
+    client::error::{Error, RequestContext, Result},
     connection::{BrokerCache, BrokerConnection, BrokerConnector, MessengerTransport},
     messenger::RequestError,
     protocol::{
@@ -25,6 +25,8 @@ use std::sync::Arc;
 use time::OffsetDateTime;
 use tokio::sync::Mutex;
 use tracing::{error, info};
+
+use super::error::ServerErrorResponse;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Compression {
@@ -224,10 +226,13 @@ impl PartitionClient {
 
         if let Some(e) = topic.error {
             // TODO: Add retry logic
-            return Err(Error::ServerError(
-                e,
-                format!("error getting metadata for topic \"{}\"", self.topic),
-            ));
+            return Err(Error::ServerError {
+                protocol_error: e,
+                error_message: None,
+                request: RequestContext::Topic(self.topic.clone()),
+                response: None,
+                is_virtual: false,
+            });
         }
 
         let partition = topic
@@ -243,23 +248,23 @@ impl PartitionClient {
 
         if let Some(e) = partition.error {
             // TODO: Add retry logic
-            return Err(Error::ServerError(
-                e,
-                format!(
-                    "error getting metadata for partition {} in topic \"{}\"",
-                    self.partition, self.topic
-                ),
-            ));
+            return Err(Error::ServerError {
+                protocol_error: e,
+                error_message: None,
+                request: RequestContext::Partition(self.topic.clone(), self.partition),
+                response: None,
+                is_virtual: false,
+            });
         }
 
         if partition.leader_id.0 == -1 {
-            return Err(Error::ServerError(
-                ProtocolError::LeaderNotAvailable,
-                format!(
-                    "Leader unknown for partition {} and topic \"{}\"",
-                    self.partition, self.topic
-                ),
-            ));
+            return Err(Error::ServerError {
+                protocol_error: ProtocolError::LeaderNotAvailable,
+                error_message: None,
+                request: RequestContext::Partition(self.topic.clone(), self.partition),
+                response: None,
+                is_virtual: true,
+            });
         }
 
         info!(
@@ -310,13 +315,16 @@ impl BrokerCache for &PartitionClient {
         if leader != leader_self {
             // this might happen if the leader changed after we got the hint from a arbitrary broker and this specific
             // metadata call.
-            return Err(Error::ServerError(
-                ProtocolError::NotLeaderOrFollower,
-                format!(
-                    "Broker {} which we determined as leader thinks there is another leader {}",
-                    leader, leader_self
-                ),
-            ));
+            return Err(Error::ServerError {
+                protocol_error: ProtocolError::NotLeaderOrFollower,
+                error_message: None,
+                request: RequestContext::Partition(self.topic.clone(), self.partition),
+                response: Some(ServerErrorResponse::LeaderForward {
+                    broker: leader,
+                    new_leader: leader_self,
+                }),
+                is_virtual: true,
+            });
         }
 
         *current_broker = Some(Arc::clone(&broker));
@@ -365,10 +373,17 @@ where
             match error {
                 Error::Request(RequestError::Poisoned(_) | RequestError::IO(_))
                 | Error::Connection(_) => broker_cache.invalidate().await,
-                Error::ServerError(ProtocolError::InvalidReplicationFactor, _) => {}
-                Error::ServerError(ProtocolError::LeaderNotAvailable, _) => {}
-                Error::ServerError(ProtocolError::OffsetNotAvailable, _) => {}
-                Error::ServerError(ProtocolError::NotLeaderOrFollower, _) => {
+                Error::ServerError {
+                    protocol_error:
+                        ProtocolError::InvalidReplicationFactor
+                        | ProtocolError::LeaderNotAvailable
+                        | ProtocolError::OffsetNotAvailable,
+                    ..
+                } => {}
+                Error::ServerError {
+                    protocol_error: ProtocolError::NotLeaderOrFollower,
+                    ..
+                } => {
                     broker_cache.invalidate().await;
                 }
                 _ => {
@@ -490,7 +505,13 @@ fn process_produce_response(
     }
 
     match response.error {
-        Some(e) => Err(Error::ServerError(e, Default::default())),
+        Some(e) => Err(Error::ServerError {
+            protocol_error: e,
+            error_message: None,
+            request: RequestContext::Partition(topic.to_owned(), partition),
+            response: None,
+            is_virtual: false,
+        }),
         None => Ok((0..num_records)
             .map(|x| x + response.base_offset.0)
             .collect()),
@@ -551,7 +572,16 @@ fn process_fetch_response(
     }
 
     if let Some(err) = response_partition.error_code {
-        return Err(Error::ServerError(err, String::new()));
+        return Err(Error::ServerError {
+            protocol_error: err,
+            error_message: None,
+            request: RequestContext::Partition(topic.to_owned(), partition),
+            response: Some(ServerErrorResponse::PartitionFetchState {
+                high_watermark: response_partition.high_watermark.0,
+                last_stable_offset: response_partition.last_stable_offset.map(|x| x.0),
+            }),
+            is_virtual: false,
+        });
     }
 
     Ok(response_partition)
@@ -657,7 +687,13 @@ fn process_list_offsets_response(
     }
 
     match response_partition.error_code {
-        Some(err) => Err(Error::ServerError(err, String::new())),
+        Some(err) => Err(Error::ServerError {
+            protocol_error: err,
+            error_message: None,
+            request: RequestContext::Partition(topic.to_owned(), partition),
+            response: None,
+            is_virtual: false,
+        }),
         None => Ok(response_partition),
     }
 }
@@ -737,7 +773,13 @@ fn process_delete_records_response(
     }
 
     match response_partition.error {
-        Some(err) => Err(Error::ServerError(err, String::new())),
+        Some(err) => Err(Error::ServerError {
+            protocol_error: err,
+            error_message: None,
+            request: RequestContext::Partition(topic.to_owned(), partition),
+            response: None,
+            is_virtual: false,
+        }),
         None => Ok(response_partition),
     }
 }
