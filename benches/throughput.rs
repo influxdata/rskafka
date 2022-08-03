@@ -315,7 +315,7 @@ impl RecordExt for Record {
 macro_rules! maybe_skip_kafka_integration {
     () => {{
         use std::env;
-        dotenv::dotenv().ok();
+        dotenvy::dotenv().ok();
 
         match (
             env::var("TEST_INTEGRATION").is_ok(),

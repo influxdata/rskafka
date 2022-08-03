@@ -13,7 +13,7 @@ use time::OffsetDateTime;
 macro_rules! maybe_skip_java_interopt {
     () => {{
         use std::env;
-        dotenv::dotenv().ok();
+        dotenvy::dotenv().ok();
 
         if env::var("TEST_JAVA_INTEROPT").is_err() {
             return;

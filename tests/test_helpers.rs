@@ -16,7 +16,7 @@ use time::OffsetDateTime;
 macro_rules! maybe_skip_kafka_integration {
     () => {{
         use std::env;
-        dotenv::dotenv().ok();
+        dotenvy::dotenv().ok();
 
         match (
             env::var("TEST_INTEGRATION").is_ok(),
@@ -80,7 +80,7 @@ macro_rules! maybe_skip_delete {
 macro_rules! maybe_skip_SOCKS_PROXY {
     () => {{
         use std::env;
-        dotenv::dotenv().ok();
+        dotenvy::dotenv().ok();
 
         match (env::var("SOCKS_PROXY").ok()) {
             Some(proxy) => proxy,
