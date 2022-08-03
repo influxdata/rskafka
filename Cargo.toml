@@ -41,7 +41,7 @@ zstd = { version = "0.10", optional = true }
 [dev-dependencies]
 assert_matches = "1.5"
 criterion = { version = "0.3", features = ["async_tokio"] }
-dotenv = "0.15"
+dotenvy = "0.15.1"
 futures = "0.3"
 j4rs = "0.13"
 once_cell = "1.9"
