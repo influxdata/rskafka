@@ -240,13 +240,14 @@ pub struct BatchProducerBuilder {
 }
 
 impl BatchProducerBuilder {
-    /// Build a new `BatchProducer`
+    /// Build a new `BatchProducer`.
     pub fn new(client: Arc<PartitionClient>) -> Self {
         Self::new_with_client(client)
     }
 
-    /// Internal API for creating with any `dyn ProducerClient`
-    fn new_with_client(client: Arc<dyn ProducerClient>) -> Self {
+    /// Construct a [`BatchProducer`] with a dynamically dispatched
+    /// [`ProducerClient`] implementation.
+    pub fn new_with_client(client: Arc<dyn ProducerClient>) -> Self {
         Self {
             client,
             linger: Duration::from_millis(5),
@@ -283,8 +284,18 @@ impl BatchProducerBuilder {
     }
 }
 
-// A trait wrapper to allow mocking
-trait ProducerClient: std::fmt::Debug + Send + Sync {
+/// The [`ProducerClient`] provides an abstraction over a Kafka client than can
+/// produce a record.
+///
+/// Implementing this trait allows user code to inspect the low-level Kafka
+/// [`Record`] instances being published to Kafka, as well as the result of the
+/// produce call.
+///
+/// Most users will want to use the [`BatchProducer`] implementation of this
+/// trait.
+pub trait ProducerClient: std::fmt::Debug + Send + Sync {
+    /// Write the set of `records` to the Kafka broker, using the specified
+    /// `compression` algorithm.
     fn produce(
         &self,
         records: Vec<Record>,
