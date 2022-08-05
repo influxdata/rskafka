@@ -12,6 +12,19 @@ pub enum RequestContext {
 
     /// Error is specific to a partition (indexed via topic name and partition ID).
     Partition(String, i32),
+
+    /// Error is specific to a fetch request.
+    #[non_exhaustive]
+    Fetch {
+        /// Topic name.
+        topic_name: String,
+
+        /// Partition ID.
+        partition_id: i32,
+
+        /// Offset used during the request.
+        offset: i64,
+    },
 }
 
 /// Usable broker data for [`Error::ServerError`].

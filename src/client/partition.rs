@@ -154,7 +154,7 @@ impl PartitionClient {
 
         let partition = maybe_retry(&self.backoff_config, self, "fetch_records", || async move {
             let response = self.get().await?.request(&request).await?;
-            process_fetch_response(self.partition, &self.topic, response)
+            process_fetch_response(self.partition, &self.topic, response, offset)
         })
         .await?;
 
@@ -546,6 +546,7 @@ fn process_fetch_response(
     partition: i32,
     topic: &str,
     response: FetchResponse,
+    request_offset: i64,
 ) -> Result<FetchResponsePartition> {
     let response_topic = response
         .responses
@@ -575,7 +576,11 @@ fn process_fetch_response(
         return Err(Error::ServerError {
             protocol_error: err,
             error_message: None,
-            request: RequestContext::Partition(topic.to_owned(), partition),
+            request: RequestContext::Fetch {
+                topic_name: topic.to_owned(),
+                partition_id: partition,
+                offset: request_offset,
+            },
             response: Some(ServerErrorResponse::PartitionFetchState {
                 high_watermark: response_partition.high_watermark.0,
                 last_stable_offset: response_partition.last_stable_offset.map(|x| x.0),
