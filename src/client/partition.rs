@@ -206,10 +206,14 @@ impl PartitionClient {
     }
 
     /// Retrieve the broker ID of the partition leader
-    async fn get_leader(&self, broker_override: Option<BrokerConnection>) -> Result<i32> {
+    async fn get_leader(
+        &self,
+        broker_override: Option<BrokerConnection>,
+        use_cache: bool,
+    ) -> Result<i32> {
         let metadata = self
             .brokers
-            .request_metadata(broker_override, Some(vec![self.topic.clone()]))
+            .request_metadata(broker_override, Some(vec![self.topic.clone()]), use_cache)
             .await?;
 
         let topic = metadata
@@ -295,24 +299,47 @@ impl BrokerCache for &PartitionClient {
             "Creating new partition-specific broker connection",
         );
 
-        let leader = self.get_leader(None).await?;
-        let broker = self.brokers.connect(leader).await?.ok_or_else(|| {
-            Error::InvalidResponse(format!(
-                "Partition leader {} not found in metadata response",
-                leader
-            ))
-        })?;
+        // Perform a request to fetch the topic metadata to determine the
+        // current leader.
+        //
+        // Accept a cached metadata entry as a response because:
+        //   * If the leader is offline, the connection call below fails and the cache is invalidated - the next call
+        //     will cause the cache to be re-populate with a fresh entry.
+        //   * A subsequent query is performed against the leader that does not use the cached entry - this validates
+        //     the correctness of the cached entry.
+        //
+        let leader = self.get_leader(None, true).await?;
+        let broker = match self.brokers.connect(leader).await {
+            Ok(Some(c)) => Ok(c),
+            Ok(None) => {
+                self.brokers.invalidate_metadata_cache();
+                Err(Error::InvalidResponse(format!(
+                    "Partition leader {} not found in metadata response",
+                    leader
+                )))
+            }
+            Err(e) => {
+                self.brokers.invalidate_metadata_cache();
+                Err(e.into())
+            }
+        }?;
 
         // Check if the chosen leader also thinks it is the leader.
         //
-        // For Kafka (+ Zookeeper) this seems to be required if we don't want to blindly retry
-        // `UnknownTopicOrPartition` that happen after we connect to a leader (as advised by another broker) which
-        // doesn't know about its assigned partition yet. The metadata query below seems to result in an
-        // LeaderNotAvailable in this case and is retried by the layer above.
+        // For Kafka (+ Zookeeper) this seems to be required if we don't want to blindly retry `UnknownTopicOrPartition`
+        // that happen after we connect to a leader (as advised by another broker) which doesn't know about its assigned
+        // partition yet. The metadata query below seems to result in an LeaderNotAvailable in this case and is retried
+        // by the layer above.
         //
         // This does not seem to be required for redpanda.
-        let leader_self = self.get_leader(Some(Arc::clone(&broker))).await?;
+        //
+        // Because this check requires the most up-to-date metadata from a specific broker, do not accept a cached
+        // metadata response.
+        let leader_self = self.get_leader(Some(Arc::clone(&broker)), false).await?;
         if leader != leader_self {
+            // The cached metadata identified an incorrect leader - it is stale and should be refreshed.
+            self.brokers.invalidate_metadata_cache();
+
             // this might happen if the leader changed after we got the hint from a arbitrary broker and this specific
             // metadata call.
             return Err(Error::ServerError {
@@ -344,6 +371,7 @@ impl BrokerCache for &PartitionClient {
             partition = self.partition,
             "Invaliding cached leader",
         );
+        self.brokers.invalidate_metadata_cache();
         *self.current_broker.lock().await = None
     }
 }

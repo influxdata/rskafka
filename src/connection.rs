@@ -6,12 +6,15 @@ use thiserror::Error;
 use tokio::{io::BufStream, sync::Mutex};
 use tracing::{debug, error, info, warn};
 
-use crate::backoff::{Backoff, BackoffConfig, BackoffError};
 use crate::connection::topology::{Broker, BrokerTopology};
 use crate::connection::transport::Transport;
 use crate::messenger::{Messenger, RequestError};
 use crate::protocol::messages::{MetadataRequest, MetadataRequestTopic, MetadataResponse};
 use crate::protocol::primitives::String_;
+use crate::{
+    backoff::{Backoff, BackoffConfig, BackoffError},
+    client::metadata_cache::MetadataCache,
+};
 
 pub use self::transport::TlsConfig;
 
@@ -128,6 +131,11 @@ pub struct BrokerConnector {
     /// This one is used for metadata queries.
     cached_arbitrary_broker: Mutex<Option<BrokerConnection>>,
 
+    /// A cache of [`MetadataResponse`].
+    ///
+    /// Used during leader discovery.
+    cached_metadata: MetadataCache,
+
     /// The backoff configuration on error
     backoff_config: BackoffConfig,
 
@@ -152,6 +160,7 @@ impl BrokerConnector {
             bootstrap_brokers,
             topology: Default::default(),
             cached_arbitrary_broker: Mutex::new(None),
+            cached_metadata: Default::default(),
             backoff_config: Default::default(),
             tls_config,
             socks5_proxy,
@@ -159,10 +168,10 @@ impl BrokerConnector {
         }
     }
 
-    /// Fetch and cache broker metadata
+    /// Fetch and cache metadata
     pub async fn refresh_metadata(&self) -> Result<()> {
-        // Not interested in topic metadata
-        self.request_metadata(None, Some(vec![])).await?;
+        self.request_metadata(None, None, false).await?;
+
         Ok(())
     }
 
@@ -172,13 +181,47 @@ impl BrokerConnector {
     ///
     /// If `broker_override` is provided this will request metadata from that specific broker.
     ///
-    /// Note: overriding the broker prevents automatic handling of connection-invalidating errors,
-    /// which will instead be returned to the caller
+    /// Note: overriding the broker prevents automatic handling of connection-invalidating errors, which will instead be
+    /// returned to the caller
+    ///
+    /// # Cache
+    ///
+    /// The caller can request a cached metadata entry by specifying `use_cache: true` in the call. If no cached entry
+    /// is available the request will be dispatched to an arbitrary broker.
+    ///
+    /// Using a cached entry is only valid if:
+    ///  * An arbitrary broker was to be queried
+    ///  * The caller can tolerate, or validate, a potentially infinitely stale cached entry
+    ///
+    /// # Panics
+    ///
+    /// It is invalid to request metadata from a specific broker (by specifying `broker_override`), and request a cached
+    /// entry - doing so will panic.
     pub async fn request_metadata(
         &self,
         broker_override: Option<BrokerConnection>,
         topics: Option<Vec<String>>,
+        use_cache: bool,
     ) -> Result<MetadataResponse> {
+        // Return a cached metadata response as an optimisation to prevent
+        // multiple successive metadata queries for the same topic across
+        // multiple PartitionClient instances.
+        //
+        // NOTE: no serialisation / locking is imposed over the cache during
+        // this call  - multiple parallel calls to this function will still
+        // perform multiple requests until the cache is populated. However, the
+        // Client initialises this cache at construction time, so unless
+        // invalidated, there will always be a cached entry available.
+        if use_cache {
+            assert!(
+                broker_override.is_none(),
+                "cannot ask for cached metadata from specific broker"
+            );
+            if let Some(m) = self.cached_metadata.get(&topics) {
+                return Ok(m);
+            }
+        }
+
         let backoff = Backoff::new(&self.backoff_config);
         let request = MetadataRequest {
             topics: topics.map(|t| {
@@ -192,10 +235,20 @@ impl BrokerConnector {
         let response =
             metadata_request_with_retry(broker_override, &request, backoff, self).await?;
 
+        // If the request was for a full, unfiltered set of topics, cache the
+        // response for later calls to make use of.
+        if request.topics.is_none() {
+            self.cached_metadata.update(response.clone());
+        }
+
         // Since the metadata request contains information about the cluster state, use it to update our view.
         self.topology.update(&response.brokers);
 
         Ok(response)
+    }
+
+    pub(crate) fn invalidate_metadata_cache(&self) {
+        self.cached_metadata.invalidate()
     }
 
     /// Returns a new connection to the broker with the provided id

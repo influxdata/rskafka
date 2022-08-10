@@ -281,7 +281,7 @@ where
 ///
 /// For non-null strings, first the length N is given as an INT16. Then N bytes follow which are the UTF-8 encoding of
 /// the character sequence. A null value is encoded with length of -1 and there are no following bytes.
-#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Default, Clone)]
 #[cfg_attr(test, derive(proptest_derive::Arbitrary))]
 pub struct NullableString(pub Option<String>);
 
@@ -329,7 +329,7 @@ where
 ///
 /// First the length N is given as an INT16. Then N bytes follow which are the UTF-8 encoding of the character
 /// sequence. Length must not be negative.
-#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Clone)]
 #[cfg_attr(test, derive(proptest_derive::Arbitrary))]
 pub struct String_(pub String);
 
@@ -575,7 +575,7 @@ where
 /// Type T can be either a primitive type (e.g. STRING) or a structure. First, the length N is given as an INT32. Then
 /// N instances of type T follow. A null array is represented with a length of -1. In protocol documentation an array
 /// of T instances is referred to as `[T]`.
-#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Clone)]
 #[cfg_attr(test, derive(proptest_derive::Arbitrary))]
 pub struct Array<T>(pub Option<Vec<T>>);
 
