@@ -88,7 +88,10 @@ async fn test_partition_client() {
         .await
         .unwrap();
 
-    let partition_client = client.partition_client(topic_name.clone(), 0).unwrap();
+    let partition_client = client
+        .partition_client(topic_name.clone(), 0)
+        .await
+        .unwrap();
     assert_eq!(partition_client.topic(), &topic_name);
     assert_eq!(partition_client.partition(), 0);
 }
@@ -162,7 +165,7 @@ async fn test_socks5() {
         .await
         .unwrap();
 
-    let partition_client = client.partition_client(topic_name, 0).unwrap();
+    let partition_client = client.partition_client(topic_name, 0).await.unwrap();
 
     let record = record(b"");
     partition_client
@@ -194,7 +197,7 @@ async fn test_produce_empty() {
         .await
         .unwrap();
 
-    let partition_client = client.partition_client(&topic_name, 1).unwrap();
+    let partition_client = client.partition_client(&topic_name, 1).await.unwrap();
     partition_client
         .produce(vec![], Compression::NoCompression)
         .await
@@ -216,7 +219,7 @@ async fn test_consume_empty() {
         .await
         .unwrap();
 
-    let partition_client = client.partition_client(&topic_name, 1).unwrap();
+    let partition_client = client.partition_client(&topic_name, 1).await.unwrap();
     let (records, watermark) = partition_client
         .fetch_records(0, 1..10_000, 1_000)
         .await
@@ -240,7 +243,7 @@ async fn test_consume_offset_out_of_range() {
         .await
         .unwrap();
 
-    let partition_client = client.partition_client(&topic_name, 1).unwrap();
+    let partition_client = client.partition_client(&topic_name, 1).await.unwrap();
     let record = record(b"");
     let offsets = partition_client
         .produce(vec![record], Compression::NoCompression)
@@ -279,7 +282,10 @@ async fn test_get_offset() {
         .await
         .unwrap();
 
-    let partition_client = client.partition_client(topic_name.clone(), 0).unwrap();
+    let partition_client = client
+        .partition_client(topic_name.clone(), 0)
+        .await
+        .unwrap();
 
     assert_eq!(
         partition_client
@@ -340,7 +346,7 @@ async fn test_produce_consume_size_cutoff() {
         .await
         .unwrap();
 
-    let partition_client = Arc::new(client.partition_client(&topic_name, 0).unwrap());
+    let partition_client = Arc::new(client.partition_client(&topic_name, 0).await.unwrap());
 
     let record_1 = large_record();
     let record_2 = large_record();
@@ -413,7 +419,7 @@ async fn test_consume_midbatch() {
         .await
         .unwrap();
 
-    let partition_client = client.partition_client(&topic_name, 0).unwrap();
+    let partition_client = client.partition_client(&topic_name, 0).await.unwrap();
 
     // produce two records into a single batch
     let record_1 = record(b"x");
@@ -458,7 +464,7 @@ async fn test_delete_records() {
         .await
         .unwrap();
 
-    let partition_client = client.partition_client(&topic_name, 0).unwrap();
+    let partition_client = client.partition_client(&topic_name, 0).await.unwrap();
 
     // produce the following record batches:
     // - record_1

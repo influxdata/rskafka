@@ -448,7 +448,7 @@ async fn setup_rskafka(connection: Vec<String>) -> PartitionClient {
         .await
         .unwrap();
 
-    client.partition_client(topic_name, 0).unwrap()
+    client.partition_client(topic_name, 0).await.unwrap()
 }
 
 static LOG_SETUP: Once = Once::new();
