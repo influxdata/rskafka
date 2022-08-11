@@ -22,8 +22,10 @@ use crate::{
     validation::ExactlyOne,
 };
 use async_trait::async_trait;
-use std::ops::{ControlFlow, Deref, Range};
-use std::sync::Arc;
+use std::{
+    ops::{ControlFlow, Deref, Range},
+    sync::Arc,
+};
 use time::OffsetDateTime;
 use tokio::sync::Mutex;
 use tracing::{error, info};
@@ -95,14 +97,35 @@ impl std::fmt::Debug for PartitionClient {
 }
 
 impl PartitionClient {
-    pub(super) fn new(topic: String, partition: i32, brokers: Arc<BrokerConnector>) -> Self {
-        Self {
+    pub(super) async fn new(
+        topic: String,
+        partition: i32,
+        brokers: Arc<BrokerConnector>,
+    ) -> Result<Self> {
+        let p = Self {
             topic,
             partition,
-            brokers,
+            brokers: Arc::clone(&brokers),
             backoff_config: Default::default(),
             current_broker: Mutex::new(None),
-        }
+        };
+
+        // Force discover and establish a cached connection to the leader
+        let scope = &p;
+        maybe_retry(
+            &Default::default(),
+            &*brokers,
+            "leader_detection",
+            || async move {
+                scope
+                    .get_leader(MetadataLookupMode::CachedArbitrary)
+                    .await?;
+                Ok(())
+            },
+        )
+        .await?;
+
+        Ok(p)
     }
 
     /// Topic

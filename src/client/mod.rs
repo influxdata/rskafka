@@ -116,16 +116,12 @@ impl Client {
     }
 
     /// Returns a client for performing operations on a specific partition
-    pub fn partition_client(
+    pub async fn partition_client(
         &self,
         topic: impl Into<String> + Send,
         partition: i32,
     ) -> Result<PartitionClient> {
-        Ok(PartitionClient::new(
-            topic.into(),
-            partition,
-            Arc::clone(&self.brokers),
-        ))
+        PartitionClient::new(topic.into(), partition, Arc::clone(&self.brokers)).await
     }
 
     /// Returns a list of topics in the cluster

@@ -25,7 +25,7 @@ async fn test_batch_producer() {
 
     let record = record(b"");
 
-    let partition_client = Arc::new(client.partition_client(&topic, 0).unwrap());
+    let partition_client = Arc::new(client.partition_client(&topic, 0).await.unwrap());
     let producer = BatchProducerBuilder::new(partition_client)
         .with_linger(Duration::from_secs(5))
         .build(RecordAggregator::new(record.approximate_size() * 2 + 1));
