@@ -22,8 +22,10 @@ use crate::{
     validation::ExactlyOne,
 };
 use async_trait::async_trait;
-use std::ops::{ControlFlow, Deref, Range};
-use std::sync::Arc;
+use std::{
+    ops::{ControlFlow, Deref, Range},
+    sync::Arc,
+};
 use time::OffsetDateTime;
 use tokio::sync::Mutex;
 use tracing::{error, info};
@@ -95,14 +97,35 @@ impl std::fmt::Debug for PartitionClient {
 }
 
 impl PartitionClient {
-    pub(super) fn new(topic: String, partition: i32, brokers: Arc<BrokerConnector>) -> Self {
-        Self {
+    pub(super) async fn new(
+        topic: String,
+        partition: i32,
+        brokers: Arc<BrokerConnector>,
+    ) -> Result<Self> {
+        let p = Self {
             topic,
             partition,
-            brokers,
+            brokers: Arc::clone(&brokers),
             backoff_config: Default::default(),
             current_broker: Mutex::new(None),
-        }
+        };
+
+        // Force discover and establish a cached connection to the leader
+        let scope = &p;
+        maybe_retry(
+            &Default::default(),
+            &*brokers,
+            "leader_detection",
+            || async move {
+                scope
+                    .get_leader(MetadataLookupMode::CachedArbitrary)
+                    .await?;
+                Ok(())
+            },
+        )
+        .await?;
+
+        Ok(p)
     }
 
     /// Topic
@@ -113,17 +136,6 @@ impl PartitionClient {
     /// Partition
     pub fn partition(&self) -> i32 {
         self.partition
-    }
-
-    /// Re-run the leader discovery process for this client, and establish a
-    /// connection to the leader.
-    pub(crate) async fn refresh_leader(&self) -> Result<()> {
-        // Remove the current broker connection, if any.
-        *self.current_broker.lock().await = None;
-        // And acquire a new one, forcing discovery and establishing a cached
-        // connection to the leader.
-        self.get().await?;
-        Ok(())
     }
 
     /// Produce a batch of records to the partition

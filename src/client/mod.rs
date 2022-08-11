@@ -121,9 +121,7 @@ impl Client {
         topic: impl Into<String> + Send,
         partition: i32,
     ) -> Result<PartitionClient> {
-        let client = PartitionClient::new(topic.into(), partition, Arc::clone(&self.brokers));
-        client.refresh_leader().await?;
-        Ok(client)
+        PartitionClient::new(topic.into(), partition, Arc::clone(&self.brokers)).await
     }
 
     /// Returns a list of topics in the cluster
