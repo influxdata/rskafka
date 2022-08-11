@@ -117,9 +117,7 @@ impl PartitionClient {
             &*brokers,
             "leader_detection",
             || async move {
-                scope
-                    .get_leader(MetadataLookupMode::CachedArbitrary)
-                    .await?;
+                scope.get().await?;
                 Ok(())
             },
         )
