@@ -115,6 +115,17 @@ impl PartitionClient {
         self.partition
     }
 
+    /// Re-run the leader discovery process for this client, and establish a
+    /// connection to the leader.
+    pub async fn refresh_leader(&self) -> Result<()> {
+        // Remove the current broker connection, if any.
+        *self.current_broker.lock().await = None;
+        // And acquire a new one, forcing discovery and establishing a cached
+        // connection to the leader.
+        self.get().await?;
+        Ok(())
+    }
+
     /// Produce a batch of records to the partition
     pub async fn produce(
         &self,
