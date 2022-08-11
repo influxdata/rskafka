@@ -4,7 +4,7 @@ use thiserror::Error;
 
 use crate::{
     client::partition::PartitionClient,
-    connection::{BrokerConnector, TlsConfig},
+    connection::{BrokerConnector, MetadataLookupMode, TlsConfig},
     protocol::primitives::Boolean,
     topic::Topic,
 };
@@ -12,6 +12,7 @@ use crate::{
 pub mod consumer;
 pub mod controller;
 pub mod error;
+pub(crate) mod metadata_cache;
 pub mod partition;
 pub mod producer;
 
@@ -129,7 +130,18 @@ impl Client {
 
     /// Returns a list of topics in the cluster
     pub async fn list_topics(&self) -> Result<Vec<Topic>> {
-        let response = self.brokers.request_metadata(None, None).await?;
+        // Do not used a cached metadata response to satisfy this request, in
+        // order to prevent:
+        //
+        //  * Client creates a topic
+        //  * Client calls list_topics() and does not see new topic
+        //
+        // Because this is an unconstrained metadata request (all topics) it
+        // will update the cached metadata entry.
+        let response = self
+            .brokers
+            .request_metadata(MetadataLookupMode::ArbitraryBroker, None)
+            .await?;
 
         Ok(response
             .topics

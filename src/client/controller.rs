@@ -7,7 +7,9 @@ use tracing::{debug, error, info};
 use crate::{
     backoff::{Backoff, BackoffConfig},
     client::{Error, Result},
-    connection::{BrokerCache, BrokerConnection, BrokerConnector, MessengerTransport},
+    connection::{
+        BrokerCache, BrokerConnection, BrokerConnector, MessengerTransport, MetadataLookupMode,
+    },
     messenger::RequestError,
     protocol::{
         error::Error as ProtocolError,
@@ -80,12 +82,21 @@ impl ControllerClient {
                 }),
             }
         })
-        .await
+        .await?;
+
+        // Refresh the cache now there is definitely a new topic to observe.
+        let _ = self.brokers.refresh_metadata().await;
+
+        Ok(())
     }
 
     /// Retrieve the broker ID of the controller
     async fn get_controller_id(&self) -> Result<i32> {
-        let metadata = self.brokers.request_metadata(None, Some(vec![])).await?;
+        // Request an uncached, fresh copy of the metadata.
+        let metadata = self
+            .brokers
+            .request_metadata(MetadataLookupMode::ArbitraryBroker, Some(vec![]))
+            .await?;
 
         let controller_id = metadata
             .controller_id
