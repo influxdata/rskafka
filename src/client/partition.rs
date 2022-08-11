@@ -1,7 +1,9 @@
 use crate::{
     backoff::{Backoff, BackoffConfig},
     client::error::{Error, RequestContext, Result},
-    connection::{BrokerCache, BrokerConnection, BrokerConnector, MessengerTransport},
+    connection::{
+        BrokerCache, BrokerConnection, BrokerConnector, MessengerTransport, MetadataLookupMode,
+    },
     messenger::RequestError,
     protocol::{
         error::Error as ProtocolError,
@@ -206,14 +208,10 @@ impl PartitionClient {
     }
 
     /// Retrieve the broker ID of the partition leader
-    async fn get_leader(
-        &self,
-        broker_override: Option<BrokerConnection>,
-        use_cache: bool,
-    ) -> Result<i32> {
+    async fn get_leader(&self, metadata_mode: MetadataLookupMode) -> Result<i32> {
         let metadata = self
             .brokers
-            .request_metadata(broker_override, Some(vec![self.topic.clone()]), use_cache)
+            .request_metadata(metadata_mode, Some(vec![self.topic.clone()]))
             .await?;
 
         let topic = metadata
@@ -308,7 +306,7 @@ impl BrokerCache for &PartitionClient {
         //   * A subsequent query is performed against the leader that does not use the cached entry - this validates
         //     the correctness of the cached entry.
         //
-        let leader = self.get_leader(None, true).await?;
+        let leader = self.get_leader(MetadataLookupMode::CachedArbitrary).await?;
         let broker = match self.brokers.connect(leader).await {
             Ok(Some(c)) => Ok(c),
             Ok(None) => {
@@ -335,7 +333,9 @@ impl BrokerCache for &PartitionClient {
         //
         // Because this check requires the most up-to-date metadata from a specific broker, do not accept a cached
         // metadata response.
-        let leader_self = self.get_leader(Some(Arc::clone(&broker)), false).await?;
+        let leader_self = self
+            .get_leader(MetadataLookupMode::SpecificBroker(Arc::clone(&broker)))
+            .await?;
         if leader != leader_self {
             // The cached metadata identified an incorrect leader - it is stale and should be refreshed.
             self.brokers.invalidate_metadata_cache();

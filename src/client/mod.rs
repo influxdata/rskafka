@@ -4,7 +4,7 @@ use thiserror::Error;
 
 use crate::{
     client::partition::PartitionClient,
-    connection::{BrokerConnector, TlsConfig},
+    connection::{BrokerConnector, MetadataLookupMode, TlsConfig},
     protocol::primitives::Boolean,
     topic::Topic,
 };
@@ -138,7 +138,10 @@ impl Client {
         //
         // Because this is an unconstrained metadata request (all topics) it
         // will update the cached metadata entry.
-        let response = self.brokers.request_metadata(None, None, false).await?;
+        let response = self
+            .brokers
+            .request_metadata(MetadataLookupMode::ArbitraryBroker, None)
+            .await?;
 
         Ok(response
             .topics

@@ -7,7 +7,9 @@ use tracing::{debug, error, info};
 use crate::{
     backoff::{Backoff, BackoffConfig},
     client::{Error, Result},
-    connection::{BrokerCache, BrokerConnection, BrokerConnector, MessengerTransport},
+    connection::{
+        BrokerCache, BrokerConnection, BrokerConnector, MessengerTransport, MetadataLookupMode,
+    },
     messenger::RequestError,
     protocol::{
         error::Error as ProtocolError,
@@ -93,7 +95,7 @@ impl ControllerClient {
         // Request an uncached, fresh copy of the metadata.
         let metadata = self
             .brokers
-            .request_metadata(None, Some(vec![]), false)
+            .request_metadata(MetadataLookupMode::ArbitraryBroker, Some(vec![]))
             .await?;
 
         let controller_id = metadata

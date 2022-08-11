@@ -59,6 +59,19 @@ trait ConnectionHandler {
     ) -> Result<Arc<Self::R>>;
 }
 
+/// Defines the possible request modes of metadata retrieval.
+pub enum MetadataLookupMode<B = BrokerConnection> {
+    /// Perform a metadata request using an arbitrary, cached broker connection.
+    ArbitraryBroker,
+    /// Request metadata using the specified [`BrokerCache`] implementation.
+    SpecificBroker(B),
+    /// Use cached metadata from an arbitrary broker (if available).
+    ///
+    /// If a cached entry is not available, the request is satisfied as if
+    /// [`MetadataLookupMode::ArbitraryBroker`] was specified.
+    CachedArbitrary,
+}
+
 /// Info needed to connect to a broker, with [optional broker ID](Self::id) for debugging
 enum BrokerRepresentation {
     /// URL specified as a bootstrap broker
@@ -170,7 +183,8 @@ impl BrokerConnector {
 
     /// Fetch and cache metadata
     pub async fn refresh_metadata(&self) -> Result<()> {
-        self.request_metadata(None, None, false).await?;
+        self.request_metadata(MetadataLookupMode::ArbitraryBroker, None)
+            .await?;
 
         Ok(())
     }
@@ -199,9 +213,8 @@ impl BrokerConnector {
     /// entry - doing so will panic.
     pub async fn request_metadata(
         &self,
-        broker_override: Option<BrokerConnection>,
+        metadata_mode: MetadataLookupMode,
         topics: Option<Vec<String>>,
-        use_cache: bool,
     ) -> Result<MetadataResponse> {
         // Return a cached metadata response as an optimisation to prevent
         // multiple successive metadata queries for the same topic across
@@ -212,11 +225,7 @@ impl BrokerConnector {
         // perform multiple requests until the cache is populated. However, the
         // Client initialises this cache at construction time, so unless
         // invalidated, there will always be a cached entry available.
-        if use_cache {
-            assert!(
-                broker_override.is_none(),
-                "cannot ask for cached metadata from specific broker"
-            );
+        if matches!(metadata_mode, MetadataLookupMode::CachedArbitrary) {
             if let Some(m) = self.cached_metadata.get(&topics) {
                 return Ok(m);
             }
@@ -232,8 +241,7 @@ impl BrokerConnector {
             allow_auto_topic_creation: None,
         };
 
-        let response =
-            metadata_request_with_retry(broker_override, &request, backoff, self).await?;
+        let response = metadata_request_with_retry(&metadata_mode, &request, backoff, self).await?;
 
         // If the request was for a full, unfiltered set of topics, cache the
         // response for later calls to make use of.
@@ -402,7 +410,7 @@ where
 }
 
 async fn metadata_request_with_retry<A>(
-    broker_override: Option<Arc<A::R>>,
+    metadata_mode: &MetadataLookupMode<Arc<A::R>>,
     request_params: &MetadataRequest,
     mut backoff: Backoff,
     arbitrary_broker_cache: A,
@@ -415,18 +423,20 @@ where
     backoff
         .retry_with_backoff("metadata", || async {
             // Retrieve the broker within the loop, in case it is invalidated
-            let broker = match broker_override.as_ref() {
-                Some(b) => Arc::clone(b),
-                None => match arbitrary_broker_cache.get().await {
-                    Ok(inner) => inner,
-                    Err(e) => return ControlFlow::Break(Err(e.into())),
-                },
+            let broker = match metadata_mode {
+                MetadataLookupMode::SpecificBroker(b) => Arc::clone(b),
+                MetadataLookupMode::ArbitraryBroker | MetadataLookupMode::CachedArbitrary => {
+                    match arbitrary_broker_cache.get().await {
+                        Ok(inner) => inner,
+                        Err(e) => return ControlFlow::Break(Err(e.into())),
+                    }
+                }
             };
 
             match broker.metadata_request(request_params).await {
                 Ok(response) => ControlFlow::Break(Ok(response)),
                 Err(e @ RequestError::Poisoned(_) | e @ RequestError::IO(_))
-                    if broker_override.is_none() =>
+                    if !matches!(metadata_mode, MetadataLookupMode::SpecificBroker(_)) =>
                 {
                     arbitrary_broker_cache.invalidate().await;
                     ControlFlow::Continue(e)
@@ -506,7 +516,7 @@ mod tests {
         };
 
         let result = metadata_request_with_retry(
-            None,
+            &MetadataLookupMode::ArbitraryBroker,
             &metadata_request,
             Backoff::new(&Default::default()),
             broker_cache,
@@ -527,7 +537,7 @@ mod tests {
         };
 
         let result = metadata_request_with_retry(
-            None,
+            &MetadataLookupMode::ArbitraryBroker,
             &metadata_request,
             Backoff::new(&Default::default()),
             broker_cache,
@@ -568,7 +578,7 @@ mod tests {
         };
 
         let result = metadata_request_with_retry(
-            None,
+            &MetadataLookupMode::ArbitraryBroker,
             &metadata_request,
             Backoff::new(&Default::default()),
             broker_cache,
@@ -581,7 +591,7 @@ mod tests {
 
     #[tokio::test]
     async fn happy_broker_override() {
-        let broker_override = Some(Arc::new(FakeBroker::success()));
+        let broker_override = Arc::new(FakeBroker::success());
         let metadata_request = arbitrary_metadata_request();
         let success_response = arbitrary_metadata_response();
 
@@ -591,7 +601,7 @@ mod tests {
         };
 
         let result = metadata_request_with_retry(
-            broker_override,
+            &MetadataLookupMode::SpecificBroker(broker_override),
             &metadata_request,
             Backoff::new(&Default::default()),
             broker_cache,
@@ -604,7 +614,7 @@ mod tests {
 
     #[tokio::test]
     async fn sad_broker_override() {
-        let broker_override = Some(Arc::new(FakeBroker::recoverable()));
+        let broker_override = Arc::new(FakeBroker::recoverable());
         let metadata_request = arbitrary_metadata_request();
 
         let broker_cache = FakeBrokerCache {
@@ -613,7 +623,7 @@ mod tests {
         };
 
         let result = metadata_request_with_retry(
-            broker_override,
+            &MetadataLookupMode::SpecificBroker(broker_override),
             &metadata_request,
             Backoff::new(&Default::default()),
             broker_cache,
