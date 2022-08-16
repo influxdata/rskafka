@@ -82,6 +82,11 @@ transport-tls = ["rustls", "tokio-rustls"]
 
 unstable-fuzzing = []
 
+[lib]
+# For `cargo bench -- --save-baseline ...`
+# See https://github.com/bheisler/criterion.rs/issues/275.
+bench = false
+
 [[bench]]
 name = "throughput"
 harness = false
