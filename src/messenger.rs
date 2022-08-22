@@ -302,7 +302,9 @@ where
             request_api_key: R::API_KEY,
             request_api_version: body_api_version,
             correlation_id: Int32(correlation_id),
-            client_id: Some(NullableString(None)),
+            // Technically we don't need to send a client_id, but newer redpanda version fail to parse the message
+            // without it. See https://github.com/influxdata/rskafka/issues/169 .
+            client_id: Some(NullableString(Some(String::from(env!("CARGO_PKG_NAME"))))),
             tagged_fields: Some(TaggedFields::default()),
         };
         let header_version = if use_tagged_fields_in_request {
@@ -1110,7 +1112,7 @@ mod tests {
                         request_api_key: ApiKey::ApiVersions,
                         request_api_version: ApiVersion(Int16(0)),
                         correlation_id: Int32(correlation_id),
-                        client_id: Some(NullableString(None)),
+                        client_id: Some(NullableString(Some(String::from(env!("CARGO_PKG_NAME"))))),
                         tagged_fields: None,
                     }
                 );
