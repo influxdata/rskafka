@@ -50,7 +50,7 @@ async fn test_stream_consumer_start_at_0() {
         .build();
 
     // Fetch first record
-    assert_ok(timeout(Duration::from_millis(100), stream.next()).await);
+    assert_ok(timeout(Duration::from_millis(1_000), stream.next()).await);
 
     // No further records
     assert_stream_pending(&mut stream).await;
@@ -64,10 +64,10 @@ async fn test_stream_consumer_start_at_0() {
         .unwrap();
 
     // Get second record
-    assert_ok(timeout(Duration::from_millis(100), stream.next()).await);
+    assert_ok(timeout(Duration::from_millis(1_000), stream.next()).await);
 
     // Get third record
-    assert_ok(timeout(Duration::from_millis(100), stream.next()).await);
+    assert_ok(timeout(Duration::from_millis(1_000), stream.next()).await);
 
     // No further records
     assert_stream_pending(&mut stream).await;
@@ -110,7 +110,7 @@ async fn test_stream_consumer_start_at_1() {
 
     // Skips first record
     let (record_and_offset, _watermark) =
-        assert_ok(timeout(Duration::from_millis(100), stream.next()).await);
+        assert_ok(timeout(Duration::from_millis(1_000), stream.next()).await);
     assert_eq!(record_and_offset.record, record_2);
 
     // No further records
@@ -188,7 +188,7 @@ async fn test_stream_consumer_start_at_earliest() {
 
     // Fetch first record
     let (record_and_offset, _) =
-        assert_ok(timeout(Duration::from_millis(100), stream.next()).await);
+        assert_ok(timeout(Duration::from_millis(1_000), stream.next()).await);
     assert_eq!(record_and_offset.record, record_1);
 
     // No further records
@@ -201,7 +201,7 @@ async fn test_stream_consumer_start_at_earliest() {
 
     // Get second record
     let (record_and_offset, _) =
-        assert_ok(timeout(Duration::from_millis(100), stream.next()).await);
+        assert_ok(timeout(Duration::from_millis(1_000), stream.next()).await);
     assert_eq!(record_and_offset.record, record_2);
 
     // No further records
@@ -246,7 +246,7 @@ async fn test_stream_consumer_start_at_earliest_empty() {
 
     // Get second record
     let (record_and_offset, _) =
-        assert_ok(timeout(Duration::from_millis(200), stream.next()).await);
+        assert_ok(timeout(Duration::from_millis(1_000), stream.next()).await);
     assert_eq!(record_and_offset.record, record);
 
     // No further records
@@ -293,7 +293,7 @@ async fn test_stream_consumer_start_at_earliest_after_deletion() {
 
     // First record skipped / deleted
     let (record_and_offset, _) =
-        assert_ok(timeout(Duration::from_millis(100), stream.next()).await);
+        assert_ok(timeout(Duration::from_millis(1_000), stream.next()).await);
     assert_eq!(record_and_offset.record, record_2);
 
     // No further records
@@ -342,7 +342,7 @@ async fn test_stream_consumer_start_at_latest() {
 
     // Get second record
     let (record_and_offset, _) =
-        assert_ok(timeout(Duration::from_millis(100), stream.next()).await);
+        assert_ok(timeout(Duration::from_millis(1_000), stream.next()).await);
     assert_eq!(record_and_offset.record, record_2);
 
     // No further records
@@ -386,7 +386,7 @@ async fn test_stream_consumer_start_at_latest_empty() {
 
     // Get second record
     let (record_and_offset, _) =
-        assert_ok(timeout(Duration::from_millis(100), stream.next()).await);
+        assert_ok(timeout(Duration::from_millis(1_000), stream.next()).await);
     assert_eq!(record_and_offset.record, record);
 
     // No further records
