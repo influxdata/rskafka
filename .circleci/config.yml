@@ -208,6 +208,10 @@ jobs:
       - run:
           name: Cargo test
           command: cargo test --all-features --all-targets
+      # extra step required due to https://github.com/rust-lang/cargo/issues/11015
+      - run:
+          name: Cargo test doctests
+          command: cargo test --all-features --doc
       - cache_save
       - store_artifacts:
           path: proptest-regressions
@@ -280,6 +284,10 @@ jobs:
       - run:
           name: Cargo test
           command: cargo test --all-features --all-targets
+      # extra step required due to https://github.com/rust-lang/cargo/issues/11015
+      - run:
+          name: Cargo test doctests
+          command: cargo test --all-features --doc
       - cache_save
       - store_artifacts:
           path: proptest-regressions
