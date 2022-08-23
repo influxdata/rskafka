@@ -1,6 +1,7 @@
 ---
 name: "Semantic PR and Commit Messages"
 
+# yamllint disable-line rule:truthy
 on:
   pull_request:
     types: [opened, reopened, synchronize, edited]
