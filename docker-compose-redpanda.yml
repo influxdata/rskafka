@@ -19,6 +19,7 @@ services:
       - --advertise-kafka-addr EXTERNAL://127.0.0.1:9010,FOR_PROXY://redpanda-0:9020
       - --rpc-addr 0.0.0.0:33145
       - --advertise-rpc-addr redpanda-0:33145
+      - --set redpanda.auto_create_topics_enabled=false
   redpanda-1:
     image: vectorized/redpanda:v22.2.1
     container_name: redpanda-1
@@ -38,6 +39,7 @@ services:
       - --advertise-kafka-addr EXTERNAL://127.0.0.1:9011,FOR_PROXY://redpanda-1:9021
       - --rpc-addr 0.0.0.0:33146
       - --advertise-rpc-addr redpanda-1:33146
+      - --set redpanda.auto_create_topics_enabled=false
   redpanda-2:
     image: vectorized/redpanda:v22.2.1
     container_name: redpanda-2
@@ -57,6 +59,7 @@ services:
       - --advertise-kafka-addr EXTERNAL://127.0.0.1:9012,FOR_PROXY://redpanda-2:9022
       - --rpc-addr 0.0.0.0:33147
       - --advertise-rpc-addr redpanda-2:33147
+      - --set redpanda.auto_create_topics_enabled=false
   proxy:
     image: serjs/go-socks5-proxy
     ports:
