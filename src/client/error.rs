@@ -93,6 +93,9 @@ pub enum Error {
 
     #[error("All retries failed: {0}")]
     RetryFailed(#[from] crate::backoff::BackoffError),
+
+    #[error("Timeout")]
+    Timeout,
 }
 
 impl Error {

@@ -42,6 +42,7 @@
 //! use rskafka::{
 //!     client::{
 //!         ClientBuilder,
+//!         partition::PartitionClientBindMode,
 //!         producer::{
 //!             aggregator::RecordAggregator,
 //!             BatchProducerBuilder,
@@ -60,7 +61,11 @@
 //! let connection = "localhost:9093".to_owned();
 //! let client = ClientBuilder::new(vec![connection]).build().await.unwrap();
 //! let partition_client = Arc::new(
-//!     client.partition_client("my_topic", 0).await.unwrap()
+//!     client.partition_client(
+//!         "my_topic",
+//!         0,
+//!         PartitionClientBindMode::Strong,
+//!     ).await.unwrap()
 //! );
 //!
 //! // construct batch producer
@@ -91,6 +96,7 @@
 //! use rskafka::{
 //!     client::{
 //!         ClientBuilder,
+//!         partition::PartitionClientBindMode,
 //!         producer::{
 //!             aggregator::{
 //!                 Aggregator,
@@ -177,7 +183,11 @@
 //! let connection = "localhost:9093".to_owned();
 //! let client = ClientBuilder::new(vec![connection]).build().await.unwrap();
 //! let partition_client = Arc::new(
-//!     client.partition_client("my_topic", 0).await.unwrap()
+//!     client.partition_client(
+//!         "my_topic",
+//!         0,
+//!         PartitionClientBindMode::Strong,
+//!     ).await.unwrap()
 //! );
 //!
 //! // construct batch producer

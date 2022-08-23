@@ -32,8 +32,40 @@ use tracing::{error, info};
 
 use super::error::ServerErrorResponse;
 
+/// How strongly a [`PartitionClient`] is bound to a partition.
+///
+/// Under some circumstances and broker implementations, you might face a [`ProtocolError::UnknownTopicOrPartition`]
+/// for nearly all operations directly after topic/partition creation. Since the Kafka protocol offers no (at least
+/// to our knowledge) we to differentiate between "a topic/partition actually does not exist" and "our multiverse
+/// split brain is not synced up yet", we can only offer your this manual way to wait for the existence.
+///
+/// We offer the following ways to deal with this:
+///
+/// - Use a [strong binding](Self::Strong) which assumes a partition exists and retries [`ProtocolError::UnknownTopicOrPartition`]
+/// - Use a [weak binding](Self::Weak). All other methods (including the creation of a [`PartitionClient`]) may produce
+///   sporadic [`ProtocolError::UnknownTopicOrPartition`] errors.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PartitionClientBindMode {
+    /// Assume that the partition (or topic that contains it) can be deleted at any time.
+    ///
+    /// This bubbles [`ProtocolError::UnknownTopicOrPartition`] to the user.
+    Weak,
+
+    /// Assume that the partition (and topic that contais it) exist.
+    ///
+    /// This retries [`ProtocolError::UnknownTopicOrPartition`].
+    Strong,
+}
+
+/// Compression of records.
+///
+/// This is only relevant for [produce requests](PartitionClient::produce). There the client compresses the records.
+///
+/// For [fetch requests](PartitionClient::fetch_records) we have to accept a message as it exists, i.e. how it was
+/// originally compressed. The broker will NOT change the data compression based on our request.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub enum Compression {
+    #[default]
     NoCompression,
     #[cfg(feature = "compression-gzip")]
     Gzip,
@@ -43,12 +75,6 @@ pub enum Compression {
     Snappy,
     #[cfg(feature = "compression-zstd")]
     Zstd,
-}
-
-impl Default for Compression {
-    fn default() -> Self {
-        Self::NoCompression
-    }
 }
 
 /// Which type of offset should be requested by [`PartitionClient::get_offset`].
@@ -88,6 +114,8 @@ pub struct PartitionClient {
 
     /// Current broker connection if any
     current_broker: Mutex<Option<BrokerConnection>>,
+
+    bind_mode: PartitionClientBindMode,
 }
 
 impl std::fmt::Debug for PartitionClient {
@@ -101,6 +129,7 @@ impl PartitionClient {
         topic: String,
         partition: i32,
         brokers: Arc<BrokerConnector>,
+        bind_mode: PartitionClientBindMode,
     ) -> Result<Self> {
         let p = Self {
             topic,
@@ -108,12 +137,14 @@ impl PartitionClient {
             brokers: Arc::clone(&brokers),
             backoff_config: Default::default(),
             current_broker: Mutex::new(None),
+            bind_mode,
         };
 
         // Force discover and establish a cached connection to the leader
         let scope = &p;
         maybe_retry(
-            &Default::default(),
+            &p.backoff_config,
+            p.bind_mode,
             &*brokers,
             "leader_detection",
             || async move {
@@ -150,11 +181,17 @@ impl PartitionClient {
         let n = records.len() as i64;
         let request = &build_produce_request(self.partition, &self.topic, records, compression);
 
-        maybe_retry(&self.backoff_config, self, "produce", || async move {
-            let broker = self.get().await?;
-            let response = broker.request(&request).await?;
-            process_produce_response(self.partition, &self.topic, n, response)
-        })
+        maybe_retry(
+            &self.backoff_config,
+            self.bind_mode,
+            self,
+            "produce",
+            || async move {
+                let broker = self.get().await?;
+                let response = broker.request(&request).await?;
+                process_produce_response(self.partition, &self.topic, n, response)
+            },
+        )
         .await
     }
 
@@ -175,10 +212,16 @@ impl PartitionClient {
     ) -> Result<(Vec<RecordAndOffset>, i64)> {
         let request = &build_fetch_request(offset, bytes, max_wait_ms, self.partition, &self.topic);
 
-        let partition = maybe_retry(&self.backoff_config, self, "fetch_records", || async move {
-            let response = self.get().await?.request(&request).await?;
-            process_fetch_response(self.partition, &self.topic, response, offset)
-        })
+        let partition = maybe_retry(
+            &self.backoff_config,
+            self.bind_mode,
+            self,
+            "fetch_records",
+            || async move {
+                let response = self.get().await?.request(&request).await?;
+                process_fetch_response(self.partition, &self.topic, response, offset)
+            },
+        )
         .await?;
 
         let records = extract_records(partition.records.0, offset)?;
@@ -196,10 +239,16 @@ impl PartitionClient {
     pub async fn get_offset(&self, at: OffsetAt) -> Result<i64> {
         let request = &build_list_offsets_request(self.partition, &self.topic, at);
 
-        let partition = maybe_retry(&self.backoff_config, self, "get_offset", || async move {
-            let response = self.get().await?.request(&request).await?;
-            process_list_offsets_response(self.partition, &self.topic, response)
-        })
+        let partition = maybe_retry(
+            &self.backoff_config,
+            self.bind_mode,
+            self,
+            "get_offset",
+            || async move {
+                let response = self.get().await?.request(&request).await?;
+                process_list_offsets_response(self.partition, &self.topic, response)
+            },
+        )
         .await?;
 
         extract_offset(partition)
@@ -216,6 +265,7 @@ impl PartitionClient {
 
         maybe_retry(
             &self.backoff_config,
+            self.bind_mode,
             self,
             "delete_records",
             || async move {
@@ -401,6 +451,7 @@ impl BrokerCache for &PartitionClient {
 /// and handles certain classes of error
 async fn maybe_retry<B, R, F, T>(
     backoff_config: &BackoffConfig,
+    bind_mode: PartitionClientBindMode,
     broker_cache: B,
     request_name: &str,
     f: R,
@@ -433,6 +484,12 @@ where
                     protocol_error: ProtocolError::NotLeaderOrFollower,
                     ..
                 } => {
+                    broker_cache.invalidate().await;
+                }
+                Error::ServerError {
+                    protocol_error: ProtocolError::UnknownTopicOrPartition,
+                    ..
+                } if bind_mode == PartitionClientBindMode::Strong => {
                     broker_cache.invalidate().await;
                 }
                 _ => {

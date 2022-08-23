@@ -32,7 +32,7 @@ It will be a good fit for workloads that:
 use rskafka::{
     client::{
         ClientBuilder,
-        partition::Compression,
+        partition::{Compression, PartitionClientBindMode},
     },
     record::Record,
 };
@@ -58,6 +58,7 @@ let partition_client = client
     .partition_client(
         topic.to_owned(),
         0,  // partition
+        PartitionClientBindMode::Strong,
      )
      .await
     .unwrap();

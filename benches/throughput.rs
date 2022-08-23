@@ -22,7 +22,7 @@ use rdkafka::{
 use rskafka::{
     client::{
         consumer::{StartOffset, StreamConsumerBuilder as RsStreamConsumerBuilder},
-        partition::{Compression, PartitionClient},
+        partition::{Compression, PartitionClient, PartitionClientBindMode},
         producer::{aggregator::RecordAggregator, BatchProducerBuilder},
         ClientBuilder,
     },
@@ -448,7 +448,10 @@ async fn setup_rskafka(connection: Vec<String>) -> PartitionClient {
         .await
         .unwrap();
 
-    client.partition_client(topic_name, 0).await.unwrap()
+    client
+        .partition_client(topic_name, 0, PartitionClientBindMode::Strong)
+        .await
+        .unwrap()
 }
 
 static LOG_SETUP: Once = Once::new();

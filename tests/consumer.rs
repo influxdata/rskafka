@@ -9,7 +9,7 @@ use rskafka::{
     client::{
         consumer::{StartOffset, StreamConsumer, StreamConsumerBuilder},
         error::{Error, ProtocolError},
-        partition::Compression,
+        partition::{Compression, PartitionClientBindMode},
         ClientBuilder,
     },
     record::RecordAndOffset,
@@ -34,7 +34,12 @@ async fn test_stream_consumer_start_at_0() {
 
     let record = record(b"x");
 
-    let partition_client = Arc::new(client.partition_client(&topic, 0).await.unwrap());
+    let partition_client = Arc::new(
+        client
+            .partition_client(&topic, 0, PartitionClientBindMode::Strong)
+            .await
+            .unwrap(),
+    );
     partition_client
         .produce(vec![record.clone()], Compression::NoCompression)
         .await
@@ -85,7 +90,12 @@ async fn test_stream_consumer_start_at_1() {
     let record_1 = record(b"x");
     let record_2 = record(b"y");
 
-    let partition_client = Arc::new(client.partition_client(&topic, 0).await.unwrap());
+    let partition_client = Arc::new(
+        client
+            .partition_client(&topic, 0, PartitionClientBindMode::Strong)
+            .await
+            .unwrap(),
+    );
     partition_client
         .produce(
             vec![record_1.clone(), record_2.clone()],
@@ -121,7 +131,12 @@ async fn test_stream_consumer_offset_out_of_range() {
         .await
         .unwrap();
 
-    let partition_client = Arc::new(client.partition_client(&topic, 0).await.unwrap());
+    let partition_client = Arc::new(
+        client
+            .partition_client(&topic, 0, PartitionClientBindMode::Strong)
+            .await
+            .unwrap(),
+    );
 
     let mut stream = StreamConsumerBuilder::new(partition_client, StartOffset::At(1)).build();
 
@@ -155,7 +170,12 @@ async fn test_stream_consumer_start_at_earliest() {
     let record_1 = record(b"x");
     let record_2 = record(b"y");
 
-    let partition_client = Arc::new(client.partition_client(&topic, 0).await.unwrap());
+    let partition_client = Arc::new(
+        client
+            .partition_client(&topic, 0, PartitionClientBindMode::Strong)
+            .await
+            .unwrap(),
+    );
     partition_client
         .produce(vec![record_1.clone()], Compression::NoCompression)
         .await
@@ -204,7 +224,12 @@ async fn test_stream_consumer_start_at_earliest_empty() {
 
     let record = record(b"x");
 
-    let partition_client = Arc::new(client.partition_client(&topic, 0).await.unwrap());
+    let partition_client = Arc::new(
+        client
+            .partition_client(&topic, 0, PartitionClientBindMode::Strong)
+            .await
+            .unwrap(),
+    );
 
     let mut stream =
         StreamConsumerBuilder::new(Arc::clone(&partition_client), StartOffset::Earliest)
@@ -245,7 +270,12 @@ async fn test_stream_consumer_start_at_earliest_after_deletion() {
     let record_1 = record(b"x");
     let record_2 = record(b"y");
 
-    let partition_client = Arc::new(client.partition_client(&topic, 0).await.unwrap());
+    let partition_client = Arc::new(
+        client
+            .partition_client(&topic, 0, PartitionClientBindMode::Strong)
+            .await
+            .unwrap(),
+    );
     partition_client
         .produce(
             vec![record_1.clone(), record_2.clone()],
@@ -287,7 +317,12 @@ async fn test_stream_consumer_start_at_latest() {
     let record_1 = record(b"x");
     let record_2 = record(b"y");
 
-    let partition_client = Arc::new(client.partition_client(&topic, 0).await.unwrap());
+    let partition_client = Arc::new(
+        client
+            .partition_client(&topic, 0, PartitionClientBindMode::Strong)
+            .await
+            .unwrap(),
+    );
     partition_client
         .produce(vec![record_1.clone()], Compression::NoCompression)
         .await
@@ -330,7 +365,12 @@ async fn test_stream_consumer_start_at_latest_empty() {
 
     let record = record(b"x");
 
-    let partition_client = Arc::new(client.partition_client(&topic, 0).await.unwrap());
+    let partition_client = Arc::new(
+        client
+            .partition_client(&topic, 0, PartitionClientBindMode::Strong)
+            .await
+            .unwrap(),
+    );
 
     let mut stream = StreamConsumerBuilder::new(Arc::clone(&partition_client), StartOffset::Latest)
         .with_max_wait_ms(50)
