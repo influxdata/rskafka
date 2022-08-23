@@ -87,6 +87,9 @@ jobs:
       - run:
           name: yamllint
           command: yamllint --strict .
+      - run:
+          name: shellcheck
+          command: find . \( -name target -prune \) -o -type f \( -iname '*.sh' -or -iname '*.bash' \) -exec shellcheck {} \;
       - cache_save
   cargo_audit:
     docker:

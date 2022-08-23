@@ -3,8 +3,12 @@
 
 set -euo pipefail
 
-readonly SCRIPTPATH="$( cd -- "$(dirname "$0")" >/dev/null 2>&1 ; pwd -P )"
+SCRIPTPATH="$( cd -- "$(dirname "$0")" >/dev/null 2>&1 ; pwd -P )"
+readonly SCRIPTPATH
+
 readonly DEPS=(redpanda kafka zookeeper)
+
+pushd "$SCRIPTPATH/.."
 
 for dependency in "${DEPS[@]}"; do
     echo "========================================"
