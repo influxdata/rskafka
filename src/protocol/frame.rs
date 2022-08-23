@@ -37,6 +37,7 @@ impl<R> AsyncMessageRead for R
 where
     R: AsyncRead + Send + Unpin,
 {
+    #[allow(clippy::read_zero_byte_vec)] // See https://github.com/rust-lang/rust-clippy/issues/9274
     async fn read_message(&mut self, max_message_size: usize) -> Result<Vec<u8>, ReadError> {
         let mut len_buf = vec![0u8; 4];
         self.read_exact(&mut len_buf).await?;

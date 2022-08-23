@@ -59,6 +59,7 @@ let partition_client = client
         topic.to_owned(),
         0,  // partition
      )
+     .await
     .unwrap();
 
 // produce some data

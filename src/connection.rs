@@ -84,15 +84,15 @@ enum BrokerRepresentation {
 impl BrokerRepresentation {
     fn id(&self) -> Option<i32> {
         match self {
-            BrokerRepresentation::Bootstrap(_) => None,
-            BrokerRepresentation::Topology(broker) => Some(broker.id),
+            Self::Bootstrap(_) => None,
+            Self::Topology(broker) => Some(broker.id),
         }
     }
 
     fn url(&self) -> String {
         match self {
-            BrokerRepresentation::Bootstrap(inner) => inner.clone(),
-            BrokerRepresentation::Topology(broker) => broker.to_string(),
+            Self::Bootstrap(inner) => inner.clone(),
+            Self::Topology(broker) => broker.to_string(),
         }
     }
 }

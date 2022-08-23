@@ -60,7 +60,7 @@
 //! let connection = "localhost:9093".to_owned();
 //! let client = ClientBuilder::new(vec![connection]).build().await.unwrap();
 //! let partition_client = Arc::new(
-//!     client.partition_client("my_topic", 0).unwrap()
+//!     client.partition_client("my_topic", 0).await.unwrap()
 //! );
 //!
 //! // construct batch producer
@@ -177,7 +177,7 @@
 //! let connection = "localhost:9093".to_owned();
 //! let client = ClientBuilder::new(vec![connection]).build().await.unwrap();
 //! let partition_client = Arc::new(
-//!     client.partition_client("my_topic", 0).unwrap()
+//!     client.partition_client("my_topic", 0).await.unwrap()
 //! );
 //!
 //! // construct batch producer

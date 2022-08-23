@@ -4,7 +4,7 @@ use thiserror::Error;
 use tokio::sync::Notify;
 use tracing::warn;
 
-#[derive(Debug, Error, Clone, PartialEq)]
+#[derive(Debug, Error, Clone, PartialEq, Eq)]
 pub enum Error {
     #[error("BroadcastOnce dropped")]
     Dropped,
