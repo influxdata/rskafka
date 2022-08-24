@@ -473,39 +473,46 @@ where
                 Err(e) => e,
             };
 
-            match error {
+            let retry = match error {
                 Error::Request(RequestError::Poisoned(_) | RequestError::IO(_))
-                | Error::Connection(_) => broker_cache.invalidate().await,
+                | Error::Connection(_) => {
+                    broker_cache.invalidate().await;
+                    true
+                }
                 Error::ServerError {
                     protocol_error:
                         ProtocolError::InvalidReplicationFactor
                         | ProtocolError::LeaderNotAvailable
                         | ProtocolError::OffsetNotAvailable,
                     ..
-                } => {}
+                } => true,
                 Error::ServerError {
                     protocol_error: ProtocolError::NotLeaderOrFollower,
                     ..
                 } => {
                     broker_cache.invalidate().await;
+                    true
                 }
                 Error::ServerError {
                     protocol_error: ProtocolError::UnknownTopicOrPartition,
                     ..
-                } if unknown_topic_handling == UnknownTopicHandling::Retry => {
+                } => {
                     broker_cache.invalidate().await;
+                    unknown_topic_handling == UnknownTopicHandling::Retry
                 }
-                _ => {
-                    error!(
-                        e=%error,
-                        request_name,
-                        "request encountered fatal error",
-                    );
-                    return ControlFlow::Break(Err(error));
-                }
-            }
+                _ => false,
+            };
 
-            ControlFlow::Continue(error)
+            if retry {
+                ControlFlow::Continue(error)
+            } else {
+                error!(
+                    e=%error,
+                    request_name,
+                    "request encountered fatal error",
+                );
+                ControlFlow::Break(Err(error))
+            }
         })
         .await
         .map_err(Error::RetryFailed)?
