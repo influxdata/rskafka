@@ -10,7 +10,7 @@ use rskafka::{
 use std::{collections::BTreeMap, str::FromStr, sync::Arc, time::Duration};
 
 mod test_helpers;
-use test_helpers::{maybe_start_logging, now, random_topic_name, record};
+use test_helpers::{maybe_start_logging, now, random_topic_name, record, TEST_TIMEOUT};
 
 #[tokio::test]
 async fn test_plain() {
@@ -52,7 +52,7 @@ async fn test_topic_crud() {
         .unwrap();
 
     // might take a while to converge
-    tokio::time::timeout(Duration::from_millis(1_000), async {
+    tokio::time::timeout(TEST_TIMEOUT, async {
         loop {
             let topics = client.list_topics().await.unwrap();
             let topic = topics.iter().find(|t| t.name == new_topic);
@@ -119,6 +119,7 @@ async fn test_non_existing_partition() {
 
     // do NOT create the topic
 
+    // short timeout, should just check that we will never finish
     tokio::time::timeout(Duration::from_millis(100), async {
         client
             .partition_client(topic_name.clone(), 0, UnknownTopicHandling::Retry)

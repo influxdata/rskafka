@@ -1,7 +1,11 @@
 use parking_lot::Once;
 use rskafka::record::Record;
-use std::collections::BTreeMap;
+use std::{collections::BTreeMap, time::Duration};
 use time::OffsetDateTime;
+
+/// Sensible test timeout.
+#[allow(dead_code)]
+pub const TEST_TIMEOUT: Duration = Duration::from_secs(4);
 
 /// Environment variable to configure if integration tests should be run.
 ///
