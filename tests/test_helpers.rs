@@ -1,95 +1,153 @@
 use parking_lot::Once;
 use rskafka::record::Record;
-use std::collections::BTreeMap;
+use std::{collections::BTreeMap, time::Duration};
 use time::OffsetDateTime;
 
-/// Get the testing Kafka connection string or return current scope.
+/// Sensible test timeout.
+#[allow(dead_code)]
+pub const TEST_TIMEOUT: Duration = Duration::from_secs(4);
+
+/// Environment variable to configure if integration tests should be run.
 ///
-/// If `TEST_INTEGRATION` and `KAFKA_CONNECT` are set, return the Kafka connection URL to the
-/// caller.
+/// Accepts a boolean.
+pub const ENV_TEST_INTEGRATION: &str = "TEST_INTEGRATION";
+
+/// Environment variable that contains the list of bootstrap brokers.
+pub const ENV_KAFKA_CONNECT: &str = "KAFKA_CONNECT";
+
+/// Environment variable that determines which broker implementation we use.
+pub const ENV_TEST_BROKER_IMPL: &str = "TEST_BROKER_IMPL";
+
+/// Environment variable that contains the connection string for a SOCKS5 proxy that can be used for testing.
+pub const ENV_SOCKS5_PROXY: &str = "SOCKS5_PROXY";
+
+/// Broker implementation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BrokerImpl {
+    Kafka,
+    Redpanda,
+}
+
+impl BrokerImpl {
+    #[allow(dead_code)]
+    pub fn supports_deletes(&self) -> bool {
+        match self {
+            BrokerImpl::Kafka => true,
+            // See https://github.com/redpanda-data/redpanda/issues/2648
+            BrokerImpl::Redpanda => false,
+        }
+    }
+}
+
+/// Test config.
+#[derive(Debug)]
+pub struct TestConfig {
+    pub bootstrap_brokers: Vec<String>,
+    pub broker_impl: BrokerImpl,
+    pub socks5_proxy: Option<String>,
+}
+
+impl TestConfig {
+    /// Get test config from environment.
+    pub fn from_env() -> Option<Self> {
+        dotenvy::dotenv().ok();
+
+        match std::env::var(ENV_TEST_INTEGRATION)
+            .ok()
+            .map(|s| parse_as_bool(&s))
+        {
+            None | Some(Ok(false)) => {
+                return None;
+            }
+            Some(Ok(true)) => {}
+            Some(Err(s)) => {
+                panic!("Invalid value for {ENV_TEST_INTEGRATION}: {s}")
+            }
+        }
+
+        let bootstrap_brokers = std::env::var(ENV_KAFKA_CONNECT)
+            .ok()
+            .unwrap_or_else(|| panic!("{ENV_KAFKA_CONNECT} not set, please read README"))
+            .split(',')
+            .map(|s| s.trim().to_owned())
+            .collect();
+
+        let broker_impl = std::env::var(ENV_TEST_BROKER_IMPL)
+            .ok()
+            .unwrap_or_else(|| panic!("{ENV_TEST_BROKER_IMPL} is required to determine the broker implementation (e.g. kafka, redpanda)"))
+            .to_lowercase();
+        let broker_impl = match broker_impl.as_str() {
+            "kafka" => BrokerImpl::Kafka,
+            "redpanda" => BrokerImpl::Redpanda,
+            other => panic!("Invalid {ENV_TEST_BROKER_IMPL}: {other}"),
+        };
+
+        let socks5_proxy = std::env::var(ENV_SOCKS5_PROXY).ok();
+
+        Some(Self {
+            bootstrap_brokers,
+            broker_impl,
+            socks5_proxy,
+        })
+    }
+}
+
+/// Parse string as boolean variable.
+fn parse_as_bool(s: &str) -> Result<bool, String> {
+    let s_lower = s.to_lowercase();
+
+    match s_lower.as_str() {
+        "0" | "false" | "f" | "no" | "n" => Ok(false),
+        "1" | "true" | "t" | "yes" | "y" => Ok(true),
+        _ => Err(s.to_owned()),
+    }
+}
+
+/// Get [`TestConfig`] or exit test (by returning).
 ///
-/// If `TEST_INTEGRATION` is set but `KAFKA_CONNECT` is not set, fail the tests and provide
-/// guidance for setting `KAFKA_CONNECTION`.
+/// Takes an optional list of capabilities that are needed to run the test. These are:
 ///
-/// If `TEST_INTEGRATION` is not set, skip the calling test by returning early.
+/// - `delete`: the broker implementation must support deletes
+/// - `socks5`: a SOCKS5 proxy is available for tests
 #[macro_export]
 macro_rules! maybe_skip_kafka_integration {
     () => {{
-        use std::env;
-        dotenvy::dotenv().ok();
-
-        match (
-            env::var("TEST_INTEGRATION").is_ok(),
-            env::var("KAFKA_CONNECT").ok(),
-        ) {
-            (true, Some(kafka_connection)) => {
-                let kafka_connection: Vec<String> =
-                    kafka_connection.split(",").map(|s| s.to_owned()).collect();
-                kafka_connection
-            }
-            (true, None) => {
-                panic!(
-                    "TEST_INTEGRATION is set which requires running integration tests, but \
-                    KAFKA_CONNECT is not set. Please run Kafka or Redpanda then \
-                    set KAFKA_CONNECT as directed in README.md."
-                )
-            }
-            (false, Some(_)) => {
-                eprintln!("skipping Kafka integration tests - set TEST_INTEGRATION to run");
-                return;
-            }
-            (false, None) => {
+        match test_helpers::TestConfig::from_env() {
+            Some(cfg) => cfg,
+            None => {
                 eprintln!(
-                    "skipping Kafka integration tests - set TEST_INTEGRATION and KAFKA_CONNECT to \
-                    run"
+                    "skipping Kafka integration tests - set {} to run",
+                    test_helpers::ENV_KAFKA_CONNECT
                 );
                 return;
             }
         }
     }};
-}
-
-/// Performs delete operation using.
-///
-/// This is skipped (via `return`) if the broker returns `NoVersionMatch`, except when the `TEST_DELETE_RECORDS`
-/// environment variable is set.
-///
-/// This is helpful because Redpanda does not support deletes yet, see
-/// <https://github.com/redpanda-data/redpanda/issues/1016> but we also don not want to skip these test unconditionally.
-#[macro_export]
-macro_rules! maybe_skip_delete {
-    ($partition_client:ident, $offset:expr) => {
-        match $partition_client.delete_records($offset, 1_000).await {
-            Ok(()) => {}
-            Err(rskafka::client::error::Error::Request(
-                rskafka::client::error::RequestError::NoVersionMatch { .. },
-            )) if std::env::var("TEST_DELETE_RECORDS").is_err() => {
-                println!("Skip test_delete_records");
-                return;
-            }
-            Err(e) => panic!("Cannot delete: {e}"),
-        }
+    ($cap:ident) => {
+        $crate::maybe_skip_kafka_integration!($cap,)
     };
-}
-
-/// Get the Socks Proxy environment variable.
-///
-/// If `SOCKS_PROXY` is not set, fail the tests and provide
-/// guidance for setting `SOCKS_PROXY`.
-#[macro_export]
-macro_rules! maybe_skip_SOCKS_PROXY {
-    () => {{
-        use std::env;
-        dotenvy::dotenv().ok();
-
-        match (env::var("SOCKS_PROXY").ok()) {
-            Some(proxy) => proxy,
-            _ => {
-                eprintln!("skipping integration tests with Proxy - set SOCKS_PROXY to run");
-                return;
-            }
+    ($cap:ident, $($other:ident),*,) => {
+        $crate::maybe_skip_kafka_integration!($cap, $($other:ident),*)
+    };
+    (delete, $($other:ident),*) => {{
+        let cfg = $crate::maybe_skip_kafka_integration!($($other),*);
+        if !cfg.broker_impl.supports_deletes() {
+            eprintln!("Skipping due to missing delete support");
+            return;
         }
+        cfg
     }};
+    (socks5, $($other:ident),*) => {{
+        let cfg = $crate::maybe_skip_kafka_integration!($($other),*);
+        if cfg.socks5_proxy.is_none() {
+            eprintln!("skipping integration tests with Proxy - set {} to run", test_helpers::ENV_SOCKS5_PROXY);
+            return;
+        }
+        cfg
+    }};
+    ($cap:ident, $($other:ident),*) => {
+        compile_error!(concat!("invalid capability: ", stringify!($cap)))
+    };
 }
 
 /// Generated random topic name for testing.
