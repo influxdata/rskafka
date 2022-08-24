@@ -2,7 +2,7 @@ use std::{sync::Arc, time::Duration};
 
 use rskafka::{
     client::{
-        partition::{Compression, PartitionClient, PartitionClientBindMode},
+        partition::{Compression, PartitionClient, UnknownTopicHandling},
         ClientBuilder,
     },
     record::{Record, RecordAndOffset},
@@ -262,7 +262,7 @@ async fn assert_produce_consume<F1, G1, F2, G2>(
 
     let partition_client = Arc::new(
         client
-            .partition_client(topic_name.clone(), 1, PartitionClientBindMode::Strong)
+            .partition_client(topic_name.clone(), 1, UnknownTopicHandling::Retry)
             .await
             .unwrap(),
     );

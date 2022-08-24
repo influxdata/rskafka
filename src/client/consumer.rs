@@ -10,7 +10,7 @@
 //!         StartOffset,
 //!         StreamConsumerBuilder,
 //!     },
-//!     partition::PartitionClientBindMode,
+//!     partition::UnknownTopicHandling,
 //! };
 //! use std::sync::Arc;
 //!
@@ -21,7 +21,7 @@
 //!     client.partition_client(
 //!         "my_topic",
 //!         0,
-//!         PartitionClientBindMode::Strong,
+//!         UnknownTopicHandling::Retry,
 //!     ).await.unwrap()
 //! );
 //!

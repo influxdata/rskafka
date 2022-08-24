@@ -42,7 +42,7 @@
 //! use rskafka::{
 //!     client::{
 //!         ClientBuilder,
-//!         partition::PartitionClientBindMode,
+//!         partition::UnknownTopicHandling,
 //!         producer::{
 //!             aggregator::RecordAggregator,
 //!             BatchProducerBuilder,
@@ -64,7 +64,7 @@
 //!     client.partition_client(
 //!         "my_topic",
 //!         0,
-//!         PartitionClientBindMode::Strong,
+//!         UnknownTopicHandling::Retry,
 //!     ).await.unwrap()
 //! );
 //!
@@ -96,7 +96,7 @@
 //! use rskafka::{
 //!     client::{
 //!         ClientBuilder,
-//!         partition::PartitionClientBindMode,
+//!         partition::UnknownTopicHandling,
 //!         producer::{
 //!             aggregator::{
 //!                 Aggregator,
@@ -186,7 +186,7 @@
 //!     client.partition_client(
 //!         "my_topic",
 //!         0,
-//!         PartitionClientBindMode::Strong,
+//!         UnknownTopicHandling::Retry,
 //!     ).await.unwrap()
 //! );
 //!

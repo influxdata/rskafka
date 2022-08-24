@@ -9,7 +9,7 @@ use rskafka::{
     client::{
         consumer::{StartOffset, StreamConsumer, StreamConsumerBuilder},
         error::{Error, ProtocolError},
-        partition::{Compression, PartitionClientBindMode},
+        partition::{Compression, UnknownTopicHandling},
         ClientBuilder,
     },
     record::RecordAndOffset,
@@ -36,7 +36,7 @@ async fn test_stream_consumer_start_at_0() {
 
     let partition_client = Arc::new(
         client
-            .partition_client(&topic, 0, PartitionClientBindMode::Strong)
+            .partition_client(&topic, 0, UnknownTopicHandling::Retry)
             .await
             .unwrap(),
     );
@@ -92,7 +92,7 @@ async fn test_stream_consumer_start_at_1() {
 
     let partition_client = Arc::new(
         client
-            .partition_client(&topic, 0, PartitionClientBindMode::Strong)
+            .partition_client(&topic, 0, UnknownTopicHandling::Retry)
             .await
             .unwrap(),
     );
@@ -133,7 +133,7 @@ async fn test_stream_consumer_offset_out_of_range() {
 
     let partition_client = Arc::new(
         client
-            .partition_client(&topic, 0, PartitionClientBindMode::Strong)
+            .partition_client(&topic, 0, UnknownTopicHandling::Retry)
             .await
             .unwrap(),
     );
@@ -172,7 +172,7 @@ async fn test_stream_consumer_start_at_earliest() {
 
     let partition_client = Arc::new(
         client
-            .partition_client(&topic, 0, PartitionClientBindMode::Strong)
+            .partition_client(&topic, 0, UnknownTopicHandling::Retry)
             .await
             .unwrap(),
     );
@@ -226,7 +226,7 @@ async fn test_stream_consumer_start_at_earliest_empty() {
 
     let partition_client = Arc::new(
         client
-            .partition_client(&topic, 0, PartitionClientBindMode::Strong)
+            .partition_client(&topic, 0, UnknownTopicHandling::Retry)
             .await
             .unwrap(),
     );
@@ -272,7 +272,7 @@ async fn test_stream_consumer_start_at_earliest_after_deletion() {
 
     let partition_client = Arc::new(
         client
-            .partition_client(&topic, 0, PartitionClientBindMode::Strong)
+            .partition_client(&topic, 0, UnknownTopicHandling::Retry)
             .await
             .unwrap(),
     );
@@ -319,7 +319,7 @@ async fn test_stream_consumer_start_at_latest() {
 
     let partition_client = Arc::new(
         client
-            .partition_client(&topic, 0, PartitionClientBindMode::Strong)
+            .partition_client(&topic, 0, UnknownTopicHandling::Retry)
             .await
             .unwrap(),
     );
@@ -367,7 +367,7 @@ async fn test_stream_consumer_start_at_latest_empty() {
 
     let partition_client = Arc::new(
         client
-            .partition_client(&topic, 0, PartitionClientBindMode::Strong)
+            .partition_client(&topic, 0, UnknownTopicHandling::Retry)
             .await
             .unwrap(),
     );

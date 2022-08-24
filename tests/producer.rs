@@ -1,6 +1,6 @@
 use futures::{future::FusedFuture, pin_mut, FutureExt};
 use rskafka::client::{
-    partition::PartitionClientBindMode,
+    partition::UnknownTopicHandling,
     producer::{aggregator::RecordAggregator, BatchProducerBuilder},
     ClientBuilder,
 };
@@ -28,7 +28,7 @@ async fn test_batch_producer() {
 
     let partition_client = Arc::new(
         client
-            .partition_client(&topic, 0, PartitionClientBindMode::Strong)
+            .partition_client(&topic, 0, UnknownTopicHandling::Retry)
             .await
             .unwrap(),
     );

@@ -2,7 +2,7 @@ use assert_matches::assert_matches;
 use rskafka::{
     client::{
         error::{Error as ClientError, ProtocolError, ServerErrorResponse},
-        partition::{Compression, OffsetAt, PartitionClientBindMode},
+        partition::{Compression, OffsetAt, UnknownTopicHandling},
         ClientBuilder,
     },
     record::{Record, RecordAndOffset},
@@ -89,7 +89,7 @@ async fn test_partition_client() {
         .unwrap();
 
     let partition_client = client
-        .partition_client(topic_name.clone(), 0, PartitionClientBindMode::Strong)
+        .partition_client(topic_name.clone(), 0, UnknownTopicHandling::Retry)
         .await
         .unwrap();
     assert_eq!(partition_client.topic(), &topic_name);
@@ -109,7 +109,7 @@ async fn test_non_existing_partition() {
 
     tokio::time::timeout(Duration::from_millis(100), async {
         client
-            .partition_client(topic_name.clone(), 0, PartitionClientBindMode::Strong)
+            .partition_client(topic_name.clone(), 0, UnknownTopicHandling::Retry)
             .await
             .unwrap();
     })
@@ -117,7 +117,7 @@ async fn test_non_existing_partition() {
     .unwrap_err();
 
     let err = client
-        .partition_client(topic_name.clone(), 0, PartitionClientBindMode::Weak)
+        .partition_client(topic_name.clone(), 0, UnknownTopicHandling::Error)
         .await
         .unwrap_err();
     assert_matches!(
@@ -199,7 +199,7 @@ async fn test_socks5() {
         .unwrap();
 
     let partition_client = client
-        .partition_client(topic_name, 0, PartitionClientBindMode::Strong)
+        .partition_client(topic_name, 0, UnknownTopicHandling::Retry)
         .await
         .unwrap();
 
@@ -234,7 +234,7 @@ async fn test_produce_empty() {
         .unwrap();
 
     let partition_client = client
-        .partition_client(&topic_name, 1, PartitionClientBindMode::Strong)
+        .partition_client(&topic_name, 1, UnknownTopicHandling::Retry)
         .await
         .unwrap();
     partition_client
@@ -259,7 +259,7 @@ async fn test_consume_empty() {
         .unwrap();
 
     let partition_client = client
-        .partition_client(&topic_name, 1, PartitionClientBindMode::Strong)
+        .partition_client(&topic_name, 1, UnknownTopicHandling::Retry)
         .await
         .unwrap();
     let (records, watermark) = partition_client
@@ -286,7 +286,7 @@ async fn test_consume_offset_out_of_range() {
         .unwrap();
 
     let partition_client = client
-        .partition_client(&topic_name, 1, PartitionClientBindMode::Strong)
+        .partition_client(&topic_name, 1, UnknownTopicHandling::Retry)
         .await
         .unwrap();
     let record = record(b"");
@@ -329,7 +329,7 @@ async fn test_get_offset() {
         .unwrap();
 
     let partition_client = client
-        .partition_client(topic_name.clone(), 0, PartitionClientBindMode::Strong)
+        .partition_client(topic_name.clone(), 0, UnknownTopicHandling::Retry)
         .await
         .unwrap();
 
@@ -394,7 +394,7 @@ async fn test_produce_consume_size_cutoff() {
 
     let partition_client = Arc::new(
         client
-            .partition_client(&topic_name, 0, PartitionClientBindMode::Strong)
+            .partition_client(&topic_name, 0, UnknownTopicHandling::Retry)
             .await
             .unwrap(),
     );
@@ -471,7 +471,7 @@ async fn test_consume_midbatch() {
         .unwrap();
 
     let partition_client = client
-        .partition_client(&topic_name, 0, PartitionClientBindMode::Strong)
+        .partition_client(&topic_name, 0, UnknownTopicHandling::Retry)
         .await
         .unwrap();
 
@@ -519,7 +519,7 @@ async fn test_delete_records() {
         .unwrap();
 
     let partition_client = client
-        .partition_client(&topic_name, 0, PartitionClientBindMode::Strong)
+        .partition_client(&topic_name, 0, UnknownTopicHandling::Retry)
         .await
         .unwrap();
 

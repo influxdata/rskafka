@@ -41,20 +41,23 @@ use super::error::ServerErrorResponse;
 ///
 /// We offer the following ways to deal with this:
 ///
-/// - Use a [strong binding](Self::Strong) which assumes a partition exists and retries [`ProtocolError::UnknownTopicOrPartition`]
-/// - Use a [weak binding](Self::Weak). All other methods (including the creation of a [`PartitionClient`]) may produce
+/// - Use a [`Error`](Self::Error). All other methods (including the creation of a [`PartitionClient`]) may produce
 ///   sporadic [`ProtocolError::UnknownTopicOrPartition`] errors.
+/// - Use a [`Retry`](Self::Error) which assumes a partition exists and retries [`ProtocolError::UnknownTopicOrPartition`]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum PartitionClientBindMode {
-    /// Assume that the partition (or topic that contains it) can be deleted at any time.
+pub enum UnknownTopicHandling {
+    /// When a [`ProtocolError::UnknownTopicOrPartition`] is returned by Kafka,
+    /// it is passed up to the user to handle.
     ///
-    /// This bubbles [`ProtocolError::UnknownTopicOrPartition`] to the user.
-    Weak,
+    /// These errors may occur spuriously.
+    Error,
 
-    /// Assume that the partition (and topic that contais it) exist.
+    /// Always retry operations that return a
+    /// [`ProtocolError::UnknownTopicOrPartition`], until the operation succeeds
+    /// or a different error is returned.
     ///
-    /// This retries [`ProtocolError::UnknownTopicOrPartition`].
-    Strong,
+    /// This may unpredictably increase operation latency.
+    Retry,
 }
 
 /// Compression of records.
@@ -115,7 +118,7 @@ pub struct PartitionClient {
     /// Current broker connection if any
     current_broker: Mutex<Option<BrokerConnection>>,
 
-    bind_mode: PartitionClientBindMode,
+    unknown_topic_handling: UnknownTopicHandling,
 }
 
 impl std::fmt::Debug for PartitionClient {
@@ -129,7 +132,7 @@ impl PartitionClient {
         topic: String,
         partition: i32,
         brokers: Arc<BrokerConnector>,
-        bind_mode: PartitionClientBindMode,
+        unknown_topic_handling: UnknownTopicHandling,
     ) -> Result<Self> {
         let p = Self {
             topic,
@@ -137,14 +140,14 @@ impl PartitionClient {
             brokers: Arc::clone(&brokers),
             backoff_config: Default::default(),
             current_broker: Mutex::new(None),
-            bind_mode,
+            unknown_topic_handling,
         };
 
         // Force discover and establish a cached connection to the leader
         let scope = &p;
         maybe_retry(
             &p.backoff_config,
-            p.bind_mode,
+            p.unknown_topic_handling,
             &*brokers,
             "leader_detection",
             || async move {
@@ -183,7 +186,7 @@ impl PartitionClient {
 
         maybe_retry(
             &self.backoff_config,
-            self.bind_mode,
+            self.unknown_topic_handling,
             self,
             "produce",
             || async move {
@@ -214,7 +217,7 @@ impl PartitionClient {
 
         let partition = maybe_retry(
             &self.backoff_config,
-            self.bind_mode,
+            self.unknown_topic_handling,
             self,
             "fetch_records",
             || async move {
@@ -241,7 +244,7 @@ impl PartitionClient {
 
         let partition = maybe_retry(
             &self.backoff_config,
-            self.bind_mode,
+            self.unknown_topic_handling,
             self,
             "get_offset",
             || async move {
@@ -265,7 +268,7 @@ impl PartitionClient {
 
         maybe_retry(
             &self.backoff_config,
-            self.bind_mode,
+            self.unknown_topic_handling,
             self,
             "delete_records",
             || async move {
@@ -451,7 +454,7 @@ impl BrokerCache for &PartitionClient {
 /// and handles certain classes of error
 async fn maybe_retry<B, R, F, T>(
     backoff_config: &BackoffConfig,
-    bind_mode: PartitionClientBindMode,
+    unknown_topic_handling: UnknownTopicHandling,
     broker_cache: B,
     request_name: &str,
     f: R,
@@ -489,7 +492,7 @@ where
                 Error::ServerError {
                     protocol_error: ProtocolError::UnknownTopicOrPartition,
                     ..
-                } if bind_mode == PartitionClientBindMode::Strong => {
+                } if unknown_topic_handling == UnknownTopicHandling::Retry => {
                     broker_cache.invalidate().await;
                 }
                 _ => {
