@@ -1,8 +1,8 @@
 use assert_matches::assert_matches;
 use rskafka::{
     client::{
-        error::{Error as ClientError, ProtocolError},
-        partition::{Compression, OffsetAt},
+        error::{Error as ClientError, ProtocolError, ServerErrorResponse},
+        partition::{Compression, OffsetAt, UnknownTopicHandling},
         ClientBuilder,
     },
     record::{Record, RecordAndOffset},
@@ -89,11 +89,44 @@ async fn test_partition_client() {
         .unwrap();
 
     let partition_client = client
-        .partition_client(topic_name.clone(), 0)
+        .partition_client(topic_name.clone(), 0, UnknownTopicHandling::Retry)
         .await
         .unwrap();
     assert_eq!(partition_client.topic(), &topic_name);
     assert_eq!(partition_client.partition(), 0);
+}
+
+#[tokio::test]
+async fn test_non_existing_partition() {
+    maybe_start_logging();
+
+    let connection = maybe_skip_kafka_integration!();
+    let topic_name = random_topic_name();
+
+    let client = ClientBuilder::new(connection).build().await.unwrap();
+
+    // do NOT create the topic
+
+    tokio::time::timeout(Duration::from_millis(100), async {
+        client
+            .partition_client(topic_name.clone(), 0, UnknownTopicHandling::Retry)
+            .await
+            .unwrap();
+    })
+    .await
+    .unwrap_err();
+
+    let err = client
+        .partition_client(topic_name.clone(), 0, UnknownTopicHandling::Error)
+        .await
+        .unwrap_err();
+    assert_matches!(
+        err,
+        ClientError::ServerError {
+            protocol_error: ProtocolError::UnknownTopicOrPartition,
+            ..
+        }
+    );
 }
 
 // Disabled as currently no TLS integration tests
@@ -165,7 +198,10 @@ async fn test_socks5() {
         .await
         .unwrap();
 
-    let partition_client = client.partition_client(topic_name, 0).await.unwrap();
+    let partition_client = client
+        .partition_client(topic_name, 0, UnknownTopicHandling::Retry)
+        .await
+        .unwrap();
 
     let record = record(b"");
     partition_client
@@ -197,7 +233,10 @@ async fn test_produce_empty() {
         .await
         .unwrap();
 
-    let partition_client = client.partition_client(&topic_name, 1).await.unwrap();
+    let partition_client = client
+        .partition_client(&topic_name, 1, UnknownTopicHandling::Retry)
+        .await
+        .unwrap();
     partition_client
         .produce(vec![], Compression::NoCompression)
         .await
@@ -219,7 +258,10 @@ async fn test_consume_empty() {
         .await
         .unwrap();
 
-    let partition_client = client.partition_client(&topic_name, 1).await.unwrap();
+    let partition_client = client
+        .partition_client(&topic_name, 1, UnknownTopicHandling::Retry)
+        .await
+        .unwrap();
     let (records, watermark) = partition_client
         .fetch_records(0, 1..10_000, 1_000)
         .await
@@ -243,7 +285,10 @@ async fn test_consume_offset_out_of_range() {
         .await
         .unwrap();
 
-    let partition_client = client.partition_client(&topic_name, 1).await.unwrap();
+    let partition_client = client
+        .partition_client(&topic_name, 1, UnknownTopicHandling::Retry)
+        .await
+        .unwrap();
     let record = record(b"");
     let offsets = partition_client
         .produce(vec![record], Compression::NoCompression)
@@ -259,6 +304,7 @@ async fn test_consume_offset_out_of_range() {
         err,
         ClientError::ServerError {
             protocol_error: ProtocolError::OffsetOutOfRange,
+            response: Some(ServerErrorResponse::PartitionFetchState { .. }),
             ..
         }
     );
@@ -283,7 +329,7 @@ async fn test_get_offset() {
         .unwrap();
 
     let partition_client = client
-        .partition_client(topic_name.clone(), 0)
+        .partition_client(topic_name.clone(), 0, UnknownTopicHandling::Retry)
         .await
         .unwrap();
 
@@ -346,7 +392,12 @@ async fn test_produce_consume_size_cutoff() {
         .await
         .unwrap();
 
-    let partition_client = Arc::new(client.partition_client(&topic_name, 0).await.unwrap());
+    let partition_client = Arc::new(
+        client
+            .partition_client(&topic_name, 0, UnknownTopicHandling::Retry)
+            .await
+            .unwrap(),
+    );
 
     let record_1 = large_record();
     let record_2 = large_record();
@@ -419,7 +470,10 @@ async fn test_consume_midbatch() {
         .await
         .unwrap();
 
-    let partition_client = client.partition_client(&topic_name, 0).await.unwrap();
+    let partition_client = client
+        .partition_client(&topic_name, 0, UnknownTopicHandling::Retry)
+        .await
+        .unwrap();
 
     // produce two records into a single batch
     let record_1 = record(b"x");
@@ -464,7 +518,10 @@ async fn test_delete_records() {
         .await
         .unwrap();
 
-    let partition_client = client.partition_client(&topic_name, 0).await.unwrap();
+    let partition_client = client
+        .partition_client(&topic_name, 0, UnknownTopicHandling::Retry)
+        .await
+        .unwrap();
 
     // produce the following record batches:
     // - record_1
@@ -509,6 +566,7 @@ async fn test_delete_records() {
         err,
         ClientError::ServerError {
             protocol_error: ProtocolError::OffsetOutOfRange,
+            response: Some(ServerErrorResponse::PartitionFetchState { .. }),
             ..
         }
     );
@@ -520,6 +578,7 @@ async fn test_delete_records() {
         err,
         ClientError::ServerError {
             protocol_error: ProtocolError::OffsetOutOfRange,
+            response: Some(ServerErrorResponse::PartitionFetchState { .. }),
             ..
         }
     );

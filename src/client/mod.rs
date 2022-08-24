@@ -18,7 +18,7 @@ pub mod producer;
 
 use error::{Error, Result};
 
-use self::controller::ControllerClient;
+use self::{controller::ControllerClient, partition::UnknownTopicHandling};
 
 #[derive(Debug, Error)]
 pub enum ProduceError {
@@ -120,8 +120,15 @@ impl Client {
         &self,
         topic: impl Into<String> + Send,
         partition: i32,
+        unknown_topic_handling: UnknownTopicHandling,
     ) -> Result<PartitionClient> {
-        PartitionClient::new(topic.into(), partition, Arc::clone(&self.brokers)).await
+        PartitionClient::new(
+            topic.into(),
+            partition,
+            Arc::clone(&self.brokers),
+            unknown_topic_handling,
+        )
+        .await
     }
 
     /// Returns a list of topics in the cluster

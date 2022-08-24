@@ -148,7 +148,7 @@ jobs:
     # setup multiple docker images (see https://circleci.com/docs/2.0/configuration-reference/#docker)
     docker:
       - image: quay.io/influxdb/rust:ci
-      - image: vectorized/redpanda:v22.1.4
+      - image: vectorized/redpanda:v22.2.1
         name: redpanda-0
         command:
           - redpanda
@@ -161,7 +161,8 @@ jobs:
           - --check=false
           - --kafka-addr redpanda-0:9092
           - --rpc-addr redpanda-0:33145
-      - image: vectorized/redpanda:v22.1.4
+          - --set redpanda.auto_create_topics_enabled=false
+      - image: vectorized/redpanda:v22.2.1
         name: redpanda-1
         command:
           - redpanda
@@ -175,7 +176,8 @@ jobs:
           - --kafka-addr redpanda-1:9092
           - --rpc-addr redpanda-1:33145
           - --seeds redpanda-0:33145
-      - image: vectorized/redpanda:v22.1.4
+          - --set redpanda.auto_create_topics_enabled=false
+      - image: vectorized/redpanda:v22.2.1
         name: redpanda-2
         command:
           - redpanda
@@ -189,6 +191,7 @@ jobs:
           - --kafka-addr redpanda-2:9092
           - --rpc-addr redpanda-2:33145
           - --seeds redpanda-0:33145
+          - --set redpanda.auto_create_topics_enabled=false
       - image: serjs/go-socks5-proxy
         name: proxy
     resource_class: xlarge  # use of a smaller executor tends crashes on link
@@ -243,6 +246,7 @@ jobs:
           - KAFKA_CFG_LISTENERS=CLIENT://:9092,EXTERNAL://:9093
           - KAFKA_CFG_ADVERTISED_LISTENERS=CLIENT://kafka-0:9092,EXTERNAL://kafka-0:9093
           - KAFKA_INTER_BROKER_LISTENER_NAME=CLIENT
+          - KAFKA_CFG_AUTO_CREATE_TOPICS_ENABLE=false
       - image: docker.io/bitnami/kafka:3
         name: kafka-1
         environment:
@@ -253,6 +257,7 @@ jobs:
           - KAFKA_CFG_LISTENERS=CLIENT://:9092,EXTERNAL://:9093
           - KAFKA_CFG_ADVERTISED_LISTENERS=CLIENT://kafka-1:9092,EXTERNAL://kafka-1:9093
           - KAFKA_INTER_BROKER_LISTENER_NAME=CLIENT
+          - KAFKA_CFG_AUTO_CREATE_TOPICS_ENABLE=false
       - image: docker.io/bitnami/kafka:3
         name: kafka-2
         environment:
@@ -263,6 +268,7 @@ jobs:
           - KAFKA_CFG_LISTENERS=CLIENT://:9092,EXTERNAL://:9093
           - KAFKA_CFG_ADVERTISED_LISTENERS=CLIENT://kafka-2:9092,EXTERNAL://kafka-2:9093
           - KAFKA_INTER_BROKER_LISTENER_NAME=CLIENT
+          - KAFKA_CFG_AUTO_CREATE_TOPICS_ENABLE=false
       - image: serjs/go-socks5-proxy
         name: proxy
     resource_class: xlarge  # use of a smaller executor tends crashes on link

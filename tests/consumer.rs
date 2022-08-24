@@ -9,7 +9,7 @@ use rskafka::{
     client::{
         consumer::{StartOffset, StreamConsumer, StreamConsumerBuilder},
         error::{Error, ProtocolError},
-        partition::Compression,
+        partition::{Compression, UnknownTopicHandling},
         ClientBuilder,
     },
     record::RecordAndOffset,
@@ -34,7 +34,12 @@ async fn test_stream_consumer_start_at_0() {
 
     let record = record(b"x");
 
-    let partition_client = Arc::new(client.partition_client(&topic, 0).await.unwrap());
+    let partition_client = Arc::new(
+        client
+            .partition_client(&topic, 0, UnknownTopicHandling::Retry)
+            .await
+            .unwrap(),
+    );
     partition_client
         .produce(vec![record.clone()], Compression::NoCompression)
         .await
@@ -45,7 +50,7 @@ async fn test_stream_consumer_start_at_0() {
         .build();
 
     // Fetch first record
-    assert_ok(timeout(Duration::from_millis(100), stream.next()).await);
+    assert_ok(timeout(Duration::from_millis(1_000), stream.next()).await);
 
     // No further records
     assert_stream_pending(&mut stream).await;
@@ -59,10 +64,10 @@ async fn test_stream_consumer_start_at_0() {
         .unwrap();
 
     // Get second record
-    assert_ok(timeout(Duration::from_millis(100), stream.next()).await);
+    assert_ok(timeout(Duration::from_millis(1_000), stream.next()).await);
 
     // Get third record
-    assert_ok(timeout(Duration::from_millis(100), stream.next()).await);
+    assert_ok(timeout(Duration::from_millis(1_000), stream.next()).await);
 
     // No further records
     assert_stream_pending(&mut stream).await;
@@ -85,7 +90,12 @@ async fn test_stream_consumer_start_at_1() {
     let record_1 = record(b"x");
     let record_2 = record(b"y");
 
-    let partition_client = Arc::new(client.partition_client(&topic, 0).await.unwrap());
+    let partition_client = Arc::new(
+        client
+            .partition_client(&topic, 0, UnknownTopicHandling::Retry)
+            .await
+            .unwrap(),
+    );
     partition_client
         .produce(
             vec![record_1.clone(), record_2.clone()],
@@ -100,7 +110,7 @@ async fn test_stream_consumer_start_at_1() {
 
     // Skips first record
     let (record_and_offset, _watermark) =
-        assert_ok(timeout(Duration::from_millis(100), stream.next()).await);
+        assert_ok(timeout(Duration::from_millis(1_000), stream.next()).await);
     assert_eq!(record_and_offset.record, record_2);
 
     // No further records
@@ -121,7 +131,12 @@ async fn test_stream_consumer_offset_out_of_range() {
         .await
         .unwrap();
 
-    let partition_client = Arc::new(client.partition_client(&topic, 0).await.unwrap());
+    let partition_client = Arc::new(
+        client
+            .partition_client(&topic, 0, UnknownTopicHandling::Retry)
+            .await
+            .unwrap(),
+    );
 
     let mut stream = StreamConsumerBuilder::new(partition_client, StartOffset::At(1)).build();
 
@@ -155,7 +170,12 @@ async fn test_stream_consumer_start_at_earliest() {
     let record_1 = record(b"x");
     let record_2 = record(b"y");
 
-    let partition_client = Arc::new(client.partition_client(&topic, 0).await.unwrap());
+    let partition_client = Arc::new(
+        client
+            .partition_client(&topic, 0, UnknownTopicHandling::Retry)
+            .await
+            .unwrap(),
+    );
     partition_client
         .produce(vec![record_1.clone()], Compression::NoCompression)
         .await
@@ -168,7 +188,7 @@ async fn test_stream_consumer_start_at_earliest() {
 
     // Fetch first record
     let (record_and_offset, _) =
-        assert_ok(timeout(Duration::from_millis(100), stream.next()).await);
+        assert_ok(timeout(Duration::from_millis(1_000), stream.next()).await);
     assert_eq!(record_and_offset.record, record_1);
 
     // No further records
@@ -181,7 +201,7 @@ async fn test_stream_consumer_start_at_earliest() {
 
     // Get second record
     let (record_and_offset, _) =
-        assert_ok(timeout(Duration::from_millis(100), stream.next()).await);
+        assert_ok(timeout(Duration::from_millis(1_000), stream.next()).await);
     assert_eq!(record_and_offset.record, record_2);
 
     // No further records
@@ -204,7 +224,12 @@ async fn test_stream_consumer_start_at_earliest_empty() {
 
     let record = record(b"x");
 
-    let partition_client = Arc::new(client.partition_client(&topic, 0).await.unwrap());
+    let partition_client = Arc::new(
+        client
+            .partition_client(&topic, 0, UnknownTopicHandling::Retry)
+            .await
+            .unwrap(),
+    );
 
     let mut stream =
         StreamConsumerBuilder::new(Arc::clone(&partition_client), StartOffset::Earliest)
@@ -221,7 +246,7 @@ async fn test_stream_consumer_start_at_earliest_empty() {
 
     // Get second record
     let (record_and_offset, _) =
-        assert_ok(timeout(Duration::from_millis(200), stream.next()).await);
+        assert_ok(timeout(Duration::from_millis(1_000), stream.next()).await);
     assert_eq!(record_and_offset.record, record);
 
     // No further records
@@ -245,7 +270,12 @@ async fn test_stream_consumer_start_at_earliest_after_deletion() {
     let record_1 = record(b"x");
     let record_2 = record(b"y");
 
-    let partition_client = Arc::new(client.partition_client(&topic, 0).await.unwrap());
+    let partition_client = Arc::new(
+        client
+            .partition_client(&topic, 0, UnknownTopicHandling::Retry)
+            .await
+            .unwrap(),
+    );
     partition_client
         .produce(
             vec![record_1.clone(), record_2.clone()],
@@ -263,7 +293,7 @@ async fn test_stream_consumer_start_at_earliest_after_deletion() {
 
     // First record skipped / deleted
     let (record_and_offset, _) =
-        assert_ok(timeout(Duration::from_millis(100), stream.next()).await);
+        assert_ok(timeout(Duration::from_millis(1_000), stream.next()).await);
     assert_eq!(record_and_offset.record, record_2);
 
     // No further records
@@ -287,7 +317,12 @@ async fn test_stream_consumer_start_at_latest() {
     let record_1 = record(b"x");
     let record_2 = record(b"y");
 
-    let partition_client = Arc::new(client.partition_client(&topic, 0).await.unwrap());
+    let partition_client = Arc::new(
+        client
+            .partition_client(&topic, 0, UnknownTopicHandling::Retry)
+            .await
+            .unwrap(),
+    );
     partition_client
         .produce(vec![record_1.clone()], Compression::NoCompression)
         .await
@@ -307,7 +342,7 @@ async fn test_stream_consumer_start_at_latest() {
 
     // Get second record
     let (record_and_offset, _) =
-        assert_ok(timeout(Duration::from_millis(100), stream.next()).await);
+        assert_ok(timeout(Duration::from_millis(1_000), stream.next()).await);
     assert_eq!(record_and_offset.record, record_2);
 
     // No further records
@@ -330,7 +365,12 @@ async fn test_stream_consumer_start_at_latest_empty() {
 
     let record = record(b"x");
 
-    let partition_client = Arc::new(client.partition_client(&topic, 0).await.unwrap());
+    let partition_client = Arc::new(
+        client
+            .partition_client(&topic, 0, UnknownTopicHandling::Retry)
+            .await
+            .unwrap(),
+    );
 
     let mut stream = StreamConsumerBuilder::new(Arc::clone(&partition_client), StartOffset::Latest)
         .with_max_wait_ms(50)
@@ -346,7 +386,7 @@ async fn test_stream_consumer_start_at_latest_empty() {
 
     // Get second record
     let (record_and_offset, _) =
-        assert_ok(timeout(Duration::from_millis(100), stream.next()).await);
+        assert_ok(timeout(Duration::from_millis(1_000), stream.next()).await);
     assert_eq!(record_and_offset.record, record);
 
     // No further records

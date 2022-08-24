@@ -32,8 +32,43 @@ use tracing::{error, info};
 
 use super::error::ServerErrorResponse;
 
+/// How strongly a [`PartitionClient`] is bound to a partition.
+///
+/// Under some circumstances and broker implementations, you might face a [`ProtocolError::UnknownTopicOrPartition`]
+/// for nearly all operations directly after topic/partition creation. Since the Kafka protocol offers no (at least
+/// to our knowledge) way to differentiate between "a topic/partition actually does not exist" and "our multiverse
+/// split brain is not synced up yet", we can only offer you a manual way to wait for topic existence.
+///
+/// We offer the following ways to deal with this:
+///
+/// - Use a [`Error`](Self::Error). All other methods (including the creation of a [`PartitionClient`]) may produce
+///   sporadic [`ProtocolError::UnknownTopicOrPartition`] errors.
+/// - Use a [`Retry`](Self::Error) which assumes a partition exists and retries [`ProtocolError::UnknownTopicOrPartition`]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum UnknownTopicHandling {
+    /// When a [`ProtocolError::UnknownTopicOrPartition`] is returned by Kafka,
+    /// it is passed up to the user to handle.
+    ///
+    /// These errors may occur spuriously.
+    Error,
+
+    /// Always retry operations that return a
+    /// [`ProtocolError::UnknownTopicOrPartition`], until the operation succeeds
+    /// or a different error is returned.
+    ///
+    /// This may unpredictably increase operation latency.
+    Retry,
+}
+
+/// Compression of records.
+///
+/// This is only relevant for [produce requests](PartitionClient::produce). There the client compresses the records.
+///
+/// For [fetch requests](PartitionClient::fetch_records) we have to accept a message as it exists, i.e. how it was
+/// originally compressed. The broker will NOT change the data compression based on our request.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub enum Compression {
+    #[default]
     NoCompression,
     #[cfg(feature = "compression-gzip")]
     Gzip,
@@ -43,12 +78,6 @@ pub enum Compression {
     Snappy,
     #[cfg(feature = "compression-zstd")]
     Zstd,
-}
-
-impl Default for Compression {
-    fn default() -> Self {
-        Self::NoCompression
-    }
 }
 
 /// Which type of offset should be requested by [`PartitionClient::get_offset`].
@@ -88,6 +117,8 @@ pub struct PartitionClient {
 
     /// Current broker connection if any
     current_broker: Mutex<Option<BrokerConnection>>,
+
+    unknown_topic_handling: UnknownTopicHandling,
 }
 
 impl std::fmt::Debug for PartitionClient {
@@ -101,6 +132,7 @@ impl PartitionClient {
         topic: String,
         partition: i32,
         brokers: Arc<BrokerConnector>,
+        unknown_topic_handling: UnknownTopicHandling,
     ) -> Result<Self> {
         let p = Self {
             topic,
@@ -108,12 +140,14 @@ impl PartitionClient {
             brokers: Arc::clone(&brokers),
             backoff_config: Default::default(),
             current_broker: Mutex::new(None),
+            unknown_topic_handling,
         };
 
         // Force discover and establish a cached connection to the leader
         let scope = &p;
         maybe_retry(
-            &Default::default(),
+            &p.backoff_config,
+            p.unknown_topic_handling,
             &*brokers,
             "leader_detection",
             || async move {
@@ -150,11 +184,17 @@ impl PartitionClient {
         let n = records.len() as i64;
         let request = &build_produce_request(self.partition, &self.topic, records, compression);
 
-        maybe_retry(&self.backoff_config, self, "produce", || async move {
-            let broker = self.get().await?;
-            let response = broker.request(&request).await?;
-            process_produce_response(self.partition, &self.topic, n, response)
-        })
+        maybe_retry(
+            &self.backoff_config,
+            self.unknown_topic_handling,
+            self,
+            "produce",
+            || async move {
+                let broker = self.get().await?;
+                let response = broker.request(&request).await?;
+                process_produce_response(self.partition, &self.topic, n, response)
+            },
+        )
         .await
     }
 
@@ -175,10 +215,16 @@ impl PartitionClient {
     ) -> Result<(Vec<RecordAndOffset>, i64)> {
         let request = &build_fetch_request(offset, bytes, max_wait_ms, self.partition, &self.topic);
 
-        let partition = maybe_retry(&self.backoff_config, self, "fetch_records", || async move {
-            let response = self.get().await?.request(&request).await?;
-            process_fetch_response(self.partition, &self.topic, response, offset)
-        })
+        let partition = maybe_retry(
+            &self.backoff_config,
+            self.unknown_topic_handling,
+            self,
+            "fetch_records",
+            || async move {
+                let response = self.get().await?.request(&request).await?;
+                process_fetch_response(self.partition, &self.topic, response, offset)
+            },
+        )
         .await?;
 
         let records = extract_records(partition.records.0, offset)?;
@@ -196,10 +242,16 @@ impl PartitionClient {
     pub async fn get_offset(&self, at: OffsetAt) -> Result<i64> {
         let request = &build_list_offsets_request(self.partition, &self.topic, at);
 
-        let partition = maybe_retry(&self.backoff_config, self, "get_offset", || async move {
-            let response = self.get().await?.request(&request).await?;
-            process_list_offsets_response(self.partition, &self.topic, response)
-        })
+        let partition = maybe_retry(
+            &self.backoff_config,
+            self.unknown_topic_handling,
+            self,
+            "get_offset",
+            || async move {
+                let response = self.get().await?.request(&request).await?;
+                process_list_offsets_response(self.partition, &self.topic, response)
+            },
+        )
         .await?;
 
         extract_offset(partition)
@@ -216,6 +268,7 @@ impl PartitionClient {
 
         maybe_retry(
             &self.backoff_config,
+            self.unknown_topic_handling,
             self,
             "delete_records",
             || async move {
@@ -401,6 +454,7 @@ impl BrokerCache for &PartitionClient {
 /// and handles certain classes of error
 async fn maybe_retry<B, R, F, T>(
     backoff_config: &BackoffConfig,
+    unknown_topic_handling: UnknownTopicHandling,
     broker_cache: B,
     request_name: &str,
     f: R,
@@ -419,33 +473,46 @@ where
                 Err(e) => e,
             };
 
-            match error {
+            let retry = match error {
                 Error::Request(RequestError::Poisoned(_) | RequestError::IO(_))
-                | Error::Connection(_) => broker_cache.invalidate().await,
+                | Error::Connection(_) => {
+                    broker_cache.invalidate().await;
+                    true
+                }
                 Error::ServerError {
                     protocol_error:
                         ProtocolError::InvalidReplicationFactor
                         | ProtocolError::LeaderNotAvailable
                         | ProtocolError::OffsetNotAvailable,
                     ..
-                } => {}
+                } => true,
                 Error::ServerError {
                     protocol_error: ProtocolError::NotLeaderOrFollower,
                     ..
                 } => {
                     broker_cache.invalidate().await;
+                    true
                 }
-                _ => {
-                    error!(
-                        e=%error,
-                        request_name,
-                        "request encountered fatal error",
-                    );
-                    return ControlFlow::Break(Err(error));
+                Error::ServerError {
+                    protocol_error: ProtocolError::UnknownTopicOrPartition,
+                    ..
+                } => {
+                    broker_cache.invalidate().await;
+                    unknown_topic_handling == UnknownTopicHandling::Retry
                 }
-            }
+                _ => false,
+            };
 
-            ControlFlow::Continue(error)
+            if retry {
+                ControlFlow::Continue(error)
+            } else {
+                error!(
+                    e=%error,
+                    request_name,
+                    "request encountered fatal error",
+                );
+                ControlFlow::Break(Err(error))
+            }
         })
         .await
         .map_err(Error::RetryFailed)?
