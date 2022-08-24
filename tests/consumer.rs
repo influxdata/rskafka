@@ -22,8 +22,11 @@ mod test_helpers;
 async fn test_stream_consumer_start_at_0() {
     maybe_start_logging();
 
-    let connection = maybe_skip_kafka_integration!();
-    let client = ClientBuilder::new(connection).build().await.unwrap();
+    let test_cfg = maybe_skip_kafka_integration!();
+    let client = ClientBuilder::new(test_cfg.bootstrap_brokers)
+        .build()
+        .await
+        .unwrap();
     let controller_client = client.controller_client().unwrap();
 
     let topic = random_topic_name();
@@ -77,8 +80,11 @@ async fn test_stream_consumer_start_at_0() {
 async fn test_stream_consumer_start_at_1() {
     maybe_start_logging();
 
-    let connection = maybe_skip_kafka_integration!();
-    let client = ClientBuilder::new(connection).build().await.unwrap();
+    let test_cfg = maybe_skip_kafka_integration!();
+    let client = ClientBuilder::new(test_cfg.bootstrap_brokers)
+        .build()
+        .await
+        .unwrap();
     let controller_client = client.controller_client().unwrap();
 
     let topic = random_topic_name();
@@ -121,8 +127,11 @@ async fn test_stream_consumer_start_at_1() {
 async fn test_stream_consumer_offset_out_of_range() {
     maybe_start_logging();
 
-    let connection = maybe_skip_kafka_integration!();
-    let client = ClientBuilder::new(connection).build().await.unwrap();
+    let test_cfg = maybe_skip_kafka_integration!();
+    let client = ClientBuilder::new(test_cfg.bootstrap_brokers)
+        .build()
+        .await
+        .unwrap();
     let controller_client = client.controller_client().unwrap();
 
     let topic = random_topic_name();
@@ -157,8 +166,11 @@ async fn test_stream_consumer_offset_out_of_range() {
 async fn test_stream_consumer_start_at_earliest() {
     maybe_start_logging();
 
-    let connection = maybe_skip_kafka_integration!();
-    let client = ClientBuilder::new(connection).build().await.unwrap();
+    let test_cfg = maybe_skip_kafka_integration!();
+    let client = ClientBuilder::new(test_cfg.bootstrap_brokers)
+        .build()
+        .await
+        .unwrap();
     let controller_client = client.controller_client().unwrap();
 
     let topic = random_topic_name();
@@ -212,8 +224,11 @@ async fn test_stream_consumer_start_at_earliest() {
 async fn test_stream_consumer_start_at_earliest_empty() {
     maybe_start_logging();
 
-    let connection = maybe_skip_kafka_integration!();
-    let client = ClientBuilder::new(connection).build().await.unwrap();
+    let test_cfg = maybe_skip_kafka_integration!();
+    let client = ClientBuilder::new(test_cfg.bootstrap_brokers)
+        .build()
+        .await
+        .unwrap();
     let controller_client = client.controller_client().unwrap();
 
     let topic = random_topic_name();
@@ -257,8 +272,16 @@ async fn test_stream_consumer_start_at_earliest_empty() {
 async fn test_stream_consumer_start_at_earliest_after_deletion() {
     maybe_start_logging();
 
-    let connection = maybe_skip_kafka_integration!();
-    let client = ClientBuilder::new(connection).build().await.unwrap();
+    let test_cfg = maybe_skip_kafka_integration!(delete);
+    if !test_cfg.broker_impl.supports_deletes() {
+        println!("Skipping due to missing delete support");
+        return;
+    }
+
+    let client = ClientBuilder::new(test_cfg.bootstrap_brokers)
+        .build()
+        .await
+        .unwrap();
     let controller_client = client.controller_client().unwrap();
 
     let topic = random_topic_name();
@@ -284,7 +307,7 @@ async fn test_stream_consumer_start_at_earliest_after_deletion() {
         .await
         .unwrap();
 
-    maybe_skip_delete!(partition_client, 1);
+    partition_client.delete_records(1, 1_000).await.unwrap();
 
     let mut stream =
         StreamConsumerBuilder::new(Arc::clone(&partition_client), StartOffset::Earliest)
@@ -304,8 +327,11 @@ async fn test_stream_consumer_start_at_earliest_after_deletion() {
 async fn test_stream_consumer_start_at_latest() {
     maybe_start_logging();
 
-    let connection = maybe_skip_kafka_integration!();
-    let client = ClientBuilder::new(connection).build().await.unwrap();
+    let test_cfg = maybe_skip_kafka_integration!();
+    let client = ClientBuilder::new(test_cfg.bootstrap_brokers)
+        .build()
+        .await
+        .unwrap();
     let controller_client = client.controller_client().unwrap();
 
     let topic = random_topic_name();
@@ -353,8 +379,11 @@ async fn test_stream_consumer_start_at_latest() {
 async fn test_stream_consumer_start_at_latest_empty() {
     maybe_start_logging();
 
-    let connection = maybe_skip_kafka_integration!();
-    let client = ClientBuilder::new(connection).build().await.unwrap();
+    let test_cfg = maybe_skip_kafka_integration!();
+    let client = ClientBuilder::new(test_cfg.bootstrap_brokers)
+        .build()
+        .await
+        .unwrap();
     let controller_client = client.controller_client().unwrap();
 
     let topic = random_topic_name();

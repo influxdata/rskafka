@@ -115,7 +115,7 @@ $ docker-compose -f docker-compose-redpanda.yml up
 in one session, and then run:
 
 ```console
-$ TEST_INTEGRATION=1 KAFKA_CONNECT=0.0.0.0:9011 cargo test
+$ TEST_INTEGRATION=1 TEST_BROKER_IMPL=redpanda KAFKA_CONNECT=0.0.0.0:9011 cargo test
 ```
 
 in another session.
@@ -131,7 +131,7 @@ $ docker-compose -f docker-compose-kafka.yml up
 in one session, and then run:
 
 ```console
-$ TEST_INTEGRATION=1 TEST_DELETE_RECORDS=1 KAFKA_CONNECT=localhost:9011 cargo test
+$ TEST_INTEGRATION=1 TEST_BROKER_IMPL=kafka KAFKA_CONNECT=localhost:9011 cargo test
 ```
 
 in another session. Note that Apache Kafka supports a different set of features then redpanda, so we pass other
@@ -231,14 +231,14 @@ execution that hooks right into the place where it is about to exit:
 Install [cargo-criterion], make sure you have some Kafka cluster running, and then you can run all benchmarks with:
 
 ```console
-$ TEST_INTEGRATION=1 KAFKA_CONNECT=localhost:9011 cargo criterion --all-features
+$ TEST_INTEGRATION=1 TEST_BROKER_IMPL=kafka KAFKA_CONNECT=localhost:9011 cargo criterion --all-features
 ```
 
 If you find a benchmark that is too slow, you can may want to profile it. Get [cargo-with], and [perf], then run (here
 for the `parallel/rskafka` benchmark):
 
 ```console
-$ TEST_INTEGRATION=1 KAFKA_CONNECT=localhost:9011 cargo with 'perf record --call-graph dwarf -- {bin}' -- \
+$ TEST_INTEGRATION=1 TEST_BROKER_IMPL=kafka KAFKA_CONNECT=localhost:9011 cargo with 'perf record --call-graph dwarf -- {bin}' -- \
     bench --all-features --bench write_throughput -- \
     --bench --noplot parallel/rskafka
 ```

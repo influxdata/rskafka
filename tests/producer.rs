@@ -14,8 +14,11 @@ use test_helpers::{maybe_start_logging, random_topic_name, record};
 async fn test_batch_producer() {
     maybe_start_logging();
 
-    let connection = maybe_skip_kafka_integration!();
-    let client = ClientBuilder::new(connection).build().await.unwrap();
+    let test_cfg = maybe_skip_kafka_integration!();
+    let client = ClientBuilder::new(test_cfg.bootstrap_brokers)
+        .build()
+        .await
+        .unwrap();
     let controller_client = client.controller_client().unwrap();
 
     let topic = random_topic_name();

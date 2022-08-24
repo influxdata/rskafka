@@ -245,11 +245,11 @@ async fn assert_produce_consume<F1, G1, F2, G2>(
 {
     maybe_start_logging();
 
-    let connection = maybe_skip_kafka_integration!();
+    let test_cfg = maybe_skip_kafka_integration!();
     let topic_name = random_topic_name();
     let n_partitions = 2;
 
-    let client = ClientBuilder::new(connection.clone())
+    let client = ClientBuilder::new(test_cfg.bootstrap_brokers.clone())
         .build()
         .await
         .unwrap();
@@ -306,7 +306,7 @@ async fn assert_produce_consume<F1, G1, F2, G2>(
     offsets.append(
         &mut f_produce(
             Arc::clone(&partition_client),
-            connection.clone(),
+            test_cfg.bootstrap_brokers.clone(),
             topic_name.clone(),
             1,
             vec![record_1.clone(), record_2.clone()],
@@ -317,7 +317,7 @@ async fn assert_produce_consume<F1, G1, F2, G2>(
     offsets.append(
         &mut f_produce(
             Arc::clone(&partition_client),
-            connection.clone(),
+            test_cfg.bootstrap_brokers.clone(),
             topic_name.clone(),
             1,
             vec![record_3.clone()],
@@ -331,7 +331,14 @@ async fn assert_produce_consume<F1, G1, F2, G2>(
     assert_ne!(offsets[2], offsets[0]);
 
     // consume
-    let actual = f_consume(partition_client, connection, topic_name, 1, 3).await;
+    let actual = f_consume(
+        partition_client,
+        test_cfg.bootstrap_brokers,
+        topic_name,
+        1,
+        3,
+    )
+    .await;
     let expected: Vec<_> = offsets
         .into_iter()
         .zip([record_1, record_2, record_3])

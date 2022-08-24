@@ -16,16 +16,22 @@ use test_helpers::{maybe_start_logging, now, random_topic_name, record};
 async fn test_plain() {
     maybe_start_logging();
 
-    let connection = maybe_skip_kafka_integration!();
-    ClientBuilder::new(connection).build().await.unwrap();
+    let test_cfg = maybe_skip_kafka_integration!();
+    ClientBuilder::new(test_cfg.bootstrap_brokers)
+        .build()
+        .await
+        .unwrap();
 }
 
 #[tokio::test]
 async fn test_topic_crud() {
     maybe_start_logging();
 
-    let connection = maybe_skip_kafka_integration!();
-    let client = ClientBuilder::new(connection).build().await.unwrap();
+    let test_cfg = maybe_skip_kafka_integration!();
+    let client = ClientBuilder::new(test_cfg.bootstrap_brokers)
+        .build()
+        .await
+        .unwrap();
     let controller_client = client.controller_client().unwrap();
     let topics = client.list_topics().await.unwrap();
 
@@ -77,10 +83,13 @@ async fn test_topic_crud() {
 async fn test_partition_client() {
     maybe_start_logging();
 
-    let connection = maybe_skip_kafka_integration!();
+    let test_cfg = maybe_skip_kafka_integration!();
     let topic_name = random_topic_name();
 
-    let client = ClientBuilder::new(connection).build().await.unwrap();
+    let client = ClientBuilder::new(test_cfg.bootstrap_brokers)
+        .build()
+        .await
+        .unwrap();
 
     let controller_client = client.controller_client().unwrap();
     controller_client
@@ -100,10 +109,13 @@ async fn test_partition_client() {
 async fn test_non_existing_partition() {
     maybe_start_logging();
 
-    let connection = maybe_skip_kafka_integration!();
+    let test_cfg = maybe_skip_kafka_integration!();
     let topic_name = random_topic_name();
 
-    let client = ClientBuilder::new(connection).build().await.unwrap();
+    let client = ClientBuilder::new(test_cfg.bootstrap_brokers)
+        .build()
+        .await
+        .unwrap();
 
     // do NOT create the topic
 
@@ -167,8 +179,8 @@ async fn test_tls() {
         .with_single_cert(vec![producer_root], private_key)
         .unwrap();
 
-    let connection = maybe_skip_kafka_integration!();
-    ClientBuilder::new(connection)
+    let test_cfg = maybe_skip_kafka_integration!();
+    ClientBuilder::new(test_cfg.bootstrap_brokers)
         .tls_config(Arc::new(config))
         .build()
         .await
@@ -180,14 +192,11 @@ async fn test_tls() {
 async fn test_socks5() {
     maybe_start_logging();
 
-    // e.g. "my-connection-kafka-bootstrap:9092"
-    let connection = maybe_skip_kafka_integration!();
-    // e.g. "localhost:1080"
-    let proxy = maybe_skip_SOCKS_PROXY!();
+    let test_cfg = maybe_skip_kafka_integration!(socks5);
     let topic_name = random_topic_name();
 
-    let client = ClientBuilder::new(connection)
-        .socks5_proxy(proxy)
+    let client = ClientBuilder::new(test_cfg.bootstrap_brokers)
+        .socks5_proxy(test_cfg.socks5_proxy.unwrap())
         .build()
         .await
         .unwrap();
@@ -222,11 +231,14 @@ async fn test_socks5() {
 async fn test_produce_empty() {
     maybe_start_logging();
 
-    let connection = maybe_skip_kafka_integration!();
+    let test_cfg = maybe_skip_kafka_integration!();
     let topic_name = random_topic_name();
     let n_partitions = 2;
 
-    let client = ClientBuilder::new(connection).build().await.unwrap();
+    let client = ClientBuilder::new(test_cfg.bootstrap_brokers)
+        .build()
+        .await
+        .unwrap();
     let controller_client = client.controller_client().unwrap();
     controller_client
         .create_topic(&topic_name, n_partitions, 1, 5_000)
@@ -247,11 +259,14 @@ async fn test_produce_empty() {
 async fn test_consume_empty() {
     maybe_start_logging();
 
-    let connection = maybe_skip_kafka_integration!();
+    let test_cfg = maybe_skip_kafka_integration!();
     let topic_name = random_topic_name();
     let n_partitions = 2;
 
-    let client = ClientBuilder::new(connection).build().await.unwrap();
+    let client = ClientBuilder::new(test_cfg.bootstrap_brokers)
+        .build()
+        .await
+        .unwrap();
     let controller_client = client.controller_client().unwrap();
     controller_client
         .create_topic(&topic_name, n_partitions, 1, 5_000)
@@ -274,11 +289,14 @@ async fn test_consume_empty() {
 async fn test_consume_offset_out_of_range() {
     maybe_start_logging();
 
-    let connection = maybe_skip_kafka_integration!();
+    let test_cfg = maybe_skip_kafka_integration!();
     let topic_name = random_topic_name();
     let n_partitions = 2;
 
-    let client = ClientBuilder::new(connection).build().await.unwrap();
+    let client = ClientBuilder::new(test_cfg.bootstrap_brokers)
+        .build()
+        .await
+        .unwrap();
     let controller_client = client.controller_client().unwrap();
     controller_client
         .create_topic(&topic_name, n_partitions, 1, 5_000)
@@ -314,11 +332,11 @@ async fn test_consume_offset_out_of_range() {
 async fn test_get_offset() {
     maybe_start_logging();
 
-    let connection = maybe_skip_kafka_integration!();
+    let test_cfg = maybe_skip_kafka_integration!();
     let topic_name = random_topic_name();
     let n_partitions = 1;
 
-    let client = ClientBuilder::new(connection.clone())
+    let client = ClientBuilder::new(test_cfg.bootstrap_brokers.clone())
         .build()
         .await
         .unwrap();
@@ -382,10 +400,13 @@ async fn test_get_offset() {
 async fn test_produce_consume_size_cutoff() {
     maybe_start_logging();
 
-    let connection = maybe_skip_kafka_integration!();
+    let test_cfg = maybe_skip_kafka_integration!();
     let topic_name = random_topic_name();
 
-    let client = ClientBuilder::new(connection).build().await.unwrap();
+    let client = ClientBuilder::new(test_cfg.bootstrap_brokers)
+        .build()
+        .await
+        .unwrap();
     let controller_client = client.controller_client().unwrap();
     controller_client
         .create_topic(&topic_name, 1, 1, 5_000)
@@ -460,10 +481,13 @@ async fn test_produce_consume_size_cutoff() {
 async fn test_consume_midbatch() {
     maybe_start_logging();
 
-    let connection = maybe_skip_kafka_integration!();
+    let test_cfg = maybe_skip_kafka_integration!();
     let topic_name = random_topic_name();
 
-    let client = ClientBuilder::new(connection).build().await.unwrap();
+    let client = ClientBuilder::new(test_cfg.bootstrap_brokers)
+        .build()
+        .await
+        .unwrap();
     let controller_client = client.controller_client().unwrap();
     controller_client
         .create_topic(&topic_name, 1, 1, 5_000)
@@ -508,10 +532,13 @@ async fn test_consume_midbatch() {
 async fn test_delete_records() {
     maybe_start_logging();
 
-    let connection = maybe_skip_kafka_integration!();
+    let test_cfg = maybe_skip_kafka_integration!(delete);
     let topic_name = random_topic_name();
 
-    let client = ClientBuilder::new(connection).build().await.unwrap();
+    let client = ClientBuilder::new(test_cfg.bootstrap_brokers)
+        .build()
+        .await
+        .unwrap();
     let controller_client = client.controller_client().unwrap();
     controller_client
         .create_topic(&topic_name, 1, 1, 5_000)
@@ -555,7 +582,10 @@ async fn test_delete_records() {
     let offset_4 = offsets[0];
 
     // delete from the middle of the 2nd batch
-    maybe_skip_delete!(partition_client, offset_3);
+    partition_client
+        .delete_records(offset_3, 1_000)
+        .await
+        .unwrap();
 
     // fetching data before the record fails
     let err = partition_client
