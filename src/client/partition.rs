@@ -36,8 +36,8 @@ use super::error::ServerErrorResponse;
 ///
 /// Under some circumstances and broker implementations, you might face a [`ProtocolError::UnknownTopicOrPartition`]
 /// for nearly all operations directly after topic/partition creation. Since the Kafka protocol offers no (at least
-/// to our knowledge) we to differentiate between "a topic/partition actually does not exist" and "our multiverse
-/// split brain is not synced up yet", we can only offer your this manual way to wait for the existence.
+/// to our knowledge) way to differentiate between "a topic/partition actually does not exist" and "our multiverse
+/// split brain is not synced up yet", we can only offer you a manual way to wait for topic existence.
 ///
 /// We offer the following ways to deal with this:
 ///
