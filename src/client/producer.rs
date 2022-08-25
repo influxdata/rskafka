@@ -209,18 +209,22 @@ use std::time::Duration;
 
 use futures::future::BoxFuture;
 use thiserror::Error;
-use tokio::sync::{Mutex, OwnedMutexGuard};
-use tracing::{debug, error};
+use tokio::task::JoinHandle;
+use tracing::*;
 
-use crate::client::producer::aggregator::TryPush;
-use crate::client::producer::broadcast::BroadcastOnce;
+use crate::client::{batch::FlushResult, producer::aggregator::TryPush};
 use crate::client::{error::Error as ClientError, partition::PartitionClient};
 use crate::record::Record;
 
-use super::partition::Compression;
+use self::aggregator::Aggregator;
+
+use super::{
+    batch::{BatchBuilder, ResultHandle},
+    partition::Compression,
+};
 
 pub mod aggregator;
-mod broadcast;
+pub(crate) mod broadcast;
 
 #[derive(Debug, Error, Clone)]
 pub enum Error {
@@ -284,12 +288,11 @@ impl BatchProducerBuilder {
     {
         BatchProducer {
             linger: self.linger,
-            compression: self.compression,
-            client: self.client,
-            inner: Arc::new(Mutex::new(ProducerInner {
+            inner: Arc::new(parking_lot::Mutex::new(ProducerInner::new(
                 aggregator,
-                result_slot: Default::default(),
-            })),
+                self.client,
+                self.compression,
+            ))),
         }
     }
 }
@@ -323,11 +326,235 @@ impl ProducerClient for PartitionClient {
     }
 }
 
+#[derive(Debug)]
+struct ProducerInner<A>
+where
+    A: aggregator::Aggregator,
+{
+    /// A wrapper over an [`Aggregator`] implementation that represents a single
+    /// aggregated batch of Records.
+    ///
+    /// This is wrapped in an [`Option`] to enable the
+    /// [`ProducerInner::flush()`] call to take the buffer, flush it, and
+    /// replace it with a new instance. Only the `flush()` method will ever
+    /// observe this being `None`, and all other code can safely `unwrap()` on
+    /// it.
+    batch_builder: Option<BatchBuilder<A>>,
+
+    /// A logical clock to enable a conditional flush of a specific
+    /// [`BatchBuilder`] instance.
+    ///
+    /// Each time a new [`BatchBuilder`] is initialised, this counter increases
+    /// by 1 (and wraps as necessary). Callers requested to flush the batch
+    /// after the linger duration are given the current value of this LC in the
+    /// [`CallerRole::Linger`] return variant, and once the linger fires, they
+    /// present their LC value in the [`ProducerInner::flush()`] call. If the
+    /// values match, the buffer if flushed. If the values do not match, the
+    /// buffer the caller was responsible for has already been flushed, and the
+    /// flush call becomes a NOP.
+    flush_clock: usize,
+
+    /// Used to track if a [`CallerRole::Linger`] has been returned for the
+    /// current batch_builder.
+    has_linger_waiter: bool,
+
+    compression: Compression,
+    client: Arc<dyn ProducerClient>,
+
+    /// A list of (potentially) outstanding flush tasks.
+    ///
+    /// These may or may not yet be complete, and completed flush tasks are
+    /// removed from this list when adding new flush tasks or manually flushing
+    /// with a call to [`BatchProducer::flush()`].
+    pending_flushes: Vec<JoinHandle<()>>,
+}
+
+impl<A> ProducerInner<A>
+where
+    A: aggregator::Aggregator,
+{
+    fn new(aggregator: A, client: Arc<dyn ProducerClient>, compression: Compression) -> Self {
+        Self {
+            batch_builder: Some(BatchBuilder::new(aggregator)),
+            flush_clock: 0,
+            has_linger_waiter: false,
+            client,
+            compression,
+            pending_flushes: Vec::new(),
+        }
+    }
+
+    /// Attempt to push `data` to the user-configured [`Aggregator`] impl within
+    /// the [`BatchBuilder`].
+    ///
+    /// If the aggregator indicates it is full, [`Self::flush()`] is called and
+    /// `data` is inserted into the new [`BatchBuilder`] instance. If this
+    /// insert attempt also fails, [`Error::TooLarge`] is returned.
+    ///
+    /// Once the [`BatchBuilder`] has accepted `data`, a [`CallerRole`] is
+    /// returned - if this was the first write to the [`Aggregator`], the
+    /// variant [`CallerRole::Linger`] is returned and the caller should wait
+    /// for the configured linger time (higher in the stack) before calling
+    /// [`Self::flush()`] to ensure timely batch writes.
+    ///
+    /// If [`CallerRole::JustWait`] is returned, there is already an outstanding
+    /// linger/flusher task, and this caller can wait on the provided
+    /// [`ResultHandle`] for the write result.
+    fn try_push(&mut self, data: A::Input) -> Result<CallerRole<A>, Error> {
+        // Try and write data to the [`BatchBuilder`].
+        let handle = match self.batch_builder.as_mut().unwrap().try_push(data)? {
+            TryPush::Aggregated(handle) => handle,
+            TryPush::NoCapacity(data) => {
+                debug!(client=?self.client, "insufficient capacity in aggregator - flushing");
+
+                // Perform an immediate flush of the buffer in the background,
+                // returning without waiting for the flush to complete.
+                //
+                // This call sets a new BatchBuilder while the flush of the old
+                // instance happens in the background, enabling the caller's
+                // Mutex to be dropped, so that further produce() calls can
+                // start aggregating into a new batch of writes.
+                //
+                // As a side effect, this invalidates any callers performing a
+                // linger wait + flush, preventing them from flushing this new
+                // batch.
+                self.flush(None)?;
+
+                match self.batch_builder.as_mut().unwrap().try_push(data)? {
+                    TryPush::Aggregated(handle) => handle,
+                    TryPush::NoCapacity(_) => {
+                        error!(client=?self.client, "record too large for aggregator");
+                        return Err(Error::TooLarge);
+                    }
+                }
+            }
+        };
+
+        // If this is the first writer to this batch, has_linger_waiter will be
+        // false, indicating this writer should wait for the linger time before
+        // trying to flush this batch.
+        if self.has_linger_waiter {
+            // There is an existing caller handling the linger timeout.
+            return Ok(CallerRole::JustWait(handle));
+        }
+
+        // This caller is the first writer to this batch, and it should wait for
+        // the linger time before flushing THIS batch.
+        //
+        // While the writer is waiting to flush THIS batch, it is possible
+        // another call this function results in a NoCapacity being returned by
+        // the aggregator above, which would flush THIS batch.
+        //
+        // When this happens, the writer waiting for the linger time should NOT
+        // flush the newly created batch, so it uses the flush clock as a token
+        // to avoid flushing the wrong batch when calling flush().
+        self.has_linger_waiter = true;
+        Ok(CallerRole::Linger {
+            handle,
+            flush_token: self.flush_clock,
+        })
+    }
+
+    /// Asynchronously write this batch of writes to Kafka, flushing the
+    /// underlying [`Aggregator`].
+    ///
+    /// If the caller provides a `flusher_token`, the batch flush is conditional
+    /// on the token matching. If the token does not match, the batch the caller
+    /// is attempting to flush has already been flushed, and this call is a NOP.
+    fn flush(&mut self, flusher_token: Option<usize>) -> Result<()> {
+        // If this caller is is intending to conditionally flush a specific
+        // batch, verify this BatchBuilder is the batch it is indenting to
+        // flush.
+        if let Some(token) = flusher_token {
+            if token != self.flush_clock {
+                debug!(client=?self.client, "spurious batch flush call");
+                return Ok(());
+            }
+        }
+
+        debug!(client=?self.client, "flushing batch");
+
+        // Remove the batch, temporarily swapping it for a None until a new
+        // batch is built.
+        //
+        // Nothing can observe a None in the batch field as it is always
+        // immediately replaced with a new batch instance below.
+        let batch = self.batch_builder.take().expect("no batch to flush");
+
+        let (new_builder, flush_task, maybe_err) =
+            match batch.background_flush(Arc::clone(&self.client), self.compression) {
+                FlushResult::Ok(b, flush_task) => (b, flush_task, None),
+                FlushResult::Error(b, e) => {
+                    error!(client=?self.client, error=%e, "failed to write record batch");
+                    (b, None, Some(e))
+                }
+            };
+
+        // Replace the batch builder with the new instance.
+        self.batch_builder = Some(new_builder);
+
+        // Remove any completed flushes from the pending_flushes list.
+        //
+        // Ideally this would be a linked list so removing elements are cheap,
+        // but LinkedList in stable cannot do that...
+        self.pending_flushes.retain_mut(|t| !t.is_finished());
+
+        // Retain a handle to the flush task.
+        //
+        // This enables a manual flush to wait for all outstanding flush tasks
+        // to complete.
+        if let Some(t) = flush_task {
+            self.pending_flushes.push(t);
+        }
+
+        // The flush clock increments, so that any threads trying to flush the
+        // last batch do not accidentally flush this new batch, leading to
+        // undersized batches / higher overhead per batch.
+        //
+        // Wrapping add to accept uint rollover, which is not problematic for
+        // this task.
+        self.flush_clock = self.flush_clock.wrapping_add(1);
+
+        // Reset the "need a flusher" bool so that the first write to this new
+        // batch is indicated to wait for the linger period to expire, and then
+        // trigger a flush.
+        self.has_linger_waiter = false;
+
+        match maybe_err {
+            Some(e) => Err(e),
+            None => Ok(()),
+        }
+    }
+}
+
+enum CallerRole<A>
+where
+    A: Aggregator,
+{
+    /// The caller has no additional book-keeping to perform, and can wait on
+    /// the result handle for the batched write result.
+    JustWait(ResultHandle<A>),
+
+    /// This caller has been selected to perform the "linger" timeout to drive
+    /// timely flushing of the batch.
+    ///
+    /// The caller MUST wait for the configured linger time before calling
+    /// [`ProducerInner::flush()`] with the provided `flush_token`.
+    ///
+    /// Once the batch is flushed (either by this caller after the linger, or
+    /// before if the batch was prematurely flushed) the results are made
+    /// available through handle.
+    Linger {
+        handle: ResultHandle<A>,
+        flush_token: usize,
+    },
+}
+
 /// [`BatchProducer`] attempts to aggregate multiple produce requests together
 /// using the provided [`Aggregator`].
 ///
-/// It will buffer up records until either the linger time expires or [`Aggregator`]
-/// cannot accommodate another record.
+/// It will buffer up records until either the linger time expires or
+/// [`Aggregator`] cannot accommodate another record.
 ///
 /// At this point it will flush the [`Aggregator`]
 ///
@@ -338,49 +565,7 @@ where
     A: aggregator::Aggregator,
 {
     linger: Duration,
-
-    compression: Compression,
-
-    client: Arc<dyn ProducerClient>,
-
-    inner: Arc<Mutex<ProducerInner<A>>>,
-}
-
-#[derive(Debug)]
-struct AggregatedStatus<A>
-where
-    A: aggregator::Aggregator,
-{
-    aggregated_status: Vec<i64>,
-    status_deagg: <A as aggregator::Aggregator>::StatusDeaggregator,
-}
-
-type AggregatedResult<A> = Result<Arc<AggregatedStatus<A>>, Error>;
-
-fn extract<A>(
-    result: broadcast::Result<AggregatedResult<A>>,
-    tag: A::Tag,
-) -> Result<<A as aggregator::AggregatorStatus>::Status, Error>
-where
-    A: aggregator::Aggregator,
-{
-    use self::aggregator::StatusDeaggregator;
-    let status = result.map_err(|e| Error::FlushError(e.to_string()))??;
-
-    status
-        .status_deagg
-        .deaggregate(&status.aggregated_status, tag)
-        .map_err(|e| Error::Aggregator(e.into()))
-}
-
-#[derive(Debug)]
-struct ProducerInner<A>
-where
-    A: aggregator::Aggregator,
-{
-    result_slot: BroadcastOnce<AggregatedResult<A>>,
-
-    aggregator: A,
+    inner: Arc<parking_lot::Mutex<ProducerInner<A>>>,
 }
 
 impl<A> BatchProducer<A>
@@ -389,149 +574,93 @@ where
 {
     /// Write `data` to this [`BatchProducer`]
     ///
-    /// Returns when the data has been committed to Kafka or
-    /// an unrecoverable error has been encountered
+    /// Returns when the data has been committed to Kafka or an unrecoverable
+    /// error has been encountered.
     ///
     /// # Cancellation
     ///
-    /// The returned future is cancellation safe in that it won't leave the [`BatchProducer`]
-    /// in an inconsistent state, however, the provided data may or may not be produced
+    /// The returned future is cancellation safe in that it won't leave the
+    /// [`BatchProducer`] in an inconsistent state, however, the provided data
+    /// may or may not be produced.
     ///
     pub async fn produce(
         &self,
         data: A::Input,
     ) -> Result<<A as aggregator::AggregatorStatus>::Status> {
-        let (result_slot, tag) = {
+        let role = {
             // Try to add the record to the aggregator
-            let mut inner = self.lock().await;
-
-            match inner
-                .aggregator
-                .try_push(data)
-                .map_err(|e| Error::Aggregator(e.into()))?
-            {
-                TryPush::Aggregated(tag) => (inner.result_slot.receiver(), tag),
-                TryPush::NoCapacity(data) => {
-                    debug!(client=?self.client, "Insufficient capacity in aggregator - flushing");
-
-                    let mut inner =
-                        Self::flush_impl(inner, Arc::clone(&self.client), self.compression).await?;
-
-                    match inner
-                        .aggregator
-                        .try_push(data)
-                        .map_err(|e| Error::Aggregator(e.into()))?
-                    {
-                        TryPush::Aggregated(tag) => (inner.result_slot.receiver(), tag),
-                        TryPush::NoCapacity(_) => {
-                            error!(client=?self.client, "Record too large for aggregator");
-                            return Err(Error::TooLarge);
-                        }
-                    }
-                }
-            }
+            let mut inner = self.inner.lock();
+            inner.try_push(data)?
         };
 
-        tokio::select! {
-            _ = tokio::time::sleep(self.linger) => {},
-            r = result_slot.receive() => return extract(r, tag),
+        match role {
+            CallerRole::JustWait(mut handle) => {
+                // Another caller is running the linger timer, and this caller
+                // can wait for the write result.
+                let status = handle.wait().await?;
+                handle.result(status)
+            }
+            CallerRole::Linger {
+                mut handle,
+                flush_token,
+            } => {
+                // This caller has been selected to wait for the linger
+                // duration, and then attempt to flush the batch of writes.
+                //
+                // Spawn a task for the linger to ensure cancellation safety.
+                let linger: JoinHandle<Result<(), Error>> = tokio::spawn({
+                    let linger = self.linger;
+                    let inner = Arc::clone(&self.inner);
+                    async move {
+                        tokio::time::sleep(linger).await;
+
+                        // The linger has expired, attempt to conditionally flush the
+                        // batch using the provided token to ensure only the correct
+                        // batch is flushed.
+                        inner.lock().flush(Some(flush_token))?;
+                        Ok(())
+                    }
+                });
+
+                // The batch may be flushed before the linger period expires if
+                // the aggregator becomes full, so watch for both outcomes.
+                tokio::select! {
+                    res = linger => res.expect("linger panic")?,
+                    r = handle.wait() => return handle.result(r?),
+                }
+
+                // The linger expired & completed.
+                //
+                // Wait for the result of the flush to be published.
+                let status = handle.wait().await?;
+                // And demux the status for this caller.
+                handle.result(status)
+            }
         }
-
-        // Linger expired - reacquire lock
-        let inner = self.lock().await;
-
-        // Whilst holding lock - check hasn't been flushed already
-        //
-        // This covers two scenarios:
-        // - the linger expired "simultaneously" with the publish
-        // - the linger expired but another thread triggered the flush
-        if let Some(r) = result_slot.peek() {
-            debug!(client=?self.client, ?tag, "Already flushed");
-            return extract(r, tag);
-        }
-
-        debug!(client=?self.client, ?tag, "Linger expired - flushing");
-
-        // Flush data
-        Self::flush_impl(inner, Arc::clone(&self.client), self.compression).await?;
-
-        extract(result_slot.peek().expect("just flushed"), tag)
     }
 
     /// Flushed out data from aggregator.
+    ///
+    /// Blocks until all pending writes to Kafka complete (or fail).
+    ///
+    /// If this function returns an error, the flush may be incomplete.
     pub async fn flush(&self) -> Result<()> {
-        let inner = self.lock().await;
-        debug!(client=?self.client, "Manual flush");
-        Self::flush_impl(inner, Arc::clone(&self.client), self.compression).await?;
-        Ok(())
-    }
+        let outstanding = {
+            let mut inner = self.inner.lock();
 
-    /// Flushes out the data from the aggregator, publishes the result to the result slot,
-    /// and creates a fresh result slot for future writes to use
-    async fn flush_impl(
-        mut inner: OwnedMutexGuard<ProducerInner<A>>,
-        client: Arc<dyn ProducerClient>,
-        compression: Compression,
-    ) -> Result<OwnedMutexGuard<ProducerInner<A>>> {
-        debug!(?client, "Flushing batch producer");
+            debug!("Manual flush");
+            inner.flush(None)?;
+            std::mem::take(&mut inner.pending_flushes)
+        };
 
-        // Spawn a task to provide cancellation safety
-        let handle = tokio::spawn(async move {
-            // Swap the result slot first, this ensures that if the task panics the Drop
-            // implementation will still signal the result slot preventing flushing twice
-            let slot = std::mem::take(&mut inner.result_slot);
-
-            let (output, status_deagg) = match inner.aggregator.flush() {
-                Ok(x) => x,
-                Err(e) => {
-                    debug!(?client, error=?e, "Failed to flush aggregator");
-                    let e = Error::Aggregator(e.into());
-                    slot.broadcast(Err(e.clone()));
-                    return Err(e);
-                }
-            };
-
-            let r = if output.is_empty() {
-                debug!(?client, "No data aggregated, skipping client request");
-
-                // A custom aggregator might have produced no records, but the the calls to `.produce` are still waiting for
-                // their slot values, so we need to provide them some result, otherwise we might flush twice or panic with
-                // "just flushed" because no data is available right after flushing.
-                Ok(vec![])
-            } else {
-                client.produce(output, compression).await
-            };
-
-            let result = match r {
-                Ok(status) => {
-                    debug!(?client, ?status, "Successfully produced records");
-
-                    let aggregated_status = AggregatedStatus {
-                        aggregated_status: status,
-                        status_deagg,
-                    };
-                    Ok(Arc::new(aggregated_status))
-                }
-                Err(e) => {
-                    debug!(?client, error=?e, "Failed to produce records");
-
-                    Err(Error::Client(Arc::new(e)))
-                }
-            };
-
-            slot.broadcast(result);
-
-            Ok(inner)
-        });
-
-        match handle.await {
-            Ok(r) => r,
-            Err(e) => Err(Error::FlushError(e.to_string())),
+        // Wait for all pending flushes to complete outside of the mutex.
+        for t in outstanding.into_iter() {
+            if !t.is_finished() {
+                t.await.expect("flush task panic");
+            }
         }
-    }
 
-    async fn lock(&self) -> OwnedMutexGuard<ProducerInner<A>> {
-        Arc::clone(&self.inner).lock_owned().await
+        Ok(())
     }
 }
 

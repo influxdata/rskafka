@@ -9,6 +9,7 @@ use crate::{
     topic::Topic,
 };
 
+pub(crate) mod batch;
 pub mod consumer;
 pub mod controller;
 pub mod error;
