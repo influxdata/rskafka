@@ -1,4 +1,4 @@
-use parking_lot::Mutex;
+use parking_lot::RwLock;
 use std::sync::Arc;
 use thiserror::Error;
 use tokio::sync::Notify;
@@ -17,11 +17,17 @@ pub type Result<T, E = Error> = std::result::Result<T, E>;
 /// - Receivers can be created with [`BroadcastOnce::receiver`]
 /// - The value can be produced with [`BroadcastOnce::broadcast`]
 #[derive(Debug)]
-pub struct BroadcastOnce<T> {
+pub struct BroadcastOnce<T>
+where
+    T: Send + Sync,
+{
     shared: Arc<Shared<T>>,
 }
 
-impl<T> Default for BroadcastOnce<T> {
+impl<T> Default for BroadcastOnce<T>
+where
+    T: Send + Sync,
+{
     fn default() -> Self {
         Self {
             shared: Arc::new(Shared {
@@ -34,11 +40,11 @@ impl<T> Default for BroadcastOnce<T> {
 
 #[derive(Debug)]
 struct Shared<T> {
-    data: Mutex<Option<Result<T>>>,
+    data: RwLock<Option<Result<T>>>,
     notify: Notify,
 }
 
-impl<T: Clone> BroadcastOnce<T> {
+impl<T: Clone + Send + Sync> BroadcastOnce<T> {
     /// Returns a [`BroadcastOnceReceiver`] that can be used to wait on
     /// a call to [`BroadcastOnce::broadcast`] on this instance
     pub fn receiver(&self) -> BroadcastOnceReceiver<T> {
@@ -49,7 +55,7 @@ impl<T: Clone> BroadcastOnce<T> {
 
     /// Broadcast a value to all [`BroadcastOnceReceiver`] handles
     pub fn broadcast(self, r: T) {
-        let mut locked = self.shared.data.lock();
+        let mut locked = self.shared.data.write();
         assert!(locked.is_none(), "double publish");
 
         *locked = Some(Ok(r));
@@ -57,9 +63,12 @@ impl<T: Clone> BroadcastOnce<T> {
     }
 }
 
-impl<T> Drop for BroadcastOnce<T> {
+impl<T> Drop for BroadcastOnce<T>
+where
+    T: Send + Sync,
+{
     fn drop(&mut self) {
-        let mut data = self.shared.data.lock();
+        let mut data = self.shared.data.write();
         if data.is_none() {
             warn!("BroadcastOnce dropped without producing");
             *data = Some(Err(Error::Dropped));
@@ -73,10 +82,10 @@ pub struct BroadcastOnceReceiver<T> {
     shared: Arc<Shared<T>>,
 }
 
-impl<T: Clone + Send> BroadcastOnceReceiver<T> {
+impl<T: Clone + Send + Sync> BroadcastOnceReceiver<T> {
     /// Returns `Some(_)` if data has been produced
     pub fn peek(&self) -> Option<Result<T>> {
-        self.shared.data.lock().clone()
+        self.shared.data.read().clone()
     }
 
     /// Waits for [`BroadcastOnce::broadcast`] to be called or returns an error
