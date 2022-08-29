@@ -212,18 +212,21 @@ use thiserror::Error;
 use tokio::task::JoinHandle;
 use tracing::*;
 
-use crate::client::{batch::FlushResult, producer::aggregator::TryPush};
-use crate::client::{error::Error as ClientError, partition::PartitionClient};
-use crate::record::Record;
-
-use self::aggregator::Aggregator;
-
-use super::{
-    batch::{BatchBuilder, ResultHandle},
-    partition::Compression,
+use self::{
+    aggregator::Aggregator,
+    batch::{BatchBuilder, FlushResult, ResultHandle},
+};
+use crate::{
+    client::{
+        error::Error as ClientError,
+        partition::{Compression, PartitionClient},
+        producer::aggregator::TryPush,
+    },
+    record::Record,
 };
 
 pub mod aggregator;
+mod batch;
 pub(crate) mod broadcast;
 
 #[derive(Debug, Error, Clone)]

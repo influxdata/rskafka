@@ -4,13 +4,11 @@ use tokio::task::JoinHandle;
 use tracing::*;
 
 use super::{
-    partition::Compression,
-    producer::{
-        aggregator::{self, Aggregator, StatusDeaggregator, TryPush},
-        broadcast::{BroadcastOnce, BroadcastOnceReceiver},
-        Error, ProducerClient,
-    },
+    aggregator::{self, Aggregator, StatusDeaggregator, TryPush},
+    broadcast::{BroadcastOnce, BroadcastOnceReceiver},
+    Error, ProducerClient,
 };
+use crate::client::partition::Compression;
 
 pub(super) type BatchWriteResult<A> = Result<Arc<AggregatedStatus<A>>, Error>;
 
