@@ -372,6 +372,17 @@ where
     pending_flushes: Vec<JoinHandle<()>>,
 }
 
+impl<A> Drop for ProducerInner<A>
+where
+    A: Aggregator,
+{
+    fn drop(&mut self) {
+        // Abort any in-progress flushes to avoid leaking tasks when
+        // ProducerInner is dropped.
+        self.pending_flushes.drain(..).for_each(|f| f.abort());
+    }
+}
+
 impl<A> ProducerInner<A>
 where
     A: aggregator::Aggregator,
