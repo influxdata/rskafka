@@ -5,7 +5,7 @@ use std::{collections::BTreeMap, time::Duration};
 
 /// Sensible test timeout.
 #[allow(dead_code)]
-pub const TEST_TIMEOUT: Duration = Duration::from_secs(4);
+pub const TEST_TIMEOUT: Duration = Duration::from_secs(10);
 
 /// Environment variable to configure if integration tests should be run.
 ///
