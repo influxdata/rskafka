@@ -1,5 +1,6 @@
 use std::time::Duration;
 
+use chrono::{TimeZone, Utc};
 use futures::{StreamExt, TryStreamExt};
 use rdkafka::{
     consumer::{Consumer, StreamConsumer},
@@ -12,7 +13,6 @@ use rskafka::{
     client::partition::Compression,
     record::{Record, RecordAndOffset},
 };
-use time::OffsetDateTime;
 
 /// Produce.
 pub async fn produce(
@@ -55,7 +55,7 @@ pub async fn produce(
         let mut f_record = FutureRecord::to(&topic_name)
             .partition(partition_index)
             .headers(headers)
-            .timestamp((record.timestamp.unix_timestamp_nanos() / 1_000_000) as i64);
+            .timestamp(record.timestamp.timestamp_millis());
         let key_ref: Option<&Vec<u8>> = record.key.as_ref();
         let value_ref: Option<&Vec<u8>> = record.value.as_ref();
         if let Some(key) = key_ref {
@@ -110,10 +110,8 @@ pub async fn consume(
                                     .collect()
                             })
                             .unwrap_or_default(),
-                        timestamp: OffsetDateTime::from_unix_timestamp_nanos(
-                            msg.timestamp().to_millis().unwrap_or_default() as i128 * 1_000_000,
-                        )
-                        .unwrap(),
+                        timestamp: Utc
+                            .timestamp_millis(msg.timestamp().to_millis().unwrap_or_default()),
                     },
                     offset: msg.offset(),
                 })

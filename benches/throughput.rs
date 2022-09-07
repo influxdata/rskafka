@@ -7,6 +7,7 @@ use std::{
     time::{Duration, Instant},
 };
 
+use chrono::{TimeZone, Utc};
 use criterion::{
     criterion_group, criterion_main, measurement::WallTime, BenchmarkGroup, Criterion, SamplingMode,
 };
@@ -28,7 +29,6 @@ use rskafka::{
     },
     record::Record,
 };
-use time::OffsetDateTime;
 use tokio::runtime::Runtime;
 
 const PARALLEL_BATCH_SIZE: usize = 1_000_000;
@@ -42,7 +42,7 @@ pub fn criterion_benchmark(c: &mut Criterion) {
         key: Some(vec![b'k'; 10]),
         value: Some(vec![b'x'; 10_000]),
         headers: BTreeMap::default(),
-        timestamp: OffsetDateTime::now_utc(),
+        timestamp: Utc.timestamp_millis(1337),
     };
 
     {

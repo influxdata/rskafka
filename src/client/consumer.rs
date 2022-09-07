@@ -360,8 +360,8 @@ mod tests {
     use std::time::Duration;
 
     use assert_matches::assert_matches;
+    use chrono::{TimeZone, Utc};
     use futures::{pin_mut, StreamExt};
-    use time::OffsetDateTime;
     use tokio::sync::{mpsc, Mutex};
 
     use crate::{
@@ -509,7 +509,7 @@ mod tests {
             key: Some(vec![0; 4]),
             value: Some(vec![0; 6]),
             headers: Default::default(),
-            timestamp: OffsetDateTime::now_utc(),
+            timestamp: Utc.timestamp_millis(1337),
         };
 
         let (sender, receiver) = mpsc::channel(10);
@@ -576,7 +576,7 @@ mod tests {
             key: Some(vec![0; 4]),
             value: Some(vec![0; 6]),
             headers: Default::default(),
-            timestamp: OffsetDateTime::now_utc(),
+            timestamp: Utc.timestamp_millis(1337),
         };
 
         let (sender, receiver) = mpsc::channel(10);
@@ -667,7 +667,7 @@ mod tests {
             key: Some(vec![0; 4]),
             value: Some(vec![0; 6]),
             headers: Default::default(),
-            timestamp: OffsetDateTime::now_utc(),
+            timestamp: Utc.timestamp_millis(1337),
         };
 
         // Simulate an error on first fetch to encourage an offset update
@@ -714,7 +714,7 @@ mod tests {
             key: Some(vec![0; 4]),
             value: Some(vec![0; 6]),
             headers: Default::default(),
-            timestamp: OffsetDateTime::now_utc(),
+            timestamp: Utc.timestamp_millis(1337),
         };
 
         // Simulate an error on first fetch to encourage an offset update

@@ -22,11 +22,11 @@ use crate::{
     validation::ExactlyOne,
 };
 use async_trait::async_trait;
+use chrono::{LocalResult, TimeZone, Utc};
 use std::{
     ops::{ControlFlow, Deref, Range},
     sync::Arc,
 };
-use time::OffsetDateTime;
 use tokio::sync::Mutex;
 use tracing::{error, info};
 
@@ -540,7 +540,7 @@ fn build_produce_request(
             ProtocolRecord {
                 key: record.key,
                 value: record.value,
-                timestamp_delta: (record.timestamp - first_timestamp).whole_milliseconds() as i64,
+                timestamp_delta: (record.timestamp - first_timestamp).num_milliseconds() as i64,
                 offset_delta: offset_delta as i32,
                 headers: record
                     .headers
@@ -573,8 +573,8 @@ fn build_produce_request(
             timestamp_type: RecordBatchTimestampType::CreateTime,
             producer_id: -1,
             producer_epoch: -1,
-            first_timestamp: (first_timestamp.unix_timestamp_nanos() / 1_000_000) as i64,
-            max_timestamp: (max_timestamp.unix_timestamp_nanos() / 1_000_000) as i64,
+            first_timestamp: first_timestamp.timestamp_millis(),
+            max_timestamp: max_timestamp.timestamp_millis(),
             records: ControlBatchOrRecords::Records(records),
         }]),
     };
@@ -730,12 +730,29 @@ fn extract_records(
                         continue;
                     }
 
-                    let timestamp = OffsetDateTime::from_unix_timestamp_nanos(
-                        (batch.first_timestamp + record.timestamp_delta) as i128 * 1_000_000,
-                    )
-                    .map_err(|e| {
-                        Error::InvalidResponse(format!("Cannot parse timestamp: {}", e))
-                    })?;
+                    let timestamp_millis =
+                        match batch.first_timestamp.checked_add(record.timestamp_delta) {
+                            Some(ts) => ts,
+                            None => {
+                                return Err(Error::InvalidResponse(format!(
+                                    "Timestamp overflow (first_timestamp={}, delta={}",
+                                    batch.first_timestamp, record.timestamp_delta
+                                )));
+                            }
+                        };
+                    let timestamp = match Utc.timestamp_millis_opt(timestamp_millis) {
+                        LocalResult::None => {
+                            return Err(Error::InvalidResponse(format!(
+                                "Not a valid timestamp ({timestamp_millis})"
+                            )));
+                        }
+                        LocalResult::Single(ts) => ts,
+                        LocalResult::Ambiguous(a, b) => {
+                            return Err(Error::InvalidResponse(format!(
+                                "Ambiguous timestamp ({timestamp_millis}): {a} or {b}"
+                            )));
+                        }
+                    };
 
                     records.push(RecordAndOffset {
                         record: Record {
