@@ -143,8 +143,9 @@ impl StatusDeaggregator for RecordAggregatorStatusDeaggregator {
 
 #[cfg(test)]
 mod tests {
+    use chrono::{TimeZone, Utc};
+
     use super::*;
-    use time::OffsetDateTime;
 
     #[test]
     fn test_record_aggregator() {
@@ -152,7 +153,7 @@ mod tests {
             key: Some(vec![0; 45]),
             value: Some(vec![0; 2]),
             headers: Default::default(),
-            timestamp: OffsetDateTime::from_unix_timestamp(20).unwrap(),
+            timestamp: Utc.timestamp_millis(1337),
         };
 
         let r2 = Record {

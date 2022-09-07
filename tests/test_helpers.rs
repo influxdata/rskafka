@@ -1,11 +1,11 @@
+use chrono::{TimeZone, Utc};
 use parking_lot::Once;
 use rskafka::record::Record;
 use std::{collections::BTreeMap, time::Duration};
-use time::OffsetDateTime;
 
 /// Sensible test timeout.
 #[allow(dead_code)]
-pub const TEST_TIMEOUT: Duration = Duration::from_secs(4);
+pub const TEST_TIMEOUT: Duration = Duration::from_secs(10);
 
 /// Environment variable to configure if integration tests should be run.
 ///
@@ -160,16 +160,8 @@ pub fn record(key: &[u8]) -> Record {
         key: Some(key.to_vec()),
         value: Some(b"hello kafka".to_vec()),
         headers: BTreeMap::from([("foo".to_owned(), b"bar".to_vec())]),
-        timestamp: now(),
+        timestamp: Utc.timestamp_millis(1337),
     }
-}
-
-/// UTC "now" w/o nanoseconds
-///
-/// This is required because Kafka doesn't support such fine-grained resolution.
-pub fn now() -> OffsetDateTime {
-    let x = OffsetDateTime::now_utc().unix_timestamp_nanos();
-    OffsetDateTime::from_unix_timestamp_nanos((x / 1_000_000) * 1_000_000).unwrap()
 }
 
 static LOG_SETUP: Once = Once::new();

@@ -1,5 +1,6 @@
-use std::{sync::Arc, time::Duration};
+use std::sync::Arc;
 
+use chrono::{Duration, TimeZone, Utc};
 use rskafka::{
     client::{
         partition::{Compression, PartitionClient, UnknownTopicHandling},
@@ -12,7 +13,7 @@ mod java_helper;
 mod rdkafka_helper;
 mod test_helpers;
 
-use test_helpers::{maybe_start_logging, now, random_topic_name, record};
+use test_helpers::{maybe_start_logging, random_topic_name, record};
 
 #[tokio::test]
 async fn test_produce_java_consume_java_nocompression() {
@@ -268,9 +269,9 @@ async fn assert_produce_consume<F1, G1, F2, G2>(
     );
 
     // timestamps for records. We'll reorder the messages though to ts2, ts1, ts3
-    let ts1 = now();
-    let ts2 = ts1 + Duration::from_millis(1);
-    let ts3 = ts2 + Duration::from_millis(1);
+    let ts1 = Utc.timestamp_millis(1337);
+    let ts2 = ts1 + Duration::milliseconds(1);
+    let ts3 = ts2 + Duration::milliseconds(1);
 
     let record_1 = {
         let record = Record {

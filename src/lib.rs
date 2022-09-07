@@ -37,6 +37,6 @@ pub mod record;
 pub mod topic;
 
 // re-exports
-pub use time;
+pub use chrono;
 
 mod validation;

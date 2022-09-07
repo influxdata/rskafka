@@ -50,7 +50,7 @@
 //!     },
 //!     record::Record,
 //! };
-//! use time::OffsetDateTime;
+//! use chrono::{TimeZone, Utc};
 //! use std::{
 //!     collections::BTreeMap,
 //!     sync::Arc,
@@ -82,7 +82,7 @@
 //!     headers: BTreeMap::from([
 //!         ("foo".to_owned(), b"bar".to_vec()),
 //!     ]),
-//!     timestamp: OffsetDateTime::now_utc(),
+//!     timestamp: Utc.timestamp_millis(42),
 //! };
 //! producer.produce(record.clone()).await.unwrap();
 //! # }
@@ -109,7 +109,7 @@
 //!     },
 //!     record::Record,
 //! };
-//! use time::OffsetDateTime;
+//! use chrono::{TimeZone, Utc};
 //! use std::{
 //!     collections::BTreeMap,
 //!     sync::Arc,
@@ -156,7 +156,7 @@
 //!                 headers: BTreeMap::from([
 //!                     ("foo".to_owned(), b"bar".to_vec()),
 //!                 ]),
-//!                 timestamp: OffsetDateTime::now_utc(),
+//!                 timestamp: Utc.timestamp_millis(42),
 //!             },
 //!         ];
 //!         Ok((
@@ -686,9 +686,9 @@ mod tests {
     use crate::{
         client::producer::aggregator::RecordAggregator, protocol::error::Error as ProtocolError,
     };
+    use chrono::{TimeZone, Utc};
     use futures::stream::{FuturesOrdered, FuturesUnordered};
     use futures::{pin_mut, FutureExt, StreamExt};
-    use time::OffsetDateTime;
 
     #[derive(Debug)]
     struct MockClient {
@@ -737,7 +737,7 @@ mod tests {
             key: Some(vec![0; 4]),
             value: Some(vec![0; 6]),
             headers: Default::default(),
-            timestamp: OffsetDateTime::from_unix_timestamp(320).unwrap(),
+            timestamp: Utc.timestamp_millis(320),
         }
     }
 

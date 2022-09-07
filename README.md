@@ -36,7 +36,7 @@ use rskafka::{
     },
     record::Record,
 };
-use time::OffsetDateTime;
+use chrono::{TimeZone, Utc};
 use std::collections::BTreeMap;
 
 // setup client
@@ -70,7 +70,7 @@ let record = Record {
     headers: BTreeMap::from([
         ("foo".to_owned(), b"bar".to_vec()),
     ]),
-    timestamp: OffsetDateTime::now_utc(),
+    timestamp: Utc.timestamp_millis(42),
 };
 partition_client.produce(vec![record], Compression::default()).await.unwrap();
 

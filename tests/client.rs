@@ -1,4 +1,5 @@
 use assert_matches::assert_matches;
+use chrono::{TimeZone, Utc};
 use rskafka::{
     client::{
         error::{Error as ClientError, ProtocolError, ServerErrorResponse},
@@ -10,7 +11,7 @@ use rskafka::{
 use std::{collections::BTreeMap, str::FromStr, sync::Arc, time::Duration};
 
 mod test_helpers;
-use test_helpers::{maybe_start_logging, now, random_topic_name, record, TEST_TIMEOUT};
+use test_helpers::{maybe_start_logging, random_topic_name, record, TEST_TIMEOUT};
 
 #[tokio::test]
 async fn test_plain() {
@@ -368,7 +369,7 @@ async fn test_get_offset() {
     // use out-of order timestamps to ensure our "lastest offset" logic works
     let record_early = record(b"");
     let record_late = Record {
-        timestamp: record_early.timestamp + time::Duration::SECOND,
+        timestamp: record_early.timestamp + chrono::Duration::seconds(1),
         ..record_early.clone()
     };
     let offsets = partition_client
@@ -653,6 +654,6 @@ pub fn large_record() -> Record {
         key: Some(b"".to_vec()),
         value: Some(vec![b'x'; 1024]),
         headers: BTreeMap::from([("foo".to_owned(), b"bar".to_vec())]),
-        timestamp: now(),
+        timestamp: Utc.timestamp_millis(1337),
     }
 }
