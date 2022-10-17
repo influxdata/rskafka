@@ -433,6 +433,6 @@ where
 {
     tokio::select! {
         e = stream.next() => panic!("stream is not pending, yielded: {e:?}"),
-        _ = tokio::time::sleep(Duration::from_millis(200)) => {},
+        _ = tokio::time::sleep(Duration::from_secs(1)) => {},
     };
 }
