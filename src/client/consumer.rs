@@ -51,7 +51,7 @@ use std::time::Duration;
 use futures::future::{BoxFuture, Fuse, FusedFuture, FutureExt};
 use futures::Stream;
 use pin_project_lite::pin_project;
-use tracing::{trace, warn};
+use tracing::{debug, trace, warn};
 
 use crate::{
     client::{
@@ -258,8 +258,16 @@ impl Stream for StreamConsumer {
                     let offset = match next_offset {
                         Some(x) => x,
                         None => match start_offset {
-                            StartOffset::Earliest => client.get_offset(OffsetAt::Earliest).await?,
-                            StartOffset::Latest => client.get_offset(OffsetAt::Latest).await?,
+                            StartOffset::Earliest => {
+                                let offset = client.get_offset(OffsetAt::Earliest).await?;
+                                debug!(offset, "resolved `earliest` offset");
+                                offset
+                            }
+                            StartOffset::Latest => {
+                                let offset = client.get_offset(OffsetAt::Latest).await?;
+                                debug!(offset, "resolved `latest` offset");
+                                offset
+                            }
                             StartOffset::At(x) => x,
                         },
                     };
