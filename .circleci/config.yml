@@ -469,14 +469,11 @@ workflows:
       - build-fuzz
       - doc
 
-  # Run fuzzers every 30mins
+  # Run fuzzers based on a project-wide trigger
   fuzz:
-    triggers:
-      - schedule:
-          cron: "0,30 * * * *"
-          filters:
-            branches:
-              only:
-                - main
+    when:
+      and:
+        - equal: [scheduled_pipeline, << pipeline.trigger_source >>]
+        - equal: ["fuzz", << pipeline.schedule.name >>]
     jobs:
       - run-fuzz
