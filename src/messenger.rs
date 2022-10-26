@@ -97,6 +97,9 @@ pub struct Messenger<RW> {
     /// This will be used by [`request`](Self::request) to queue up messages.
     stream_write: Arc<AsyncMutex<WriteHalf<RW>>>,
 
+    /// Client ID.
+    client_id: Arc<str>,
+
     /// The next correlation ID.
     ///
     /// This is used to map responses to active requests.
@@ -175,7 +178,7 @@ impl<RW> Messenger<RW>
 where
     RW: AsyncRead + AsyncWrite + Send + 'static,
 {
-    pub fn new(stream: RW, max_message_size: usize) -> Self {
+    pub fn new(stream: RW, max_message_size: usize, client_id: Arc<str>) -> Self {
         let (stream_read, stream_write) = tokio::io::split(stream);
         let state = Arc::new(Mutex::new(MessengerState::RequestMap(HashMap::default())));
         let state_captured = Arc::clone(&state);
@@ -255,6 +258,7 @@ where
 
         Self {
             stream_write: Arc::new(AsyncMutex::new(stream_write)),
+            client_id,
             correlation_id: AtomicI32::new(0),
             version_ranges: RwLock::new(HashMap::new()),
             state,
@@ -304,7 +308,7 @@ where
             correlation_id: Int32(correlation_id),
             // Technically we don't need to send a client_id, but newer redpanda version fail to parse the message
             // without it. See https://github.com/influxdata/rskafka/issues/169 .
-            client_id: Some(NullableString(Some(String::from(env!("CARGO_PKG_NAME"))))),
+            client_id: Some(NullableString(Some(String::from(self.client_id.as_ref())))),
             tagged_fields: Some(TaggedFields::default()),
         };
         let header_version = if use_tagged_fields_in_request {
@@ -620,12 +624,15 @@ mod tests {
 
     use super::*;
 
-    use crate::protocol::{
-        error::Error as ApiError,
-        messages::{
-            ApiVersionsResponse, ApiVersionsResponseApiKey, ListOffsetsRequest, NORMAL_CONSUMER,
+    use crate::{
+        build_info::DEFAULT_CLIENT_ID,
+        protocol::{
+            error::Error as ApiError,
+            messages::{
+                ApiVersionsResponse, ApiVersionsResponseApiKey, ListOffsetsRequest, NORMAL_CONSUMER,
+            },
+            traits::WriteType,
         },
-        traits::WriteType,
     };
 
     #[test]
@@ -666,7 +673,7 @@ mod tests {
     #[tokio::test]
     async fn test_sync_versions_ok() {
         let (sim, rx) = MessageSimulator::new();
-        let messenger = Messenger::new(rx, 1_000);
+        let messenger = Messenger::new(rx, 1_000, Arc::from(DEFAULT_CLIENT_ID));
 
         // construct response
         let mut msg = vec![];
@@ -703,7 +710,7 @@ mod tests {
     #[tokio::test]
     async fn test_sync_versions_ignores_error_code() {
         let (sim, rx) = MessageSimulator::new();
-        let messenger = Messenger::new(rx, 1_000);
+        let messenger = Messenger::new(rx, 1_000, Arc::from(DEFAULT_CLIENT_ID));
 
         // construct error response
         let mut msg = vec![];
@@ -766,7 +773,7 @@ mod tests {
     #[tokio::test]
     async fn test_sync_versions_ignores_read_code() {
         let (sim, rx) = MessageSimulator::new();
-        let messenger = Messenger::new(rx, 1_000);
+        let messenger = Messenger::new(rx, 1_000, Arc::from(DEFAULT_CLIENT_ID));
 
         // construct error response
         let mut msg = vec![];
@@ -817,7 +824,7 @@ mod tests {
     #[tokio::test]
     async fn test_sync_versions_err_flipped_range() {
         let (sim, rx) = MessageSimulator::new();
-        let messenger = Messenger::new(rx, 1_000);
+        let messenger = Messenger::new(rx, 1_000, Arc::from(DEFAULT_CLIENT_ID));
 
         // construct response
         let mut msg = vec![];
@@ -850,7 +857,7 @@ mod tests {
     #[tokio::test]
     async fn test_sync_versions_ignores_garbage() {
         let (sim, rx) = MessageSimulator::new();
-        let messenger = Messenger::new(rx, 1_000);
+        let messenger = Messenger::new(rx, 1_000, Arc::from(DEFAULT_CLIENT_ID));
 
         // construct response
         let mut msg = vec![];
@@ -914,7 +921,7 @@ mod tests {
     #[tokio::test]
     async fn test_sync_versions_err_no_working_version() {
         let (sim, rx) = MessageSimulator::new();
-        let messenger = Messenger::new(rx, 1_000);
+        let messenger = Messenger::new(rx, 1_000, Arc::from(DEFAULT_CLIENT_ID));
 
         // construct error response
         for (i, v) in ((ApiVersionsRequest::API_VERSION_RANGE.min().0 .0)
@@ -953,7 +960,7 @@ mod tests {
     #[tokio::test]
     async fn test_poison_hangup() {
         let (sim, rx) = MessageSimulator::new();
-        let messenger = Messenger::new(rx, 1_000);
+        let messenger = Messenger::new(rx, 1_000, Arc::from(DEFAULT_CLIENT_ID));
         messenger.set_version_ranges(HashMap::from([(
             ApiKey::ListOffsets,
             ListOffsetsRequest::API_VERSION_RANGE,
@@ -975,7 +982,7 @@ mod tests {
     #[tokio::test]
     async fn test_poison_negative_message_size() {
         let (sim, rx) = MessageSimulator::new();
-        let messenger = Messenger::new(rx, 1_000);
+        let messenger = Messenger::new(rx, 1_000, Arc::from(DEFAULT_CLIENT_ID));
         messenger.set_version_ranges(HashMap::from([(
             ApiKey::ListOffsets,
             ListOffsetsRequest::API_VERSION_RANGE,
@@ -1008,7 +1015,7 @@ mod tests {
     #[tokio::test]
     async fn test_broken_msg_header_does_not_poison() {
         let (sim, rx) = MessageSimulator::new();
-        let messenger = Messenger::new(rx, 1_000);
+        let messenger = Messenger::new(rx, 1_000, Arc::from(DEFAULT_CLIENT_ID));
         messenger.set_version_ranges(HashMap::from([(
             ApiKey::ApiVersions,
             ApiVersionsRequest::API_VERSION_RANGE,
@@ -1053,7 +1060,7 @@ mod tests {
         let (tx_front, rx_middle) = tokio::io::duplex(1);
         let (tx_middle, mut rx_back) = tokio::io::duplex(1);
 
-        let messenger = Messenger::new(tx_front, 1_000);
+        let messenger = Messenger::new(tx_front, 1_000, Arc::from(DEFAULT_CLIENT_ID));
 
         // create two barriers:
         // - pause: will be passed after 3 bytes were sent by the client

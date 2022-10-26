@@ -3,6 +3,7 @@ use std::sync::Arc;
 use thiserror::Error;
 
 use crate::{
+    build_info::DEFAULT_CLIENT_ID,
     client::partition::PartitionClient,
     connection::{BrokerConnector, MetadataLookupMode, TlsConfig},
     protocol::primitives::Boolean,
@@ -38,6 +39,7 @@ pub enum ProduceError {
 /// Builder for [`Client`].
 pub struct ClientBuilder {
     bootstrap_brokers: Vec<String>,
+    client_id: Option<Arc<str>>,
     max_message_size: usize,
     socks5_proxy: Option<String>,
     tls_config: TlsConfig,
@@ -48,10 +50,17 @@ impl ClientBuilder {
     pub fn new(bootstrap_brokers: Vec<String>) -> Self {
         Self {
             bootstrap_brokers,
+            client_id: None,
             max_message_size: 100 * 1024 * 1024, // 100MB
             socks5_proxy: None,
             tls_config: TlsConfig::default(),
         }
+    }
+
+    /// Sets client ID.
+    pub fn client_id(mut self, client_id: impl Into<Arc<str>>) -> Self {
+        self.client_id = Some(client_id.into());
+        self
     }
 
     /// Set maximum size (in bytes) of message frames that can be received from a broker.
@@ -82,6 +91,8 @@ impl ClientBuilder {
     pub async fn build(self) -> Result<Client> {
         let brokers = Arc::new(BrokerConnector::new(
             self.bootstrap_brokers,
+            self.client_id
+                .unwrap_or_else(|| Arc::from(DEFAULT_CLIENT_ID)),
             self.tls_config,
             self.socks5_proxy,
             self.max_message_size,

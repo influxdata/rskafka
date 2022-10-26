@@ -53,6 +53,7 @@ trait ConnectionHandler {
 
     async fn connect(
         &self,
+        client_id: Arc<str>,
         tls_config: TlsConfig,
         socks5_proxy: Option<String>,
         max_message_size: usize,
@@ -103,6 +104,7 @@ impl ConnectionHandler for BrokerRepresentation {
 
     async fn connect(
         &self,
+        client_id: Arc<str>,
         tls_config: TlsConfig,
         socks5_proxy: Option<String>,
         max_message_size: usize,
@@ -120,7 +122,11 @@ impl ConnectionHandler for BrokerRepresentation {
                 error,
             })?;
 
-        let messenger = Arc::new(Messenger::new(BufStream::new(transport), max_message_size));
+        let messenger = Arc::new(Messenger::new(
+            BufStream::new(transport),
+            max_message_size,
+            client_id,
+        ));
         messenger.sync_versions().await?;
         Ok(messenger)
     }
@@ -135,6 +141,9 @@ impl ConnectionHandler for BrokerRepresentation {
 pub struct BrokerConnector {
     /// Broker URLs used to boostrap this pool
     bootstrap_brokers: Vec<String>,
+
+    /// Client ID.
+    client_id: Arc<str>,
 
     /// Discovered brokers in the cluster, including bootstrap brokers
     topology: BrokerTopology,
@@ -165,12 +174,14 @@ pub struct BrokerConnector {
 impl BrokerConnector {
     pub fn new(
         bootstrap_brokers: Vec<String>,
+        client_id: Arc<str>,
         tls_config: TlsConfig,
         socks5_proxy: Option<String>,
         max_message_size: usize,
     ) -> Self {
         Self {
             bootstrap_brokers,
+            client_id,
             topology: Default::default(),
             cached_arbitrary_broker: Mutex::new(None),
             cached_metadata: Default::default(),
@@ -265,6 +276,7 @@ impl BrokerConnector {
             Some(broker) => {
                 let connection = BrokerRepresentation::Topology(broker)
                     .connect(
+                        Arc::clone(&self.client_id),
                         self.tls_config.clone(),
                         self.socks5_proxy.clone(),
                         self.max_message_size,
@@ -350,6 +362,7 @@ impl BrokerCache for &BrokerConnector {
 
         let connection = connect_to_a_broker_with_retry(
             self.brokers(),
+            Arc::clone(&self.client_id),
             &self.backoff_config,
             self.tls_config.clone(),
             self.socks5_proxy.clone(),
@@ -369,6 +382,7 @@ impl BrokerCache for &BrokerConnector {
 
 async fn connect_to_a_broker_with_retry<B>(
     mut brokers: Vec<B>,
+    client_id: Arc<str>,
     backoff_config: &BackoffConfig,
     tls_config: TlsConfig,
     socks5_proxy: Option<String>,
@@ -385,7 +399,12 @@ where
         .retry_with_backoff("broker_connect", || async {
             for broker in &brokers {
                 let conn = broker
-                    .connect(tls_config.clone(), socks5_proxy.clone(), max_message_size)
+                    .connect(
+                        Arc::clone(&client_id),
+                        tls_config.clone(),
+                        socks5_proxy.clone(),
+                        max_message_size,
+                    )
                     .await;
 
                 let connection = match conn {
@@ -457,7 +476,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::protocol::api_key::ApiKey;
+    use crate::{build_info::DEFAULT_CLIENT_ID, protocol::api_key::ApiKey};
     use std::sync::atomic::{AtomicBool, Ordering};
 
     struct FakeBroker(Box<dyn Fn() -> Result<MetadataResponse, RequestError> + Send + Sync>);
@@ -684,6 +703,7 @@ mod tests {
 
         async fn connect(
             &self,
+            _client_id: Arc<str>,
             _tls_config: TlsConfig,
             _socks5_proxy: Option<String>,
             _max_message_size: usize,
@@ -709,6 +729,7 @@ mod tests {
         // connects successfully.
         let conn = connect_to_a_broker_with_retry(
             brokers,
+            Arc::from(DEFAULT_CLIENT_ID),
             &Default::default(),
             Default::default(),
             Default::default(),

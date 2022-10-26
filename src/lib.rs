@@ -19,6 +19,8 @@
 
 mod backoff;
 
+pub mod build_info;
+
 pub mod client;
 
 mod connection;

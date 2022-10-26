@@ -1,9 +1,10 @@
 #![no_main]
-use std::{collections::HashMap, io::Cursor, time::Duration};
+use std::{collections::HashMap, io::Cursor, sync::Arc, time::Duration};
 
 use libfuzzer_sys::fuzz_target;
 use pin_project_lite::pin_project;
 use rskafka::{
+    build_info::DEFAULT_CLIENT_ID,
     messenger::Messenger,
     protocol::{
         api_key::ApiKey,
@@ -135,7 +136,7 @@ where
         let transport = MockTransport::new(transport_data);
 
         // setup messenger
-        let messenger = Messenger::new(transport, message_size);
+        let messenger = Messenger::new(transport, message_size, Arc::from(DEFAULT_CLIENT_ID));
         messenger.override_version_ranges(HashMap::from([(
             api_key,
             ApiVersionRange::new(api_version, api_version),
