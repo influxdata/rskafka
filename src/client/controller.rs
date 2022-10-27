@@ -2,7 +2,7 @@ use async_trait::async_trait;
 use std::ops::ControlFlow;
 use std::sync::Arc;
 use tokio::sync::Mutex;
-use tracing::{debug, error, info};
+use tracing::{error, info};
 
 use crate::{
     backoff::{Backoff, BackoffConfig, ErrorOrThrottle},
@@ -139,8 +139,8 @@ impl BrokerCache for &ControllerClient {
         Ok(broker)
     }
 
-    async fn invalidate(&self) {
-        debug!("Invalidating cached controller broker");
+    async fn invalidate(&self, reason: &'static str) {
+        info!(reason, "Invalidating cached controller broker",);
         self.current_broker.lock().await.take();
     }
 }
@@ -175,14 +175,20 @@ where
             match error {
                 // broken connection
                 Error::Request(RequestError::Poisoned(_) | RequestError::IO(_))
-                | Error::Connection(_) => broker_cache.invalidate().await,
+                | Error::Connection(_) => {
+                    broker_cache
+                        .invalidate("controller client: connection broken")
+                        .await
+                }
 
                 // our broker is actually not the controller
                 Error::ServerError {
                     protocol_error: ProtocolError::NotController,
                     ..
                 } => {
-                    broker_cache.invalidate().await;
+                    broker_cache
+                        .invalidate("controller client: server error: not controller")
+                        .await;
                 }
 
                 // fatal

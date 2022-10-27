@@ -414,14 +414,18 @@ impl BrokerCache for &PartitionClient {
         let broker = match self.brokers.connect(leader).await {
             Ok(Some(c)) => Ok(c),
             Ok(None) => {
-                self.brokers.invalidate_metadata_cache();
+                self.brokers.invalidate_metadata_cache(
+                    "partition client: broker that is leader is unknown",
+                );
                 Err(Error::InvalidResponse(format!(
                     "Partition leader {} not found in metadata response",
                     leader
                 )))
             }
             Err(e) => {
-                self.brokers.invalidate_metadata_cache();
+                self.brokers.invalidate_metadata_cache(
+                    "partition client: error connecting to partition leader",
+                );
                 Err(e.into())
             }
         }?;
@@ -442,7 +446,9 @@ impl BrokerCache for &PartitionClient {
             .await?;
         if leader != leader_self {
             // The cached metadata identified an incorrect leader - it is stale and should be refreshed.
-            self.brokers.invalidate_metadata_cache();
+            self.brokers.invalidate_metadata_cache(
+                "partition client: broker that should be leader does treat itself as a leader",
+            );
 
             // this might happen if the leader changed after we got the hint from a arbitrary broker and this specific
             // metadata call.
@@ -469,13 +475,14 @@ impl BrokerCache for &PartitionClient {
         Ok(broker)
     }
 
-    async fn invalidate(&self) {
+    async fn invalidate(&self, reason: &'static str) {
         info!(
             topic = self.topic.deref(),
             partition = self.partition,
+            reason,
             "Invaliding cached leader",
         );
-        self.brokers.invalidate_metadata_cache();
+        self.brokers.invalidate_metadata_cache(reason);
         *self.current_broker.lock().await = None
     }
 }
@@ -511,7 +518,9 @@ where
             let retry = match error {
                 Error::Request(RequestError::Poisoned(_) | RequestError::IO(_))
                 | Error::Connection(_) => {
-                    broker_cache.invalidate().await;
+                    broker_cache
+                        .invalidate("partition client: connection broken")
+                        .await;
                     true
                 }
                 Error::ServerError {
@@ -525,14 +534,18 @@ where
                     protocol_error: ProtocolError::NotLeaderOrFollower,
                     ..
                 } => {
-                    broker_cache.invalidate().await;
+                    broker_cache
+                        .invalidate("partition client: server error: not leader or follower")
+                        .await;
                     true
                 }
                 Error::ServerError {
                     protocol_error: ProtocolError::UnknownTopicOrPartition,
                     ..
                 } => {
-                    broker_cache.invalidate().await;
+                    broker_cache
+                        .invalidate("partition client: server error: unknown topic or partition")
+                        .await;
                     unknown_topic_handling == UnknownTopicHandling::Retry
                 }
                 _ => false,

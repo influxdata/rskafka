@@ -1,5 +1,5 @@
 use parking_lot::Mutex;
-use tracing::debug;
+use tracing::{debug, info};
 
 use crate::protocol::messages::MetadataResponse;
 
@@ -39,7 +39,7 @@ impl MetadataCache {
                 // if a caller keeps requesting metadata for a non-existent
                 // topic.
                 debug!("cached metadata query for unknown topic");
-                self.invalidate();
+                self.invalidate("get from metadata cache: unknown topic");
                 return None;
             }
         }
@@ -49,9 +49,9 @@ impl MetadataCache {
         Some(m)
     }
 
-    pub(crate) fn invalidate(&self) {
+    pub(crate) fn invalidate(&self, reason: &'static str) {
         *self.cache.lock() = None;
-        debug!("invalidated metadata cache");
+        info!(reason, "invalidated metadata cache",);
     }
 
     pub(crate) fn update(&self, m: MetadataResponse) {
@@ -148,7 +148,7 @@ mod tests {
         });
 
         assert!(cache.get(&None).is_some());
-        cache.invalidate();
+        cache.invalidate("test");
         assert!(cache.get(&None).is_none());
     }
 }
