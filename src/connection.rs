@@ -122,13 +122,9 @@ impl ConnectionHandler for BrokerRepresentation {
                 error,
             })?;
 
-        let messenger = Arc::new(Messenger::new(
-            BufStream::new(transport),
-            max_message_size,
-            client_id,
-        ));
+        let mut messenger = Messenger::new(BufStream::new(transport), max_message_size, client_id);
         messenger.sync_versions().await?;
-        Ok(messenger)
+        Ok(Arc::new(messenger))
     }
 }
 
