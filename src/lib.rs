@@ -36,6 +36,8 @@ mod protocol;
 
 pub mod record;
 
+mod throttle;
+
 pub mod topic;
 
 // re-exports

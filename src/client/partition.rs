@@ -1,5 +1,5 @@
 use crate::{
-    backoff::{Backoff, BackoffConfig},
+    backoff::{Backoff, BackoffConfig, ErrorOrThrottle},
     client::error::{Error, RequestContext, Result},
     connection::{
         BrokerCache, BrokerConnection, BrokerConnector, MessengerTransport, MetadataLookupMode,
@@ -19,6 +19,7 @@ use crate::{
         record::{Record as ProtocolRecord, *},
     },
     record::{Record, RecordAndOffset},
+    throttle::maybe_throttle,
     validation::ExactlyOne,
 };
 use async_trait::async_trait;
@@ -151,7 +152,7 @@ impl PartitionClient {
             &*brokers,
             "leader_detection",
             || async move {
-                scope.get().await?;
+                scope.get().await.map_err(ErrorOrThrottle::Error)?;
                 Ok(())
             },
         )
@@ -190,9 +191,14 @@ impl PartitionClient {
             self,
             "produce",
             || async move {
-                let broker = self.get().await?;
-                let response = broker.request(&request).await?;
+                let broker = self.get().await.map_err(ErrorOrThrottle::Error)?;
+                let response = broker
+                    .request(&request)
+                    .await
+                    .map_err(|e| ErrorOrThrottle::Error(e.into()))?;
+                maybe_throttle(response.throttle_time_ms)?;
                 process_produce_response(self.partition, &self.topic, n, response)
+                    .map_err(ErrorOrThrottle::Error)
             },
         )
         .await
@@ -221,8 +227,16 @@ impl PartitionClient {
             self,
             "fetch_records",
             || async move {
-                let response = self.get().await?.request(&request).await?;
+                let response = self
+                    .get()
+                    .await
+                    .map_err(ErrorOrThrottle::Error)?
+                    .request(&request)
+                    .await
+                    .map_err(|e| ErrorOrThrottle::Error(e.into()))?;
+                maybe_throttle(response.throttle_time_ms)?;
                 process_fetch_response(self.partition, &self.topic, response, offset)
+                    .map_err(ErrorOrThrottle::Error)
             },
         )
         .await?;
@@ -248,8 +262,16 @@ impl PartitionClient {
             self,
             "get_offset",
             || async move {
-                let response = self.get().await?.request(&request).await?;
+                let response = self
+                    .get()
+                    .await
+                    .map_err(ErrorOrThrottle::Error)?
+                    .request(&request)
+                    .await
+                    .map_err(|e| ErrorOrThrottle::Error(e.into()))?;
+                maybe_throttle(response.throttle_time_ms)?;
                 process_list_offsets_response(self.partition, &self.topic, response)
+                    .map_err(ErrorOrThrottle::Error)
             },
         )
         .await?;
@@ -272,8 +294,16 @@ impl PartitionClient {
             self,
             "delete_records",
             || async move {
-                let response = self.get().await?.request(&request).await?;
+                let response = self
+                    .get()
+                    .await
+                    .map_err(ErrorOrThrottle::Error)?
+                    .request(&request)
+                    .await
+                    .map_err(|e| ErrorOrThrottle::Error(e.into()))?;
+                maybe_throttle(Some(response.throttle_time_ms))?;
                 process_delete_records_response(&self.topic, self.partition, response)
+                    .map_err(ErrorOrThrottle::Error)
             },
         )
         .await?;
@@ -462,15 +492,20 @@ async fn maybe_retry<B, R, F, T>(
 where
     B: BrokerCache,
     R: (Fn() -> F) + Send + Sync,
-    F: std::future::Future<Output = Result<T>> + Send,
+    F: std::future::Future<Output = Result<T, ErrorOrThrottle<Error>>> + Send,
 {
     let mut backoff = Backoff::new(backoff_config);
 
     backoff
         .retry_with_backoff(request_name, || async {
             let error = match f().await {
-                Ok(v) => return ControlFlow::Break(Ok(v)),
-                Err(e) => e,
+                Ok(v) => {
+                    return ControlFlow::Break(Ok(v));
+                }
+                Err(ErrorOrThrottle::Throttle(throttle)) => {
+                    return ControlFlow::Continue(ErrorOrThrottle::Throttle(throttle));
+                }
+                Err(ErrorOrThrottle::Error(e)) => e,
             };
 
             let retry = match error {
@@ -504,7 +539,7 @@ where
             };
 
             if retry {
-                ControlFlow::Continue(error)
+                ControlFlow::Continue(ErrorOrThrottle::Error(error))
             } else {
                 error!(
                     e=%error,
