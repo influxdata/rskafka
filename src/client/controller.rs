@@ -5,7 +5,7 @@ use tokio::sync::Mutex;
 use tracing::{debug, error, info};
 
 use crate::{
-    backoff::{Backoff, BackoffConfig},
+    backoff::{Backoff, BackoffConfig, ErrorOrThrottle},
     client::{Error, Result},
     connection::{
         BrokerCache, BrokerConnection, BrokerConnector, MessengerTransport, MetadataLookupMode,
@@ -16,6 +16,7 @@ use crate::{
         messages::{CreateTopicRequest, CreateTopicsRequest},
         primitives::{Int16, Int32, String_},
     },
+    throttle::maybe_throttle,
     validation::ExactlyOne,
 };
 
@@ -63,23 +64,28 @@ impl ControllerClient {
         };
 
         maybe_retry(&self.backoff_config, self, "create_topic", || async move {
-            let broker = self.get().await?;
-            let response = broker.request(request).await?;
+            let broker = self.get().await.map_err(ErrorOrThrottle::Error)?;
+            let response = broker
+                .request(request)
+                .await
+                .map_err(|e| ErrorOrThrottle::Error(e.into()))?;
+
+            maybe_throttle(response.throttle_time_ms)?;
 
             let topic = response
                 .topics
                 .exactly_one()
-                .map_err(Error::exactly_one_topic)?;
+                .map_err(|e| ErrorOrThrottle::Error(Error::exactly_one_topic(e)))?;
 
             match topic.error {
                 None => Ok(()),
-                Some(protocol_error) => Err(Error::ServerError {
+                Some(protocol_error) => Err(ErrorOrThrottle::Error(Error::ServerError {
                     protocol_error,
                     error_message: topic.error_message.and_then(|s| s.0),
                     request: RequestContext::Topic(topic.name.0),
                     response: None,
                     is_virtual: false,
-                }),
+                })),
             }
         })
         .await?;
@@ -150,15 +156,20 @@ async fn maybe_retry<B, R, F, T>(
 where
     B: BrokerCache,
     R: (Fn() -> F) + Send + Sync,
-    F: std::future::Future<Output = Result<T>> + Send,
+    F: std::future::Future<Output = Result<T, ErrorOrThrottle<Error>>> + Send,
 {
     let mut backoff = Backoff::new(backoff_config);
 
     backoff
         .retry_with_backoff(request_name, || async {
             let error = match f().await {
-                Ok(v) => return ControlFlow::Break(Ok(v)),
-                Err(e) => e,
+                Ok(v) => {
+                    return ControlFlow::Break(Ok(v));
+                }
+                Err(ErrorOrThrottle::Throttle(t)) => {
+                    return ControlFlow::Continue(ErrorOrThrottle::Throttle(t));
+                }
+                Err(ErrorOrThrottle::Error(e)) => e,
             };
 
             match error {
@@ -184,7 +195,7 @@ where
                     return ControlFlow::Break(Err(error));
                 }
             }
-            ControlFlow::Continue(error)
+            ControlFlow::Continue(ErrorOrThrottle::Error(error))
         })
         .await
         .map_err(Error::RetryFailed)?

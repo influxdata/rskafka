@@ -6,11 +6,13 @@ use thiserror::Error;
 use tokio::{io::BufStream, sync::Mutex};
 use tracing::{debug, error, info, warn};
 
+use crate::backoff::ErrorOrThrottle;
 use crate::connection::topology::{Broker, BrokerTopology};
 use crate::connection::transport::Transport;
 use crate::messenger::{Messenger, RequestError};
 use crate::protocol::messages::{MetadataRequest, MetadataRequestTopic, MetadataResponse};
 use crate::protocol::primitives::String_;
+use crate::throttle::maybe_throttle;
 use crate::{
     backoff::{Backoff, BackoffConfig, BackoffError},
     client::metadata_cache::MetadataCache,
@@ -418,7 +420,7 @@ where
                 "Failed to connect to any broker, backing off".to_string(),
             );
             let err: Arc<dyn std::error::Error + Send + Sync> = err.into();
-            ControlFlow::Continue(err)
+            ControlFlow::Continue(ErrorOrThrottle::Error(err))
         })
         .await
         .map_err(Error::RetryFailed)
@@ -449,12 +451,18 @@ where
             };
 
             match broker.metadata_request(request_params).await {
-                Ok(response) => ControlFlow::Break(Ok(response)),
+                Ok(response) => {
+                    if let Err(e) = maybe_throttle(response.throttle_time_ms) {
+                        return ControlFlow::Continue(e);
+                    }
+
+                    ControlFlow::Break(Ok(response))
+                }
                 Err(e @ RequestError::Poisoned(_) | e @ RequestError::IO(_))
                     if !matches!(metadata_mode, MetadataLookupMode::SpecificBroker(_)) =>
                 {
                     arbitrary_broker_cache.invalidate().await;
-                    ControlFlow::Continue(e)
+                    ControlFlow::Continue(ErrorOrThrottle::Error(e))
                 }
                 Err(error) => {
                     error!(

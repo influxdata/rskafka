@@ -29,6 +29,16 @@ impl Default for BackoffConfig {
 pub type BackoffError = std::convert::Infallible;
 pub type BackoffResult<T> = Result<T, BackoffError>;
 
+/// Error (which should increase backoff) or throttle for a specific duration (as asked for by the broker).
+#[derive(Debug)]
+pub enum ErrorOrThrottle<E>
+where
+    E: std::error::Error + Send,
+{
+    Error(E),
+    Throttle(Duration),
+}
+
 /// [`Backoff`] can be created from a [`BackoffConfig`]
 ///
 /// Consecutive calls to [`Backoff::next`] will return the next backoff interval
@@ -99,23 +109,32 @@ impl Backoff {
     ) -> BackoffResult<B>
     where
         F: (Fn() -> F1) + Send + Sync,
-        F1: std::future::Future<Output = ControlFlow<B, E>> + Send,
+        F1: std::future::Future<Output = ControlFlow<B, ErrorOrThrottle<E>>> + Send,
         E: std::error::Error + Send,
     {
         loop {
-            let e = match do_stuff().await {
-                ControlFlow::Break(r) => break Ok(r),
-                ControlFlow::Continue(e) => e,
+            // split match statement from `tokio::time::sleep`, because otherwise rustc requires `B: Send`
+            let sleep_time = match do_stuff().await {
+                ControlFlow::Break(r) => {
+                    break Ok(r);
+                }
+                ControlFlow::Continue(ErrorOrThrottle::Error(e)) => {
+                    let backoff = self.next();
+                    info!(
+                        e=%e,
+                        request_name,
+                        backoff_secs = backoff.as_secs(),
+                        "request encountered non-fatal error - backing off",
+                    );
+                    backoff
+                }
+                ControlFlow::Continue(ErrorOrThrottle::Throttle(throttle)) => {
+                    info!(?throttle, request_name, "broker asked us to throttle",);
+                    throttle
+                }
             };
 
-            let backoff = self.next();
-            info!(
-                e=%e,
-                request_name,
-                backoff_secs = backoff.as_secs(),
-                "request encountered non-fatal error - backing off",
-            );
-            tokio::time::sleep(backoff).await;
+            tokio::time::sleep(sleep_time).await;
         }
     }
 }

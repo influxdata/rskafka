@@ -21,20 +21,24 @@ use tokio::{
     },
     task::JoinHandle,
 };
-use tracing::{debug, warn};
+use tracing::{debug, info, warn};
 
-use crate::protocol::{
-    api_key::ApiKey,
-    api_version::ApiVersion,
-    frame::{AsyncMessageRead, AsyncMessageWrite},
-    messages::{
-        ReadVersionedError, ReadVersionedType, RequestBody, RequestHeader, ResponseHeader,
-        WriteVersionedError, WriteVersionedType,
-    },
-    primitives::{Int16, Int32, NullableString, TaggedFields},
-};
 use crate::protocol::{api_version::ApiVersionRange, primitives::CompactString};
 use crate::protocol::{messages::ApiVersionsRequest, traits::ReadType};
+use crate::{
+    backoff::ErrorOrThrottle,
+    protocol::{
+        api_key::ApiKey,
+        api_version::ApiVersion,
+        frame::{AsyncMessageRead, AsyncMessageWrite},
+        messages::{
+            ReadVersionedError, ReadVersionedType, RequestBody, RequestHeader, ResponseHeader,
+            WriteVersionedError, WriteVersionedType,
+        },
+        primitives::{Int16, Int32, NullableString, TaggedFields},
+    },
+    throttle::maybe_throttle,
+};
 
 #[derive(Debug)]
 struct Response {
@@ -405,7 +409,7 @@ where
     ///
     /// Takes `&self mut` to ensure exclusive access.
     pub async fn sync_versions(&mut self) -> Result<(), SyncVersionsError> {
-        for upper_bound in (ApiVersionsRequest::API_VERSION_RANGE.min().0 .0
+        'iter_upper_bound: for upper_bound in (ApiVersionsRequest::API_VERSION_RANGE.min().0 .0
             ..=ApiVersionsRequest::API_VERSION_RANGE.max().0 .0)
             .rev()
         {
@@ -425,77 +429,91 @@ where
                 tagged_fields: Some(TaggedFields::default()),
             };
 
-            match self
-                .request_with_version_ranges(body, &version_ranges)
-                .await
-            {
-                Ok(response) => {
-                    if let Some(e) = response.error_code {
+            'throttle: loop {
+                match self
+                    .request_with_version_ranges(&body, &version_ranges)
+                    .await
+                {
+                    Ok(response) => {
+                        if let Err(ErrorOrThrottle::Throttle(throttle)) =
+                            maybe_throttle::<SyncVersionsError>(response.throttle_time_ms)
+                        {
+                            info!(
+                                ?throttle,
+                                request_name = "version sync",
+                                "broker asked us to throttle"
+                            );
+                            tokio::time::sleep(throttle).await;
+                            continue 'throttle;
+                        }
+
+                        if let Some(e) = response.error_code {
+                            debug!(
+                                %e,
+                                version=upper_bound,
+                                "Got error during version sync, cannot use version for ApiVersionRequest",
+                            );
+                            continue 'iter_upper_bound;
+                        }
+
+                        // check range sanity
+                        for api_key in &response.api_keys {
+                            if api_key.min_version.0 > api_key.max_version.0 {
+                                return Err(SyncVersionsError::FlippedVersionRange {
+                                    api_key: api_key.api_key,
+                                    min: api_key.min_version,
+                                    max: api_key.max_version,
+                                });
+                            }
+                        }
+
+                        let ranges = response
+                            .api_keys
+                            .into_iter()
+                            .map(|x| {
+                                (
+                                    x.api_key,
+                                    ApiVersionRange::new(x.min_version, x.max_version),
+                                )
+                            })
+                            .collect();
+                        debug!(
+                            versions=%sorted_ranges_repr(&ranges),
+                            "Detected supported broker versions",
+                        );
+                        self.set_version_ranges(ranges);
+                        return Ok(());
+                    }
+                    Err(RequestError::NoVersionMatch { .. }) => {
+                        unreachable!("Just set to version range to a non-empty range")
+                    }
+                    Err(RequestError::ReadVersionedError(e)) => {
                         debug!(
                             %e,
                             version=upper_bound,
-                            "Got error during version sync, cannot use version for ApiVersionRequest",
+                            "Cannot read ApiVersionResponse for version",
                         );
-                        continue;
+                        continue 'iter_upper_bound;
                     }
-
-                    // check range sanity
-                    for api_key in &response.api_keys {
-                        if api_key.min_version.0 > api_key.max_version.0 {
-                            return Err(SyncVersionsError::FlippedVersionRange {
-                                api_key: api_key.api_key,
-                                min: api_key.min_version,
-                                max: api_key.max_version,
-                            });
-                        }
+                    Err(RequestError::ReadError(e)) => {
+                        debug!(
+                            %e,
+                            version=upper_bound,
+                            "Cannot read ApiVersionResponse for version",
+                        );
+                        continue 'iter_upper_bound;
                     }
-
-                    let ranges = response
-                        .api_keys
-                        .into_iter()
-                        .map(|x| {
-                            (
-                                x.api_key,
-                                ApiVersionRange::new(x.min_version, x.max_version),
-                            )
-                        })
-                        .collect();
-                    debug!(
-                        versions=%sorted_ranges_repr(&ranges),
-                        "Detected supported broker versions",
-                    );
-                    self.set_version_ranges(ranges);
-                    return Ok(());
-                }
-                Err(RequestError::NoVersionMatch { .. }) => {
-                    unreachable!("Just set to version range to a non-empty range")
-                }
-                Err(RequestError::ReadVersionedError(e)) => {
-                    debug!(
-                        %e,
-                        version=upper_bound,
-                        "Cannot read ApiVersionResponse for version",
-                    );
-                    continue;
-                }
-                Err(RequestError::ReadError(e)) => {
-                    debug!(
-                        %e,
-                        version=upper_bound,
-                        "Cannot read ApiVersionResponse for version",
-                    );
-                    continue;
-                }
-                Err(e @ RequestError::TooMuchData { .. }) => {
-                    debug!(
-                        %e,
-                        version=upper_bound,
-                        "Cannot read ApiVersionResponse for version",
-                    );
-                    continue;
-                }
-                Err(e) => {
-                    return Err(SyncVersionsError::RequestError(e));
+                    Err(e @ RequestError::TooMuchData { .. }) => {
+                        debug!(
+                            %e,
+                            version=upper_bound,
+                            "Cannot read ApiVersionResponse for version",
+                        );
+                        continue 'iter_upper_bound;
+                    }
+                    Err(e) => {
+                        return Err(SyncVersionsError::RequestError(e));
+                    }
                 }
             }
         }
