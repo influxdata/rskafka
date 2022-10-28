@@ -108,7 +108,7 @@ impl ControllerClient {
         // Request an uncached, fresh copy of the metadata.
         let (metadata, _gen) = self
             .brokers
-            .request_metadata(MetadataLookupMode::ArbitraryBroker, Some(vec![]))
+            .request_metadata(&MetadataLookupMode::ArbitraryBroker, Some(vec![]))
             .await?;
 
         let controller_id = metadata
