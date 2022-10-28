@@ -4,7 +4,7 @@ use std::ops::ControlFlow;
 use std::sync::Arc;
 use thiserror::Error;
 use tokio::{io::BufStream, sync::Mutex};
-use tracing::{debug, error, info, warn};
+use tracing::{error, info, warn};
 
 use crate::backoff::ErrorOrThrottle;
 use crate::connection::topology::{Broker, BrokerTopology};
@@ -264,8 +264,8 @@ impl BrokerConnector {
         Ok(response)
     }
 
-    pub(crate) fn invalidate_metadata_cache(&self) {
-        self.cached_metadata.invalidate()
+    pub(crate) fn invalidate_metadata_cache(&self, reason: &'static str) {
+        self.cached_metadata.invalidate(reason)
     }
 
     /// Returns a new connection to the broker with the provided id
@@ -343,7 +343,7 @@ pub trait BrokerCache: Send + Sync {
 
     async fn get(&self) -> Result<Arc<Self::R>, Self::E>;
 
-    async fn invalidate(&self);
+    async fn invalidate(&self, reason: &'static str);
 }
 
 /// BrokerConnector caches an arbitrary broker that can successfully connect.
@@ -372,8 +372,8 @@ impl BrokerCache for &BrokerConnector {
         Ok(connection)
     }
 
-    async fn invalidate(&self) {
-        debug!("Invalidating cached arbitrary broker");
+    async fn invalidate(&self, reason: &'static str) {
+        info!(reason, "Invalidating cached arbitrary broker",);
         self.cached_arbitrary_broker.lock().await.take();
     }
 }
@@ -461,7 +461,11 @@ where
                 Err(e @ RequestError::Poisoned(_) | e @ RequestError::IO(_))
                     if !matches!(metadata_mode, MetadataLookupMode::SpecificBroker(_)) =>
                 {
-                    arbitrary_broker_cache.invalidate().await;
+                    arbitrary_broker_cache
+                        .invalidate(
+                            "metadata request: arbitrary/cached broker is connection is broken",
+                        )
+                        .await;
                     ControlFlow::Continue(ErrorOrThrottle::Error(e))
                 }
                 Err(error) => {
@@ -523,7 +527,7 @@ mod tests {
             (self.get)()
         }
 
-        async fn invalidate(&self) {
+        async fn invalidate(&self, _reason: &'static str) {
             (self.invalidate)()
         }
     }
