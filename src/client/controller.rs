@@ -99,7 +99,7 @@ impl ControllerClient {
     /// Retrieve the broker ID of the controller
     async fn get_controller_id(&self) -> Result<i32> {
         // Request an uncached, fresh copy of the metadata.
-        let metadata = self
+        let (metadata, _gen) = self
             .brokers
             .request_metadata(MetadataLookupMode::ArbitraryBroker, Some(vec![]))
             .await?;
