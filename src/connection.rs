@@ -4,7 +4,7 @@ use std::ops::ControlFlow;
 use std::sync::Arc;
 use thiserror::Error;
 use tokio::{io::BufStream, sync::Mutex};
-use tracing::{error, info, warn};
+use tracing::{debug, error, info, warn};
 
 use crate::backoff::ErrorOrThrottle;
 use crate::client::metadata_cache::MetadataCacheGeneration;
@@ -150,7 +150,7 @@ pub struct BrokerConnector {
     /// The cached arbitrary broker.
     ///
     /// This one is used for metadata queries.
-    cached_arbitrary_broker: Mutex<Option<BrokerConnection>>,
+    cached_arbitrary_broker: Mutex<(Option<BrokerConnection>, BrokerCacheGeneration)>,
 
     /// A cache of [`MetadataResponse`].
     ///
@@ -182,7 +182,7 @@ impl BrokerConnector {
             bootstrap_brokers,
             client_id,
             topology: Default::default(),
-            cached_arbitrary_broker: Mutex::new(None),
+            cached_arbitrary_broker: Mutex::new((None, BrokerCacheGeneration::START)),
             cached_metadata: Default::default(),
             backoff_config: Default::default(),
             tls_config,
@@ -341,14 +341,38 @@ impl RequestHandler for MessengerTransport {
     }
 }
 
+/// Cache generation for [`BrokerCache`].
+///
+/// This is used to avoid double-invalidating a cache.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct BrokerCacheGeneration(usize);
+
+impl BrokerCacheGeneration {
+    /// First generation.
+    pub const START: Self = Self(0);
+
+    /// Bump generation.
+    pub fn bump(&mut self) -> Self {
+        self.0 += 1;
+        *self
+    }
+
+    /// Gen numeric value of this generation.
+    ///
+    /// This is mostly useful for logging.
+    pub fn get(&self) -> usize {
+        self.0
+    }
+}
+
 #[async_trait]
 pub trait BrokerCache: Send + Sync {
     type R: Send + Sync;
     type E: std::error::Error + Send + Sync;
 
-    async fn get(&self) -> Result<Arc<Self::R>, Self::E>;
+    async fn get(&self) -> Result<(Arc<Self::R>, BrokerCacheGeneration), Self::E>;
 
-    async fn invalidate(&self, reason: &'static str);
+    async fn invalidate(&self, reason: &'static str, gen: BrokerCacheGeneration);
 }
 
 /// BrokerConnector caches an arbitrary broker that can successfully connect.
@@ -357,10 +381,10 @@ impl BrokerCache for &BrokerConnector {
     type R = MessengerTransport;
     type E = Error;
 
-    async fn get(&self) -> Result<Arc<Self::R>, Self::E> {
+    async fn get(&self) -> Result<(Arc<Self::R>, BrokerCacheGeneration), Self::E> {
         let mut current_broker = self.cached_arbitrary_broker.lock().await;
-        if let Some(broker) = &*current_broker {
-            return Ok(Arc::clone(broker));
+        if let Some(broker) = &current_broker.0 {
+            return Ok((Arc::clone(broker), current_broker.1));
         }
 
         let connection = connect_to_a_broker_with_retry(
@@ -373,13 +397,28 @@ impl BrokerCache for &BrokerConnector {
         )
         .await?;
 
-        *current_broker = Some(Arc::clone(&connection));
-        Ok(connection)
+        current_broker.0 = Some(Arc::clone(&connection));
+        current_broker.1.bump();
+
+        Ok((connection, current_broker.1))
     }
 
-    async fn invalidate(&self, reason: &'static str) {
+    async fn invalidate(&self, reason: &'static str, gen: BrokerCacheGeneration) {
+        let mut guard = self.cached_arbitrary_broker.lock().await;
+
+        if guard.1 != gen {
+            // stale request
+            debug!(
+                reason,
+                current_gen = guard.1 .0,
+                request_gen = gen.0,
+                "stale invalidation request for arbitrary broker cache",
+            );
+            return;
+        }
+
         info!(reason, "Invalidating cached arbitrary broker",);
-        self.cached_arbitrary_broker.lock().await.take();
+        guard.0.take();
     }
 }
 
@@ -445,11 +484,11 @@ where
     backoff
         .retry_with_backoff("metadata", || async {
             // Retrieve the broker within the loop, in case it is invalidated
-            let broker = match metadata_mode {
-                MetadataLookupMode::SpecificBroker(b) => Arc::clone(b),
+            let (broker, cache_gen) = match metadata_mode {
+                MetadataLookupMode::SpecificBroker(b) => (Arc::clone(b), None),
                 MetadataLookupMode::ArbitraryBroker | MetadataLookupMode::CachedArbitrary => {
                     match arbitrary_broker_cache.get().await {
-                        Ok(inner) => inner,
+                        Ok((broker, cache_gen)) => (broker, Some(cache_gen)),
                         Err(e) => return ControlFlow::Break(Err(e.into())),
                     }
                 }
@@ -466,11 +505,14 @@ where
                 Err(e @ RequestError::Poisoned(_) | e @ RequestError::IO(_))
                     if !matches!(metadata_mode, MetadataLookupMode::SpecificBroker(_)) =>
                 {
-                    arbitrary_broker_cache
-                        .invalidate(
-                            "metadata request: arbitrary/cached broker is connection is broken",
-                        )
-                        .await;
+                    if let Some(gen) = cache_gen {
+                        arbitrary_broker_cache
+                            .invalidate(
+                                "metadata request: arbitrary/cached broker is connection is broken",
+                                gen,
+                            )
+                            .await;
+                    }
                     ControlFlow::Continue(ErrorOrThrottle::Error(e))
                 }
                 Err(error) => {
@@ -528,11 +570,11 @@ mod tests {
         type R = FakeBroker;
         type E = Error;
 
-        async fn get(&self) -> Result<Arc<Self::R>> {
-            (self.get)()
+        async fn get(&self) -> Result<(Arc<Self::R>, BrokerCacheGeneration)> {
+            (self.get)().map(|b| (b, BrokerCacheGeneration::START))
         }
 
-        async fn invalidate(&self, _reason: &'static str) {
+        async fn invalidate(&self, _reason: &'static str, _gen: BrokerCacheGeneration) {
             (self.invalidate)()
         }
     }

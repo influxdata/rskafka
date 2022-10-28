@@ -2,13 +2,14 @@ use async_trait::async_trait;
 use std::ops::ControlFlow;
 use std::sync::Arc;
 use tokio::sync::Mutex;
-use tracing::{error, info};
+use tracing::{debug, error, info};
 
 use crate::{
     backoff::{Backoff, BackoffConfig, ErrorOrThrottle},
     client::{Error, Result},
     connection::{
-        BrokerCache, BrokerConnection, BrokerConnector, MessengerTransport, MetadataLookupMode,
+        BrokerCache, BrokerCacheGeneration, BrokerConnection, BrokerConnector, MessengerTransport,
+        MetadataLookupMode,
     },
     messenger::RequestError,
     protocol::{
@@ -29,7 +30,7 @@ pub struct ControllerClient {
     backoff_config: BackoffConfig,
 
     /// Current broker connection if any
-    current_broker: Mutex<Option<BrokerConnection>>,
+    current_broker: Mutex<(Option<BrokerConnection>, BrokerCacheGeneration)>,
 }
 
 impl ControllerClient {
@@ -37,7 +38,7 @@ impl ControllerClient {
         Self {
             brokers,
             backoff_config: Default::default(),
-            current_broker: Mutex::new(None),
+            current_broker: Mutex::new((None, BrokerCacheGeneration::START)),
         }
     }
 
@@ -64,28 +65,34 @@ impl ControllerClient {
         };
 
         maybe_retry(&self.backoff_config, self, "create_topic", || async move {
-            let broker = self.get().await.map_err(ErrorOrThrottle::Error)?;
+            let (broker, gen) = self
+                .get()
+                .await
+                .map_err(|e| ErrorOrThrottle::Error((e, None)))?;
             let response = broker
                 .request(request)
                 .await
-                .map_err(|e| ErrorOrThrottle::Error(e.into()))?;
+                .map_err(|e| ErrorOrThrottle::Error((e.into(), Some(gen))))?;
 
             maybe_throttle(response.throttle_time_ms)?;
 
             let topic = response
                 .topics
                 .exactly_one()
-                .map_err(|e| ErrorOrThrottle::Error(Error::exactly_one_topic(e)))?;
+                .map_err(|e| ErrorOrThrottle::Error((Error::exactly_one_topic(e), Some(gen))))?;
 
             match topic.error {
                 None => Ok(()),
-                Some(protocol_error) => Err(ErrorOrThrottle::Error(Error::ServerError {
-                    protocol_error,
-                    error_message: topic.error_message.and_then(|s| s.0),
-                    request: RequestContext::Topic(topic.name.0),
-                    response: None,
-                    is_virtual: false,
-                })),
+                Some(protocol_error) => Err(ErrorOrThrottle::Error((
+                    Error::ServerError {
+                        protocol_error,
+                        error_message: topic.error_message.and_then(|s| s.0),
+                        request: RequestContext::Topic(topic.name.0),
+                        response: None,
+                        is_virtual: false,
+                    },
+                    Some(gen),
+                ))),
             }
         })
         .await?;
@@ -119,10 +126,10 @@ impl BrokerCache for &ControllerClient {
     type R = MessengerTransport;
     type E = Error;
 
-    async fn get(&self) -> Result<Arc<Self::R>> {
+    async fn get(&self) -> Result<(Arc<Self::R>, BrokerCacheGeneration)> {
         let mut current_broker = self.current_broker.lock().await;
-        if let Some(broker) = &*current_broker {
-            return Ok(Arc::clone(broker));
+        if let Some(broker) = &current_broker.0 {
+            return Ok((Arc::clone(broker), current_broker.1));
         }
 
         info!("Creating new controller broker connection",);
@@ -135,13 +142,28 @@ impl BrokerCache for &ControllerClient {
             ))
         })?;
 
-        *current_broker = Some(Arc::clone(&broker));
-        Ok(broker)
+        current_broker.0 = Some(Arc::clone(&broker));
+        current_broker.1.bump();
+
+        Ok((broker, current_broker.1))
     }
 
-    async fn invalidate(&self, reason: &'static str) {
+    async fn invalidate(&self, reason: &'static str, gen: BrokerCacheGeneration) {
+        let mut guard = self.current_broker.lock().await;
+
+        if guard.1 != gen {
+            // stale request
+            debug!(
+                reason,
+                current_gen = guard.1.get(),
+                request_gen = gen.get(),
+                "stale invalidation request for arbitrary broker cache",
+            );
+            return;
+        }
+
         info!(reason, "Invalidating cached controller broker",);
-        self.current_broker.lock().await.take();
+        guard.0.take();
     }
 }
 
@@ -156,13 +178,15 @@ async fn maybe_retry<B, R, F, T>(
 where
     B: BrokerCache,
     R: (Fn() -> F) + Send + Sync,
-    F: std::future::Future<Output = Result<T, ErrorOrThrottle<Error>>> + Send,
+    F: std::future::Future<
+            Output = Result<T, ErrorOrThrottle<(Error, Option<BrokerCacheGeneration>)>>,
+        > + Send,
 {
     let mut backoff = Backoff::new(backoff_config);
 
     backoff
         .retry_with_backoff(request_name, || async {
-            let error = match f().await {
+            let (error, cache_gen) = match f().await {
                 Ok(v) => {
                     return ControlFlow::Break(Ok(v));
                 }
@@ -176,9 +200,11 @@ where
                 // broken connection
                 Error::Request(RequestError::Poisoned(_) | RequestError::IO(_))
                 | Error::Connection(_) => {
-                    broker_cache
-                        .invalidate("controller client: connection broken")
-                        .await
+                    if let Some(cache_gen) = cache_gen {
+                        broker_cache
+                            .invalidate("controller client: connection broken", cache_gen)
+                            .await
+                    }
                 }
 
                 // our broker is actually not the controller
@@ -186,9 +212,14 @@ where
                     protocol_error: ProtocolError::NotController,
                     ..
                 } => {
-                    broker_cache
-                        .invalidate("controller client: server error: not controller")
-                        .await;
+                    if let Some(cache_gen) = cache_gen {
+                        broker_cache
+                            .invalidate(
+                                "controller client: server error: not controller",
+                                cache_gen,
+                            )
+                            .await;
+                    }
                 }
 
                 // fatal
