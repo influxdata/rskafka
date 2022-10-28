@@ -7,6 +7,7 @@ use tokio::{io::BufStream, sync::Mutex};
 use tracing::{error, info, warn};
 
 use crate::backoff::ErrorOrThrottle;
+use crate::client::metadata_cache::MetadataCacheGeneration;
 use crate::connection::topology::{Broker, BrokerTopology};
 use crate::connection::transport::Transport;
 use crate::messenger::{Messenger, RequestError};
@@ -224,7 +225,7 @@ impl BrokerConnector {
         &self,
         metadata_mode: MetadataLookupMode,
         topics: Option<Vec<String>>,
-    ) -> Result<MetadataResponse> {
+    ) -> Result<(MetadataResponse, Option<MetadataCacheGeneration>)> {
         // Return a cached metadata response as an optimisation to prevent
         // multiple successive metadata queries for the same topic across
         // multiple PartitionClient instances.
@@ -235,8 +236,8 @@ impl BrokerConnector {
         // Client initialises this cache at construction time, so unless
         // invalidated, there will always be a cached entry available.
         if matches!(metadata_mode, MetadataLookupMode::CachedArbitrary) {
-            if let Some(m) = self.cached_metadata.get(&topics) {
-                return Ok(m);
+            if let Some((m, gen)) = self.cached_metadata.get(&topics) {
+                return Ok((m, Some(gen)));
             }
         }
 
@@ -261,11 +262,15 @@ impl BrokerConnector {
         // Since the metadata request contains information about the cluster state, use it to update our view.
         self.topology.update(&response.brokers);
 
-        Ok(response)
+        Ok((response, None))
     }
 
-    pub(crate) fn invalidate_metadata_cache(&self, reason: &'static str) {
-        self.cached_metadata.invalidate(reason)
+    pub(crate) fn invalidate_metadata_cache(
+        &self,
+        reason: &'static str,
+        gen: MetadataCacheGeneration,
+    ) {
+        self.cached_metadata.invalidate(reason, gen)
     }
 
     /// Returns a new connection to the broker with the provided id

@@ -152,7 +152,7 @@ impl Client {
         //
         // Because this is an unconstrained metadata request (all topics) it
         // will update the cached metadata entry.
-        let response = self
+        let (response, _gen) = self
             .brokers
             .request_metadata(MetadataLookupMode::ArbitraryBroker, None)
             .await?;

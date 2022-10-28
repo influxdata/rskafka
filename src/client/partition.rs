@@ -31,7 +31,7 @@ use std::{
 use tokio::sync::Mutex;
 use tracing::{error, info};
 
-use super::error::ServerErrorResponse;
+use super::{error::ServerErrorResponse, metadata_cache::MetadataCacheGeneration};
 
 /// How strongly a [`PartitionClient`] is bound to a partition.
 ///
@@ -99,6 +99,13 @@ pub enum OffsetAt {
     Latest,
 }
 
+#[derive(Debug, Default)]
+struct CurrentBroker {
+    broker: Option<BrokerConnection>,
+    gen_leader_from_arbitrary: Option<MetadataCacheGeneration>,
+    gen_leader_from_self: Option<MetadataCacheGeneration>,
+}
+
 /// Many operations must be performed on the leader for a partition
 ///
 /// Additionally a partition is the unit of concurrency within Kafka
@@ -117,7 +124,7 @@ pub struct PartitionClient {
     backoff_config: BackoffConfig,
 
     /// Current broker connection if any
-    current_broker: Mutex<Option<BrokerConnection>>,
+    current_broker: Mutex<CurrentBroker>,
 
     unknown_topic_handling: UnknownTopicHandling,
 }
@@ -140,7 +147,7 @@ impl PartitionClient {
             partition,
             brokers: Arc::clone(&brokers),
             backoff_config: Default::default(),
-            current_broker: Mutex::new(None),
+            current_broker: Mutex::new(CurrentBroker::default()),
             unknown_topic_handling,
         };
 
@@ -312,8 +319,11 @@ impl PartitionClient {
     }
 
     /// Retrieve the broker ID of the partition leader
-    async fn get_leader(&self, metadata_mode: MetadataLookupMode) -> Result<i32> {
-        let metadata = self
+    async fn get_leader(
+        &self,
+        metadata_mode: MetadataLookupMode,
+    ) -> Result<(i32, Option<MetadataCacheGeneration>)> {
+        let (metadata, gen) = self
             .brokers
             .request_metadata(metadata_mode, Some(vec![self.topic.clone()]))
             .await?;
@@ -379,7 +389,7 @@ impl PartitionClient {
             leader=partition.leader_id.0,
             "Detected leader",
         );
-        Ok(partition.leader_id.0)
+        Ok((partition.leader_id.0, gen))
     }
 }
 
@@ -391,7 +401,7 @@ impl BrokerCache for &PartitionClient {
 
     async fn get(&self) -> Result<Arc<Self::R>> {
         let mut current_broker = self.current_broker.lock().await;
-        if let Some(broker) = &*current_broker {
+        if let Some(broker) = &current_broker.broker {
             return Ok(Arc::clone(broker));
         }
 
@@ -410,22 +420,29 @@ impl BrokerCache for &PartitionClient {
         //   * A subsequent query is performed against the leader that does not use the cached entry - this validates
         //     the correctness of the cached entry.
         //
-        let leader = self.get_leader(MetadataLookupMode::CachedArbitrary).await?;
+        let (leader, gen_leader_from_arbitrary) =
+            self.get_leader(MetadataLookupMode::CachedArbitrary).await?;
         let broker = match self.brokers.connect(leader).await {
             Ok(Some(c)) => Ok(c),
             Ok(None) => {
-                self.brokers.invalidate_metadata_cache(
-                    "partition client: broker that is leader is unknown",
-                );
+                if let Some(gen) = gen_leader_from_arbitrary {
+                    self.brokers.invalidate_metadata_cache(
+                        "partition client: broker that is leader is unknown",
+                        gen,
+                    );
+                }
                 Err(Error::InvalidResponse(format!(
                     "Partition leader {} not found in metadata response",
                     leader
                 )))
             }
             Err(e) => {
-                self.brokers.invalidate_metadata_cache(
-                    "partition client: error connecting to partition leader",
-                );
+                if let Some(gen) = gen_leader_from_arbitrary {
+                    self.brokers.invalidate_metadata_cache(
+                        "partition client: error connecting to partition leader",
+                        gen,
+                    );
+                }
                 Err(e.into())
             }
         }?;
@@ -441,14 +458,17 @@ impl BrokerCache for &PartitionClient {
         //
         // Because this check requires the most up-to-date metadata from a specific broker, do not accept a cached
         // metadata response.
-        let leader_self = self
+        let (leader_self, gen_leader_from_self) = self
             .get_leader(MetadataLookupMode::SpecificBroker(Arc::clone(&broker)))
             .await?;
         if leader != leader_self {
-            // The cached metadata identified an incorrect leader - it is stale and should be refreshed.
-            self.brokers.invalidate_metadata_cache(
-                "partition client: broker that should be leader does treat itself as a leader",
-            );
+            if let Some(gen) = gen_leader_from_self {
+                // The cached metadata identified an incorrect leader - it is stale and should be refreshed.
+                self.brokers.invalidate_metadata_cache(
+                    "partition client: broker that should be leader does treat itself as a leader",
+                    gen,
+                );
+            }
 
             // this might happen if the leader changed after we got the hint from a arbitrary broker and this specific
             // metadata call.
@@ -464,7 +484,11 @@ impl BrokerCache for &PartitionClient {
             });
         }
 
-        *current_broker = Some(Arc::clone(&broker));
+        *current_broker = CurrentBroker {
+            broker: Some(Arc::clone(&broker)),
+            gen_leader_from_arbitrary,
+            gen_leader_from_self,
+        };
 
         info!(
             topic=%self.topic,
@@ -482,8 +506,17 @@ impl BrokerCache for &PartitionClient {
             reason,
             "Invaliding cached leader",
         );
-        self.brokers.invalidate_metadata_cache(reason);
-        *self.current_broker.lock().await = None
+
+        let mut current_broker = self.current_broker.lock().await;
+
+        if let Some(gen) = current_broker.gen_leader_from_arbitrary {
+            self.brokers.invalidate_metadata_cache(reason, gen);
+        }
+        if let Some(gen) = current_broker.gen_leader_from_self {
+            self.brokers.invalidate_metadata_cache(reason, gen);
+        }
+
+        current_broker.broker = None
     }
 }
 

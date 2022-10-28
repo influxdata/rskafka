@@ -1,13 +1,29 @@
+use std::ops::Deref;
+
 use parking_lot::Mutex;
 use tracing::{debug, info};
 
 use crate::protocol::messages::MetadataResponse;
 
+/// Cache generation for [`MetadataCache`].
+///
+/// This is used to avoid double-invalidating a cache.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct MetadataCacheGeneration(usize);
+
 /// A [`MetadataCache`] provides look-aside caching of [`MetadataResponse`]
 /// instances.
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub(crate) struct MetadataCache {
-    cache: Mutex<Option<MetadataResponse>>,
+    cache: Mutex<(Option<MetadataResponse>, MetadataCacheGeneration)>,
+}
+
+impl Default for MetadataCache {
+    fn default() -> Self {
+        Self {
+            cache: Mutex::new((None, MetadataCacheGeneration(0))),
+        }
+    }
 }
 
 impl MetadataCache {
@@ -16,8 +32,16 @@ impl MetadataCache {
     /// If `topics` is `Some` the returned metadata contains topics that are
     /// filtered to match by name. If a topic name is specified that doesn't
     /// exist in the cached metadata, the cache is invalidated.
-    pub(crate) fn get(&self, topics: &Option<Vec<String>>) -> Option<MetadataResponse> {
-        let mut m = self.cache.lock().clone()?;
+    pub(crate) fn get(
+        &self,
+        topics: &Option<Vec<String>>,
+    ) -> Option<(MetadataResponse, MetadataCacheGeneration)> {
+        let (mut m, gen) = match self.cache.lock().deref() {
+            (Some(m), gen) => (m.clone(), *gen),
+            (None, _) => {
+                return None;
+            }
+        };
 
         // If the caller requested a subset of topics, filter the cached result
         // to ensure only the expected topics are present.
@@ -39,23 +63,37 @@ impl MetadataCache {
                 // if a caller keeps requesting metadata for a non-existent
                 // topic.
                 debug!("cached metadata query for unknown topic");
-                self.invalidate("get from metadata cache: unknown topic");
+                self.invalidate("get from metadata cache: unknown topic", gen);
                 return None;
             }
         }
 
         debug!(?m, "using cached metadata response");
 
-        Some(m)
+        Some((m, gen))
     }
 
-    pub(crate) fn invalidate(&self, reason: &'static str) {
-        *self.cache.lock() = None;
+    pub(crate) fn invalidate(&self, reason: &'static str, gen: MetadataCacheGeneration) {
+        let mut guard = self.cache.lock();
+        if guard.1 != gen {
+            // stale request
+            debug!(
+                reason,
+                current_gen = guard.1 .0,
+                request_gen = gen.0,
+                "stale invalidation request for metadata cache",
+            );
+            return;
+        }
+
+        guard.0 = None;
         info!(reason, "invalidated metadata cache",);
     }
 
     pub(crate) fn update(&self, m: MetadataResponse) {
-        *self.cache.lock() = Some(m);
+        let mut guard = self.cache.lock();
+        guard.0 = Some(m);
+        guard.1 .0 += 1;
         debug!("updated metadata cache");
     }
 }
@@ -99,7 +137,7 @@ mod tests {
         let m = response_with_topics(None);
         cache.update(m.clone());
 
-        let got = cache.get(&None).expect("should have cached entry");
+        let (got, _gen) = cache.get(&None).expect("should have cached entry");
         assert_eq!(m, got);
     }
 
@@ -109,16 +147,16 @@ mod tests {
         cache.update(response_with_topics(Some(&["bananas", "platanos"])));
 
         // Request a subset of the topics
-        let got = cache
+        let (got, _gen) = cache
             .get(&Some(vec!["bananas".to_string()]))
             .expect("should have cached entry");
         assert_eq!(response_with_topics(Some(&["bananas"])), got);
 
-        let got = cache.get(&Some(vec![])).expect("should have cached entry");
+        let (got, _gen) = cache.get(&Some(vec![])).expect("should have cached entry");
         assert_eq!(response_with_topics(Some(&[])), got);
 
         // A request for "None" actually means "all of them".
-        let got = cache.get(&None).expect("should have cached entry");
+        let (got, _gen) = cache.get(&None).expect("should have cached entry");
         assert_eq!(response_with_topics(Some(&["bananas", "platanos"])), got);
     }
 
@@ -147,8 +185,26 @@ mod tests {
             topics: Default::default(),
         });
 
+        let (_data, gen1) = cache.get(&None).unwrap();
+        cache.invalidate("test", gen1);
+        assert!(cache.get(&None).is_none());
+
+        cache.update(MetadataResponse {
+            throttle_time_ms: Default::default(),
+            brokers: Default::default(),
+            cluster_id: Default::default(),
+            controller_id: Default::default(),
+            topics: Default::default(),
+        });
+
+        let (_data, gen2) = cache.get(&None).unwrap();
+
+        // outdated gen
+        cache.invalidate("test", gen1);
         assert!(cache.get(&None).is_some());
-        cache.invalidate("test");
+
+        // the actual gen
+        cache.invalidate("test", gen2);
         assert!(cache.get(&None).is_none());
     }
 }
