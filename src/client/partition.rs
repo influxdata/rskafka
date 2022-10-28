@@ -2,7 +2,8 @@ use crate::{
     backoff::{Backoff, BackoffConfig, ErrorOrThrottle},
     client::error::{Error, RequestContext, Result},
     connection::{
-        BrokerCache, BrokerConnection, BrokerConnector, MessengerTransport, MetadataLookupMode,
+        BrokerCache, BrokerCacheGeneration, BrokerConnection, BrokerConnector, MessengerTransport,
+        MetadataLookupMode,
     },
     messenger::RequestError,
     protocol::{
@@ -29,7 +30,7 @@ use std::{
     sync::Arc,
 };
 use tokio::sync::Mutex;
-use tracing::{error, info};
+use tracing::{debug, error, info};
 
 use super::{error::ServerErrorResponse, metadata_cache::MetadataCacheGeneration};
 
@@ -99,9 +100,10 @@ pub enum OffsetAt {
     Latest,
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug)]
 struct CurrentBroker {
     broker: Option<BrokerConnection>,
+    gen_broker: BrokerCacheGeneration,
     gen_leader_from_arbitrary: Option<MetadataCacheGeneration>,
     gen_leader_from_self: Option<MetadataCacheGeneration>,
 }
@@ -147,7 +149,12 @@ impl PartitionClient {
             partition,
             brokers: Arc::clone(&brokers),
             backoff_config: Default::default(),
-            current_broker: Mutex::new(CurrentBroker::default()),
+            current_broker: Mutex::new(CurrentBroker {
+                broker: None,
+                gen_broker: BrokerCacheGeneration::START,
+                gen_leader_from_arbitrary: None,
+                gen_leader_from_self: None,
+            }),
             unknown_topic_handling,
         };
 
@@ -159,7 +166,10 @@ impl PartitionClient {
             &*brokers,
             "leader_detection",
             || async move {
-                scope.get().await.map_err(ErrorOrThrottle::Error)?;
+                scope
+                    .get()
+                    .await
+                    .map_err(|e| ErrorOrThrottle::Error((e, None)))?;
                 Ok(())
             },
         )
@@ -198,14 +208,17 @@ impl PartitionClient {
             self,
             "produce",
             || async move {
-                let broker = self.get().await.map_err(ErrorOrThrottle::Error)?;
+                let (broker, gen) = self
+                    .get()
+                    .await
+                    .map_err(|e| ErrorOrThrottle::Error((e, None)))?;
                 let response = broker
                     .request(&request)
                     .await
-                    .map_err(|e| ErrorOrThrottle::Error(e.into()))?;
+                    .map_err(|e| ErrorOrThrottle::Error((e.into(), Some(gen))))?;
                 maybe_throttle(response.throttle_time_ms)?;
                 process_produce_response(self.partition, &self.topic, n, response)
-                    .map_err(ErrorOrThrottle::Error)
+                    .map_err(|e| ErrorOrThrottle::Error((e, Some(gen))))
             },
         )
         .await
@@ -234,16 +247,17 @@ impl PartitionClient {
             self,
             "fetch_records",
             || async move {
-                let response = self
+                let (broker, gen) = self
                     .get()
                     .await
-                    .map_err(ErrorOrThrottle::Error)?
+                    .map_err(|e| ErrorOrThrottle::Error((e, None)))?;
+                let response = broker
                     .request(&request)
                     .await
-                    .map_err(|e| ErrorOrThrottle::Error(e.into()))?;
+                    .map_err(|e| ErrorOrThrottle::Error((e.into(), Some(gen))))?;
                 maybe_throttle(response.throttle_time_ms)?;
                 process_fetch_response(self.partition, &self.topic, response, offset)
-                    .map_err(ErrorOrThrottle::Error)
+                    .map_err(|e| ErrorOrThrottle::Error((e, Some(gen))))
             },
         )
         .await?;
@@ -269,16 +283,17 @@ impl PartitionClient {
             self,
             "get_offset",
             || async move {
-                let response = self
+                let (broker, gen) = self
                     .get()
                     .await
-                    .map_err(ErrorOrThrottle::Error)?
+                    .map_err(|e| ErrorOrThrottle::Error((e, None)))?;
+                let response = broker
                     .request(&request)
                     .await
-                    .map_err(|e| ErrorOrThrottle::Error(e.into()))?;
+                    .map_err(|e| ErrorOrThrottle::Error((e.into(), Some(gen))))?;
                 maybe_throttle(response.throttle_time_ms)?;
                 process_list_offsets_response(self.partition, &self.topic, response)
-                    .map_err(ErrorOrThrottle::Error)
+                    .map_err(|e| ErrorOrThrottle::Error((e, Some(gen))))
             },
         )
         .await?;
@@ -301,16 +316,17 @@ impl PartitionClient {
             self,
             "delete_records",
             || async move {
-                let response = self
+                let (broker, gen) = self
                     .get()
                     .await
-                    .map_err(ErrorOrThrottle::Error)?
+                    .map_err(|e| ErrorOrThrottle::Error((e, None)))?;
+                let response = broker
                     .request(&request)
                     .await
-                    .map_err(|e| ErrorOrThrottle::Error(e.into()))?;
+                    .map_err(|e| ErrorOrThrottle::Error((e.into(), Some(gen))))?;
                 maybe_throttle(Some(response.throttle_time_ms))?;
                 process_delete_records_response(&self.topic, self.partition, response)
-                    .map_err(ErrorOrThrottle::Error)
+                    .map_err(|e| ErrorOrThrottle::Error((e, Some(gen))))
             },
         )
         .await?;
@@ -399,10 +415,10 @@ impl BrokerCache for &PartitionClient {
     type R = MessengerTransport;
     type E = Error;
 
-    async fn get(&self) -> Result<Arc<Self::R>> {
+    async fn get(&self) -> Result<(Arc<Self::R>, BrokerCacheGeneration)> {
         let mut current_broker = self.current_broker.lock().await;
         if let Some(broker) = &current_broker.broker {
-            return Ok(Arc::clone(broker));
+            return Ok((Arc::clone(broker), current_broker.gen_broker));
         }
 
         info!(
@@ -486,6 +502,7 @@ impl BrokerCache for &PartitionClient {
 
         *current_broker = CurrentBroker {
             broker: Some(Arc::clone(&broker)),
+            gen_broker: current_broker.gen_broker.bump(),
             gen_leader_from_arbitrary,
             gen_leader_from_self,
         };
@@ -496,18 +513,29 @@ impl BrokerCache for &PartitionClient {
             leader,
             "Created new partition-specific broker connection",
         );
-        Ok(broker)
+        Ok((broker, current_broker.gen_broker))
     }
 
-    async fn invalidate(&self, reason: &'static str) {
+    async fn invalidate(&self, reason: &'static str, gen: BrokerCacheGeneration) {
+        let mut current_broker = self.current_broker.lock().await;
+
+        if current_broker.gen_broker != gen {
+            // stale request
+            debug!(
+                reason,
+                current_gen = current_broker.gen_broker.get(),
+                request_gen = gen.get(),
+                "stale invalidation request for arbitrary broker cache",
+            );
+            return;
+        }
+
         info!(
             topic = self.topic.deref(),
             partition = self.partition,
             reason,
             "Invaliding cached leader",
         );
-
-        let mut current_broker = self.current_broker.lock().await;
 
         if let Some(gen) = current_broker.gen_leader_from_arbitrary {
             self.brokers.invalidate_metadata_cache(reason, gen);
@@ -532,13 +560,15 @@ async fn maybe_retry<B, R, F, T>(
 where
     B: BrokerCache,
     R: (Fn() -> F) + Send + Sync,
-    F: std::future::Future<Output = Result<T, ErrorOrThrottle<Error>>> + Send,
+    F: std::future::Future<
+            Output = Result<T, ErrorOrThrottle<(Error, Option<BrokerCacheGeneration>)>>,
+        > + Send,
 {
     let mut backoff = Backoff::new(backoff_config);
 
     backoff
         .retry_with_backoff(request_name, || async {
-            let error = match f().await {
+            let (error, cache_gen) = match f().await {
                 Ok(v) => {
                     return ControlFlow::Break(Ok(v));
                 }
@@ -551,9 +581,11 @@ where
             let retry = match error {
                 Error::Request(RequestError::Poisoned(_) | RequestError::IO(_))
                 | Error::Connection(_) => {
-                    broker_cache
-                        .invalidate("partition client: connection broken")
-                        .await;
+                    if let Some(cache_gen) = cache_gen {
+                        broker_cache
+                            .invalidate("partition client: connection broken", cache_gen)
+                            .await;
+                    }
                     true
                 }
                 Error::ServerError {
@@ -567,18 +599,28 @@ where
                     protocol_error: ProtocolError::NotLeaderOrFollower,
                     ..
                 } => {
-                    broker_cache
-                        .invalidate("partition client: server error: not leader or follower")
-                        .await;
+                    if let Some(cache_gen) = cache_gen {
+                        broker_cache
+                            .invalidate(
+                                "partition client: server error: not leader or follower",
+                                cache_gen,
+                            )
+                            .await;
+                    }
                     true
                 }
                 Error::ServerError {
                     protocol_error: ProtocolError::UnknownTopicOrPartition,
                     ..
                 } => {
-                    broker_cache
-                        .invalidate("partition client: server error: unknown topic or partition")
-                        .await;
+                    if let Some(cache_gen) = cache_gen {
+                        broker_cache
+                            .invalidate(
+                                "partition client: server error: unknown topic or partition",
+                                cache_gen,
+                            )
+                            .await;
+                    }
                     unknown_topic_handling == UnknownTopicHandling::Retry
                 }
                 _ => false,

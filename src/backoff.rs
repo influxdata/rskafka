@@ -33,7 +33,7 @@ pub type BackoffResult<T> = Result<T, BackoffError>;
 #[derive(Debug)]
 pub enum ErrorOrThrottle<E>
 where
-    E: std::error::Error + Send,
+    E: Send,
 {
     Error(E),
     Throttle(Duration),
