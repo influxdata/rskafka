@@ -341,7 +341,7 @@ impl PartitionClient {
     ) -> Result<(i32, Option<MetadataCacheGeneration>)> {
         let (metadata, gen) = self
             .brokers
-            .request_metadata(metadata_mode, Some(vec![self.topic.clone()]))
+            .request_metadata(&metadata_mode, Some(vec![self.topic.clone()]))
             .await?;
 
         let topic = metadata
@@ -403,6 +403,7 @@ impl PartitionClient {
             topic=%self.topic,
             partition=%self.partition,
             leader=partition.leader_id.0,
+            %metadata_mode,
             "Detected leader",
         );
         Ok((partition.leader_id.0, gen))

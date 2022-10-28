@@ -76,6 +76,16 @@ pub enum MetadataLookupMode<B = BrokerConnection> {
     CachedArbitrary,
 }
 
+impl<B> std::fmt::Display for MetadataLookupMode<B> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::ArbitraryBroker => write!(f, "ArbitraryBroker"),
+            Self::SpecificBroker(_) => f.debug_tuple("SpecificBroker").field(&"...").finish(),
+            Self::CachedArbitrary => write!(f, "CachedArbitrary"),
+        }
+    }
+}
+
 /// Info needed to connect to a broker, with [optional broker ID](Self::id) for debugging
 enum BrokerRepresentation {
     /// URL specified as a bootstrap broker
@@ -193,7 +203,7 @@ impl BrokerConnector {
 
     /// Fetch and cache metadata
     pub async fn refresh_metadata(&self) -> Result<()> {
-        self.request_metadata(MetadataLookupMode::ArbitraryBroker, None)
+        self.request_metadata(&MetadataLookupMode::ArbitraryBroker, None)
             .await?;
 
         Ok(())
@@ -223,7 +233,7 @@ impl BrokerConnector {
     /// entry - doing so will panic.
     pub async fn request_metadata(
         &self,
-        metadata_mode: MetadataLookupMode,
+        metadata_mode: &MetadataLookupMode,
         topics: Option<Vec<String>>,
     ) -> Result<(MetadataResponse, Option<MetadataCacheGeneration>)> {
         // Return a cached metadata response as an optimisation to prevent
@@ -251,7 +261,7 @@ impl BrokerConnector {
             allow_auto_topic_creation: None,
         };
 
-        let response = metadata_request_with_retry(&metadata_mode, &request, backoff, self).await?;
+        let response = metadata_request_with_retry(metadata_mode, &request, backoff, self).await?;
 
         // If the request was for a full, unfiltered set of topics, cache the
         // response for later calls to make use of.

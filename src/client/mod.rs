@@ -154,7 +154,7 @@ impl Client {
         // will update the cached metadata entry.
         let (response, _gen) = self
             .brokers
-            .request_metadata(MetadataLookupMode::ArbitraryBroker, None)
+            .request_metadata(&MetadataLookupMode::ArbitraryBroker, None)
             .await?;
 
         Ok(response
