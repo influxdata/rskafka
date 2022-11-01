@@ -4,7 +4,7 @@ use chrono::{TimeZone, Utc};
 use futures::{StreamExt, TryStreamExt};
 use rdkafka::{
     consumer::{Consumer, StreamConsumer},
-    message::{Headers, OwnedHeaders},
+    message::{Header, Headers, OwnedHeaders},
     producer::{FutureProducer, FutureRecord},
     util::Timeout,
     ClientConfig, Message, TopicPartitionList,
@@ -49,7 +49,10 @@ pub async fn produce(
     for (topic_name, partition_index, record) in records {
         let mut headers = OwnedHeaders::new();
         for (k, v) in record.headers {
-            headers = headers.add(&k, &v);
+            headers = headers.insert(Header {
+                key: &k,
+                value: Some(&v),
+            });
         }
 
         let mut f_record = FutureRecord::to(&topic_name)
@@ -104,8 +107,8 @@ pub async fn consume(
                             .map(|headers| {
                                 (0..headers.count())
                                     .map(|i| {
-                                        let (k, v) = headers.get(i).unwrap();
-                                        (k.to_owned(), v.to_vec())
+                                        let header = headers.get(i);
+                                        (header.key.to_owned(), header.value.unwrap().to_vec())
                                     })
                                     .collect()
                             })
