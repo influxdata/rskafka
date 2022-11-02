@@ -46,18 +46,26 @@ async fn test_topic_crud() {
             }
         }
     }
-    let new_topic = format!("{}{}", prefix, max_id + 1);
-    controller_client
-        .create_topic(&new_topic, 2, 1, 5_000)
-        .await
-        .unwrap();
+
+    // create two topics
+    let mut new_topics = vec![];
+    for offset in 1..=2 {
+        let new_topic = format!("{}{}", prefix, max_id + offset);
+        controller_client
+            .create_topic(&new_topic, 2, 1, 5_000)
+            .await
+            .unwrap();
+        new_topics.push(new_topic);
+    }
 
     // might take a while to converge
     tokio::time::timeout(TEST_TIMEOUT, async {
         loop {
             let topics = client.list_topics().await.unwrap();
-            let topic = topics.iter().find(|t| t.name == new_topic);
-            if topic.is_some() {
+            if new_topics
+                .iter()
+                .all(|new_topic| topics.iter().any(|t| &t.name == new_topic))
+            {
                 return;
             }
 
@@ -67,8 +75,9 @@ async fn test_topic_crud() {
     .await
     .unwrap();
 
+    // topic already exists
     let err = controller_client
-        .create_topic(&new_topic, 1, 1, 5_000)
+        .create_topic(&new_topics[0], 1, 1, 5_000)
         .await
         .unwrap_err();
     match err {
@@ -78,6 +87,28 @@ async fn test_topic_crud() {
         } => {}
         _ => panic!("Unexpected error: {}", err),
     }
+
+    // delete one topic
+    controller_client
+        .delete_topic(&new_topics[0], 5_000)
+        .await
+        .unwrap();
+
+    // might take a while to converge
+    tokio::time::timeout(TEST_TIMEOUT, async {
+        loop {
+            let topics = client.list_topics().await.unwrap();
+            if topics.iter().all(|t| t.name != new_topics[0])
+                && topics.iter().any(|t| t.name == new_topics[1])
+            {
+                return;
+            }
+
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .unwrap();
 }
 
 #[tokio::test]

@@ -14,8 +14,8 @@ use crate::{
     messenger::RequestError,
     protocol::{
         error::Error as ProtocolError,
-        messages::{CreateTopicRequest, CreateTopicsRequest},
-        primitives::{Int16, Int32, String_},
+        messages::{CreateTopicRequest, CreateTopicsRequest, DeleteTopicsRequest},
+        primitives::{Array, Int16, Int32, String_},
     },
     throttle::maybe_throttle,
     validation::ExactlyOne,
@@ -78,6 +78,57 @@ impl ControllerClient {
 
             let topic = response
                 .topics
+                .exactly_one()
+                .map_err(|e| ErrorOrThrottle::Error((Error::exactly_one_topic(e), Some(gen))))?;
+
+            match topic.error {
+                None => Ok(()),
+                Some(protocol_error) => Err(ErrorOrThrottle::Error((
+                    Error::ServerError {
+                        protocol_error,
+                        error_message: topic.error_message.and_then(|s| s.0),
+                        request: RequestContext::Topic(topic.name.0),
+                        response: None,
+                        is_virtual: false,
+                    },
+                    Some(gen),
+                ))),
+            }
+        })
+        .await?;
+
+        // Refresh the cache now there is definitely a new topic to observe.
+        let _ = self.brokers.refresh_metadata().await;
+
+        Ok(())
+    }
+
+    /// Delete a topic
+    pub async fn delete_topic(
+        &self,
+        name: impl Into<String> + Send,
+        timeout_ms: i32,
+    ) -> Result<()> {
+        let request = &DeleteTopicsRequest {
+            topic_names: Array(Some(vec![String_(name.into())])),
+            timeout_ms: Int32(timeout_ms),
+            tagged_fields: None,
+        };
+
+        maybe_retry(&self.backoff_config, self, "delete_topic", || async move {
+            let (broker, gen) = self
+                .get()
+                .await
+                .map_err(|e| ErrorOrThrottle::Error((e, None)))?;
+            let response = broker
+                .request(request)
+                .await
+                .map_err(|e| ErrorOrThrottle::Error((e.into(), Some(gen))))?;
+
+            maybe_throttle(response.throttle_time_ms)?;
+
+            let topic = response
+                .responses
                 .exactly_one()
                 .map_err(|e| ErrorOrThrottle::Error((Error::exactly_one_topic(e), Some(gen))))?;
 
