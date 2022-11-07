@@ -43,7 +43,7 @@ assert_matches = "1.5"
 criterion = { version = "0.4", features = ["async_tokio"] }
 dotenvy = "0.15.1"
 futures = "0.3"
-j4rs = "0.13"
+j4rs = "0.14"
 once_cell = "1.9"
 procspawn = "0.10"
 proptest = "1"
