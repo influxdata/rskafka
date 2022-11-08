@@ -47,11 +47,7 @@ impl MetadataCache {
         // to ensure only the expected topics are present.
         if let Some(want) = topics {
             // Filter out any topics the caller did not ask for.
-            m.topics = m
-                .topics
-                .into_iter()
-                .filter(|t| want.contains(&t.name.0))
-                .collect();
+            m.topics.retain(|t| want.contains(&t.name.0));
 
             // Validate the resulting number of topics in the metadata response.
             if m.topics.len() != want.len() {
