@@ -269,7 +269,7 @@ async fn assert_produce_consume<F1, G1, F2, G2>(
     );
 
     // timestamps for records. We'll reorder the messages though to ts2, ts1, ts3
-    let ts1 = Utc.timestamp_millis(1337);
+    let ts1 = Utc.timestamp_millis_opt(1337).unwrap();
     let ts2 = ts1 + Duration::milliseconds(1);
     let ts3 = ts2 + Duration::milliseconds(1);
 

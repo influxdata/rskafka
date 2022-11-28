@@ -685,6 +685,6 @@ pub fn large_record() -> Record {
         key: Some(b"".to_vec()),
         value: Some(vec![b'x'; 1024]),
         headers: BTreeMap::from([("foo".to_owned(), b"bar".to_vec())]),
-        timestamp: Utc.timestamp_millis(1337),
+        timestamp: Utc.timestamp_millis_opt(1337).unwrap(),
     }
 }

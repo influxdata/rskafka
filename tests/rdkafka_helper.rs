@@ -114,7 +114,8 @@ pub async fn consume(
                             })
                             .unwrap_or_default(),
                         timestamp: Utc
-                            .timestamp_millis(msg.timestamp().to_millis().unwrap_or_default()),
+                            .timestamp_millis_opt(msg.timestamp().to_millis().unwrap_or_default())
+                            .unwrap(),
                     },
                     offset: msg.offset(),
                 })

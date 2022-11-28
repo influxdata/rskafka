@@ -737,7 +737,7 @@ mod tests {
             key: Some(vec![0; 4]),
             value: Some(vec![0; 6]),
             headers: Default::default(),
-            timestamp: Utc.timestamp_millis(320),
+            timestamp: Utc.timestamp_millis_opt(320).unwrap(),
         }
     }
 

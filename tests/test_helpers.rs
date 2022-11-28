@@ -160,7 +160,7 @@ pub fn record(key: &[u8]) -> Record {
         key: Some(key.to_vec()),
         value: Some(b"hello kafka".to_vec()),
         headers: BTreeMap::from([("foo".to_owned(), b"bar".to_vec())]),
-        timestamp: Utc.timestamp_millis(1337),
+        timestamp: Utc.timestamp_millis_opt(1337).unwrap(),
     }
 }
 
