@@ -42,7 +42,7 @@ pub fn criterion_benchmark(c: &mut Criterion) {
         key: Some(vec![b'k'; 10]),
         value: Some(vec![b'x'; 10_000]),
         headers: BTreeMap::default(),
-        timestamp: Utc.timestamp_millis(1337),
+        timestamp: Utc.timestamp_millis_opt(1337).unwrap(),
     };
 
     {

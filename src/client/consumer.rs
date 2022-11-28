@@ -517,7 +517,7 @@ mod tests {
             key: Some(vec![0; 4]),
             value: Some(vec![0; 6]),
             headers: Default::default(),
-            timestamp: Utc.timestamp_millis(1337),
+            timestamp: Utc.timestamp_millis_opt(1337).unwrap(),
         };
 
         let (sender, receiver) = mpsc::channel(10);
@@ -584,7 +584,7 @@ mod tests {
             key: Some(vec![0; 4]),
             value: Some(vec![0; 6]),
             headers: Default::default(),
-            timestamp: Utc.timestamp_millis(1337),
+            timestamp: Utc.timestamp_millis_opt(1337).unwrap(),
         };
 
         let (sender, receiver) = mpsc::channel(10);
@@ -675,7 +675,7 @@ mod tests {
             key: Some(vec![0; 4]),
             value: Some(vec![0; 6]),
             headers: Default::default(),
-            timestamp: Utc.timestamp_millis(1337),
+            timestamp: Utc.timestamp_millis_opt(1337).unwrap(),
         };
 
         // Simulate an error on first fetch to encourage an offset update
@@ -722,7 +722,7 @@ mod tests {
             key: Some(vec![0; 4]),
             value: Some(vec![0; 6]),
             headers: Default::default(),
-            timestamp: Utc.timestamp_millis(1337),
+            timestamp: Utc.timestamp_millis_opt(1337).unwrap(),
         };
 
         // Simulate an error on first fetch to encourage an offset update

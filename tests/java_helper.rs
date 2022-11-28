@@ -278,7 +278,7 @@ pub async fn consume(
                 key: Some(key.as_bytes().to_vec()),
                 value: Some(value.as_bytes().to_vec()),
                 headers,
-                timestamp: Utc.timestamp_millis(timestamp),
+                timestamp: Utc.timestamp_millis_opt(timestamp).unwrap(),
             };
             let record_and_offset = RecordAndOffset { record, offset };
             results.push(record_and_offset);

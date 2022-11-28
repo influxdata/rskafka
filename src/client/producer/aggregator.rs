@@ -153,7 +153,7 @@ mod tests {
             key: Some(vec![0; 45]),
             value: Some(vec![0; 2]),
             headers: Default::default(),
-            timestamp: Utc.timestamp_millis(1337),
+            timestamp: Utc.timestamp_millis_opt(1337).unwrap(),
         };
 
         let r2 = Record {

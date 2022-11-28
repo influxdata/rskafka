@@ -45,7 +45,7 @@ mod tests {
             headers: vec![("a".to_string(), vec![0; 5]), ("b".to_string(), vec![0; 7])]
                 .into_iter()
                 .collect(),
-            timestamp: Utc.timestamp_millis(1337),
+            timestamp: Utc.timestamp_millis_opt(1337).unwrap(),
         };
 
         assert_eq!(record.approximate_size(), 23 + 45 + 1 + 5 + 1 + 7);
