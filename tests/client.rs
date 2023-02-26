@@ -11,7 +11,7 @@ use rskafka::{
 use std::{collections::BTreeMap, env, str::FromStr, sync::Arc, time::Duration};
 
 mod test_helpers;
-use test_helpers::{maybe_start_logging, random_topic_name, record, TEST_TIMEOUT};
+use test_helpers::{maybe_start_logging, random_topic_name, record, BrokerImpl, TEST_TIMEOUT};
 
 #[tokio::test]
 async fn test_plain() {
@@ -32,6 +32,11 @@ async fn test_sasl() {
     }
     if env::var("KAFKA_SASL_CONNECT").is_err() {
         eprintln!("Skipping sasl test.");
+        return;
+    }
+    let test_cfg = maybe_skip_kafka_integration!();
+    // Redpanda broker doesn't support SASL/PLAIN at this moment.
+    if test_cfg.broker_impl != BrokerImpl::Kafka {
         return;
     }
     ClientBuilder::new(vec![env::var("KAFKA_SASL_CONNECT").unwrap()])

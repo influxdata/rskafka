@@ -13,7 +13,6 @@ services:
   kafka-0:
     image: docker.io/bitnami/kafka:3
     ports:
-      - "9093:9093"
       - "9010:9010"
       - "9096:9096"
     environment:
@@ -33,7 +32,6 @@ services:
   kafka-1:
     image: docker.io/bitnami/kafka:3
     ports:
-      - "9094:9094"
       - "9011:9011"
       - "9097:9097"
     environment:
@@ -53,7 +51,6 @@ services:
   kafka-2:
     image: docker.io/bitnami/kafka:3
     ports:
-      - "9095:9095"
       - "9012:9012"
       - "9098:9098"
     environment:
