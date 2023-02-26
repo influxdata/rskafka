@@ -10,6 +10,7 @@
 //!         StartOffset,
 //!         StreamConsumerBuilder,
 //!     },
+//!     partition::UnknownTopicHandling,
 //! };
 //! use std::sync::Arc;
 //!
@@ -17,7 +18,11 @@
 //! let connection = "localhost:9093".to_owned();
 //! let client = ClientBuilder::new(vec![connection]).build().await.unwrap();
 //! let partition_client = Arc::new(
-//!     client.partition_client("my_topic", 0).unwrap()
+//!     client.partition_client(
+//!         "my_topic",
+//!         0,
+//!         UnknownTopicHandling::Retry,
+//!     ).await.unwrap()
 //! );
 //!
 //! // construct stream consumer
@@ -46,7 +51,7 @@ use std::time::Duration;
 use futures::future::{BoxFuture, Fuse, FusedFuture, FutureExt};
 use futures::Stream;
 use pin_project_lite::pin_project;
-use tracing::{trace, warn};
+use tracing::{debug, trace, warn};
 
 use crate::{
     client::{
@@ -253,8 +258,16 @@ impl Stream for StreamConsumer {
                     let offset = match next_offset {
                         Some(x) => x,
                         None => match start_offset {
-                            StartOffset::Earliest => client.get_offset(OffsetAt::Earliest).await?,
-                            StartOffset::Latest => client.get_offset(OffsetAt::Latest).await?,
+                            StartOffset::Earliest => {
+                                let offset = client.get_offset(OffsetAt::Earliest).await?;
+                                debug!(offset, "resolved `earliest` offset");
+                                offset
+                            }
+                            StartOffset::Latest => {
+                                let offset = client.get_offset(OffsetAt::Latest).await?;
+                                debug!(offset, "resolved `latest` offset");
+                                offset
+                            }
                             StartOffset::At(x) => x,
                         },
                     };
@@ -300,7 +313,10 @@ impl Stream for StreamConsumer {
                 }
                 // if we don't have an offset, try again because fetching the offset is racy
                 (
-                    Err(Error::ServerError(ProtocolError::OffsetOutOfRange, _)),
+                    Err(Error::ServerError {
+                        protocol_error: ProtocolError::OffsetOutOfRange,
+                        ..
+                    }),
                     StartOffset::Earliest | StartOffset::Latest,
                 ) => {
                     // wipe offset and try again
@@ -352,12 +368,12 @@ mod tests {
     use std::time::Duration;
 
     use assert_matches::assert_matches;
+    use chrono::{TimeZone, Utc};
     use futures::{pin_mut, StreamExt};
-    use time::OffsetDateTime;
     use tokio::sync::{mpsc, Mutex};
 
     use crate::{
-        client::error::{Error, ProtocolError},
+        client::error::{Error, ProtocolError, RequestContext},
         record::Record,
     };
 
@@ -501,7 +517,7 @@ mod tests {
             key: Some(vec![0; 4]),
             value: Some(vec![0; 6]),
             headers: Default::default(),
-            timestamp: OffsetDateTime::now_utc(),
+            timestamp: Utc.timestamp_millis_opt(1337).unwrap(),
         };
 
         let (sender, receiver) = mpsc::channel(10);
@@ -568,7 +584,7 @@ mod tests {
             key: Some(vec![0; 4]),
             value: Some(vec![0; 6]),
             headers: Default::default(),
-            timestamp: OffsetDateTime::now_utc(),
+            timestamp: Utc.timestamp_millis_opt(1337).unwrap(),
         };
 
         let (sender, receiver) = mpsc::channel(10);
@@ -627,10 +643,13 @@ mod tests {
 
     #[tokio::test]
     async fn test_consumer_terminate() {
-        let e = Error::ServerError(
-            ProtocolError::OffsetOutOfRange,
-            String::from("offset out of range"),
-        );
+        let e = Error::ServerError {
+            protocol_error: ProtocolError::OffsetOutOfRange,
+            error_message: None,
+            request: RequestContext::Partition("foo".into(), 1),
+            response: None,
+            is_virtual: true,
+        };
         let (_sender, receiver) = mpsc::channel(10);
         let consumer = Arc::new(MockFetch::new(receiver, Some(e), (0, 1_000)));
 
@@ -640,7 +659,10 @@ mod tests {
         let error = stream.next().await.expect("stream not empty").unwrap_err();
         assert_matches!(
             error,
-            Error::ServerError(ProtocolError::OffsetOutOfRange, _)
+            Error::ServerError {
+                protocol_error: ProtocolError::OffsetOutOfRange,
+                ..
+            }
         );
 
         // stream ends
@@ -653,14 +675,17 @@ mod tests {
             key: Some(vec![0; 4]),
             value: Some(vec![0; 6]),
             headers: Default::default(),
-            timestamp: OffsetDateTime::now_utc(),
+            timestamp: Utc.timestamp_millis_opt(1337).unwrap(),
         };
 
         // Simulate an error on first fetch to encourage an offset update
-        let e = Error::ServerError(
-            ProtocolError::OffsetOutOfRange,
-            String::from("offset out of range"),
-        );
+        let e = Error::ServerError {
+            protocol_error: ProtocolError::OffsetOutOfRange,
+            error_message: None,
+            request: RequestContext::Partition("foo".into(), 1),
+            response: None,
+            is_virtual: true,
+        };
 
         let (sender, receiver) = mpsc::channel(10);
         let consumer = Arc::new(MockFetch::new(receiver, Some(e), (2, 1_000)));
@@ -697,14 +722,17 @@ mod tests {
             key: Some(vec![0; 4]),
             value: Some(vec![0; 6]),
             headers: Default::default(),
-            timestamp: OffsetDateTime::now_utc(),
+            timestamp: Utc.timestamp_millis_opt(1337).unwrap(),
         };
 
         // Simulate an error on first fetch to encourage an offset update
-        let e = Error::ServerError(
-            ProtocolError::OffsetOutOfRange,
-            String::from("offset out of range"),
-        );
+        let e = Error::ServerError {
+            protocol_error: ProtocolError::OffsetOutOfRange,
+            error_message: None,
+            request: RequestContext::Partition("foo".into(), 1),
+            response: None,
+            is_virtual: true,
+        };
 
         let (sender, receiver) = mpsc::channel(10);
         let consumer = Arc::new(MockFetch::new(receiver, Some(e), (0, 2)));

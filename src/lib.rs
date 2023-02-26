@@ -19,6 +19,8 @@
 
 mod backoff;
 
+pub mod build_info;
+
 pub mod client;
 
 mod connection;
@@ -34,9 +36,11 @@ mod protocol;
 
 pub mod record;
 
+mod throttle;
+
 pub mod topic;
 
 // re-exports
-pub use time;
+pub use chrono;
 
 mod validation;

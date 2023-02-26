@@ -3,8 +3,9 @@ use std::sync::Arc;
 use thiserror::Error;
 
 use crate::{
+    build_info::DEFAULT_CLIENT_ID,
     client::partition::PartitionClient,
-    connection::{BrokerConnector, TlsConfig},
+    connection::{BrokerConnector, MetadataLookupMode, TlsConfig},
     protocol::primitives::Boolean,
     topic::Topic,
 };
@@ -12,12 +13,13 @@ use crate::{
 pub mod consumer;
 pub mod controller;
 pub mod error;
+pub(crate) mod metadata_cache;
 pub mod partition;
 pub mod producer;
 
 use error::{Error, Result};
 
-use self::controller::ControllerClient;
+use self::{controller::ControllerClient, partition::UnknownTopicHandling};
 
 pub use crate::connection::SaslConfig;
 
@@ -39,6 +41,7 @@ pub enum ProduceError {
 /// Builder for [`Client`].
 pub struct ClientBuilder {
     bootstrap_brokers: Vec<String>,
+    client_id: Option<Arc<str>>,
     max_message_size: usize,
     socks5_proxy: Option<String>,
     tls_config: TlsConfig,
@@ -50,11 +53,18 @@ impl ClientBuilder {
     pub fn new(bootstrap_brokers: Vec<String>) -> Self {
         Self {
             bootstrap_brokers,
+            client_id: None,
             max_message_size: 100 * 1024 * 1024, // 100MB
             socks5_proxy: None,
             tls_config: TlsConfig::default(),
             sasl_config: None,
         }
+    }
+
+    /// Sets client ID.
+    pub fn client_id(mut self, client_id: impl Into<Arc<str>>) -> Self {
+        self.client_id = Some(client_id.into());
+        self
     }
 
     /// Set maximum size (in bytes) of message frames that can be received from a broker.
@@ -91,6 +101,8 @@ impl ClientBuilder {
     pub async fn build(self) -> Result<Client> {
         let brokers = Arc::new(BrokerConnector::new(
             self.bootstrap_brokers,
+            self.client_id
+                .unwrap_or_else(|| Arc::from(DEFAULT_CLIENT_ID)),
             self.tls_config,
             self.socks5_proxy,
             self.sasl_config,
@@ -126,21 +138,35 @@ impl Client {
     }
 
     /// Returns a client for performing operations on a specific partition
-    pub fn partition_client(
+    pub async fn partition_client(
         &self,
         topic: impl Into<String> + Send,
         partition: i32,
+        unknown_topic_handling: UnknownTopicHandling,
     ) -> Result<PartitionClient> {
-        Ok(PartitionClient::new(
+        PartitionClient::new(
             topic.into(),
             partition,
             Arc::clone(&self.brokers),
-        ))
+            unknown_topic_handling,
+        )
+        .await
     }
 
     /// Returns a list of topics in the cluster
     pub async fn list_topics(&self) -> Result<Vec<Topic>> {
-        let response = self.brokers.request_metadata(None, None).await?;
+        // Do not used a cached metadata response to satisfy this request, in
+        // order to prevent:
+        //
+        //  * Client creates a topic
+        //  * Client calls list_topics() and does not see new topic
+        //
+        // Because this is an unconstrained metadata request (all topics) it
+        // will update the cached metadata entry.
+        let (response, _gen) = self
+            .brokers
+            .request_metadata(&MetadataLookupMode::ArbitraryBroker, None)
+            .await?;
 
         Ok(response
             .topics

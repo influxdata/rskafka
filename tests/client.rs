@@ -1,8 +1,9 @@
 use assert_matches::assert_matches;
+use chrono::{TimeZone, Utc};
 use rskafka::{
     client::{
-        error::{Error as ClientError, ProtocolError},
-        partition::{Compression, OffsetAt},
+        error::{Error as ClientError, ProtocolError, ServerErrorResponse},
+        partition::{Compression, OffsetAt, UnknownTopicHandling},
         ClientBuilder,
     },
     record::{Record, RecordAndOffset},
@@ -10,14 +11,17 @@ use rskafka::{
 use std::{collections::BTreeMap, env, str::FromStr, sync::Arc, time::Duration};
 
 mod test_helpers;
-use test_helpers::{maybe_start_logging, now, random_topic_name, record};
+use test_helpers::{maybe_start_logging, random_topic_name, record, TEST_TIMEOUT};
 
 #[tokio::test]
 async fn test_plain() {
     maybe_start_logging();
 
-    let connection = maybe_skip_kafka_integration!();
-    ClientBuilder::new(vec![connection]).build().await.unwrap();
+    let test_cfg = maybe_skip_kafka_integration!();
+    ClientBuilder::new(test_cfg.bootstrap_brokers)
+        .build()
+        .await
+        .unwrap();
 }
 
 #[tokio::test]
@@ -44,8 +48,11 @@ async fn test_sasl() {
 async fn test_topic_crud() {
     maybe_start_logging();
 
-    let connection = maybe_skip_kafka_integration!();
-    let client = ClientBuilder::new(vec![connection]).build().await.unwrap();
+    let test_cfg = maybe_skip_kafka_integration!();
+    let client = ClientBuilder::new(test_cfg.bootstrap_brokers)
+        .build()
+        .await
+        .unwrap();
     let controller_client = client.controller_client().unwrap();
     let topics = client.list_topics().await.unwrap();
 
@@ -59,18 +66,26 @@ async fn test_topic_crud() {
             }
         }
     }
-    let new_topic = format!("{}{}", prefix, max_id + 1);
-    controller_client
-        .create_topic(&new_topic, 2, 1, 5_000)
-        .await
-        .unwrap();
+
+    // create two topics
+    let mut new_topics = vec![];
+    for offset in 1..=2 {
+        let new_topic = format!("{}{}", prefix, max_id + offset);
+        controller_client
+            .create_topic(&new_topic, 2, 1, 5_000)
+            .await
+            .unwrap();
+        new_topics.push(new_topic);
+    }
 
     // might take a while to converge
-    tokio::time::timeout(Duration::from_millis(1_000), async {
+    tokio::time::timeout(TEST_TIMEOUT, async {
         loop {
             let topics = client.list_topics().await.unwrap();
-            let topic = topics.iter().find(|t| t.name == new_topic);
-            if topic.is_some() {
+            if new_topics
+                .iter()
+                .all(|new_topic| topics.iter().any(|t| &t.name == new_topic))
+            {
                 return;
             }
 
@@ -80,14 +95,103 @@ async fn test_topic_crud() {
     .await
     .unwrap();
 
+    // topic already exists
     let err = controller_client
-        .create_topic(&new_topic, 1, 1, 5_000)
+        .create_topic(&new_topics[0], 1, 1, 5_000)
         .await
         .unwrap_err();
     match err {
-        ClientError::ServerError(ProtocolError::TopicAlreadyExists, _) => {}
+        ClientError::ServerError {
+            protocol_error: ProtocolError::TopicAlreadyExists,
+            ..
+        } => {}
         _ => panic!("Unexpected error: {}", err),
     }
+
+    // delete one topic
+    controller_client
+        .delete_topic(&new_topics[0], 5_000)
+        .await
+        .unwrap();
+
+    // might take a while to converge
+    tokio::time::timeout(TEST_TIMEOUT, async {
+        loop {
+            let topics = client.list_topics().await.unwrap();
+            if topics.iter().all(|t| t.name != new_topics[0])
+                && topics.iter().any(|t| t.name == new_topics[1])
+            {
+                return;
+            }
+
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .unwrap();
+}
+
+#[tokio::test]
+async fn test_partition_client() {
+    maybe_start_logging();
+
+    let test_cfg = maybe_skip_kafka_integration!();
+    let topic_name = random_topic_name();
+
+    let client = ClientBuilder::new(test_cfg.bootstrap_brokers)
+        .build()
+        .await
+        .unwrap();
+
+    let controller_client = client.controller_client().unwrap();
+    controller_client
+        .create_topic(&topic_name, 1, 1, 5_000)
+        .await
+        .unwrap();
+
+    let partition_client = client
+        .partition_client(topic_name.clone(), 0, UnknownTopicHandling::Retry)
+        .await
+        .unwrap();
+    assert_eq!(partition_client.topic(), &topic_name);
+    assert_eq!(partition_client.partition(), 0);
+}
+
+#[tokio::test]
+async fn test_non_existing_partition() {
+    maybe_start_logging();
+
+    let test_cfg = maybe_skip_kafka_integration!();
+    let topic_name = random_topic_name();
+
+    let client = ClientBuilder::new(test_cfg.bootstrap_brokers)
+        .build()
+        .await
+        .unwrap();
+
+    // do NOT create the topic
+
+    // short timeout, should just check that we will never finish
+    tokio::time::timeout(Duration::from_millis(100), async {
+        client
+            .partition_client(topic_name.clone(), 0, UnknownTopicHandling::Retry)
+            .await
+            .unwrap();
+    })
+    .await
+    .unwrap_err();
+
+    let err = client
+        .partition_client(topic_name.clone(), 0, UnknownTopicHandling::Error)
+        .await
+        .unwrap_err();
+    assert_matches!(
+        err,
+        ClientError::ServerError {
+            protocol_error: ProtocolError::UnknownTopicOrPartition,
+            ..
+        }
+    );
 }
 
 // Disabled as currently no TLS integration tests
@@ -128,49 +232,76 @@ async fn test_tls() {
         .with_single_cert(vec![producer_root], private_key)
         .unwrap();
 
-    let connection = maybe_skip_kafka_integration!();
-    ClientBuilder::new(vec![connection])
+    let test_cfg = maybe_skip_kafka_integration!();
+    ClientBuilder::new(test_cfg.bootstrap_brokers)
         .tls_config(Arc::new(config))
         .build()
         .await
         .unwrap();
 }
 
-// Disabled as currently no SOCKS5 integration tests
 #[cfg(feature = "transport-socks5")]
-#[ignore]
 #[tokio::test]
 async fn test_socks5() {
     maybe_start_logging();
 
-    let client = ClientBuilder::new(vec!["my-cluster-kafka-bootstrap:9092".to_owned()])
-        .socks5_proxy("localhost:1080".to_owned())
+    let test_cfg = maybe_skip_kafka_integration!(socks5);
+    let topic_name = random_topic_name();
+
+    let client = ClientBuilder::new(test_cfg.bootstrap_brokers)
+        .socks5_proxy(test_cfg.socks5_proxy.unwrap())
         .build()
         .await
         .unwrap();
-    let partition_client = client.partition_client("myorg_mybucket", 0).unwrap();
+
+    let controller_client = client.controller_client().unwrap();
+    controller_client
+        .create_topic(&topic_name, 1, 1, 5_000)
+        .await
+        .unwrap();
+
+    let partition_client = client
+        .partition_client(topic_name, 0, UnknownTopicHandling::Retry)
+        .await
+        .unwrap();
+
+    let record = record(b"");
     partition_client
+        .produce(vec![record.clone()], Compression::NoCompression)
+        .await
+        .unwrap();
+
+    let (mut records, _watermark) = partition_client
         .fetch_records(0, 1..10_000_001, 1_000)
         .await
         .unwrap();
+    assert_eq!(records.len(), 1);
+    let record2 = records.remove(0).record;
+    assert_eq!(record, record2);
 }
 
 #[tokio::test]
 async fn test_produce_empty() {
     maybe_start_logging();
 
-    let connection = maybe_skip_kafka_integration!();
+    let test_cfg = maybe_skip_kafka_integration!();
     let topic_name = random_topic_name();
     let n_partitions = 2;
 
-    let client = ClientBuilder::new(vec![connection]).build().await.unwrap();
+    let client = ClientBuilder::new(test_cfg.bootstrap_brokers)
+        .build()
+        .await
+        .unwrap();
     let controller_client = client.controller_client().unwrap();
     controller_client
         .create_topic(&topic_name, n_partitions, 1, 5_000)
         .await
         .unwrap();
 
-    let partition_client = client.partition_client(&topic_name, 1).unwrap();
+    let partition_client = client
+        .partition_client(&topic_name, 1, UnknownTopicHandling::Retry)
+        .await
+        .unwrap();
     partition_client
         .produce(vec![], Compression::NoCompression)
         .await
@@ -181,18 +312,24 @@ async fn test_produce_empty() {
 async fn test_consume_empty() {
     maybe_start_logging();
 
-    let connection = maybe_skip_kafka_integration!();
+    let test_cfg = maybe_skip_kafka_integration!();
     let topic_name = random_topic_name();
     let n_partitions = 2;
 
-    let client = ClientBuilder::new(vec![connection]).build().await.unwrap();
+    let client = ClientBuilder::new(test_cfg.bootstrap_brokers)
+        .build()
+        .await
+        .unwrap();
     let controller_client = client.controller_client().unwrap();
     controller_client
         .create_topic(&topic_name, n_partitions, 1, 5_000)
         .await
         .unwrap();
 
-    let partition_client = client.partition_client(&topic_name, 1).unwrap();
+    let partition_client = client
+        .partition_client(&topic_name, 1, UnknownTopicHandling::Retry)
+        .await
+        .unwrap();
     let (records, watermark) = partition_client
         .fetch_records(0, 1..10_000, 1_000)
         .await
@@ -205,18 +342,24 @@ async fn test_consume_empty() {
 async fn test_consume_offset_out_of_range() {
     maybe_start_logging();
 
-    let connection = maybe_skip_kafka_integration!();
+    let test_cfg = maybe_skip_kafka_integration!();
     let topic_name = random_topic_name();
     let n_partitions = 2;
 
-    let client = ClientBuilder::new(vec![connection]).build().await.unwrap();
+    let client = ClientBuilder::new(test_cfg.bootstrap_brokers)
+        .build()
+        .await
+        .unwrap();
     let controller_client = client.controller_client().unwrap();
     controller_client
         .create_topic(&topic_name, n_partitions, 1, 5_000)
         .await
         .unwrap();
 
-    let partition_client = client.partition_client(&topic_name, 1).unwrap();
+    let partition_client = client
+        .partition_client(&topic_name, 1, UnknownTopicHandling::Retry)
+        .await
+        .unwrap();
     let record = record(b"");
     let offsets = partition_client
         .produce(vec![record], Compression::NoCompression)
@@ -230,7 +373,11 @@ async fn test_consume_offset_out_of_range() {
         .unwrap_err();
     assert_matches!(
         err,
-        ClientError::ServerError(ProtocolError::OffsetOutOfRange, _)
+        ClientError::ServerError {
+            protocol_error: ProtocolError::OffsetOutOfRange,
+            response: Some(ServerErrorResponse::PartitionFetchState { .. }),
+            ..
+        }
     );
 }
 
@@ -238,11 +385,11 @@ async fn test_consume_offset_out_of_range() {
 async fn test_get_offset() {
     maybe_start_logging();
 
-    let connection = maybe_skip_kafka_integration!();
+    let test_cfg = maybe_skip_kafka_integration!();
     let topic_name = random_topic_name();
     let n_partitions = 1;
 
-    let client = ClientBuilder::new(vec![connection.clone()])
+    let client = ClientBuilder::new(test_cfg.bootstrap_brokers.clone())
         .build()
         .await
         .unwrap();
@@ -252,7 +399,10 @@ async fn test_get_offset() {
         .await
         .unwrap();
 
-    let partition_client = client.partition_client(topic_name.clone(), 0).unwrap();
+    let partition_client = client
+        .partition_client(topic_name.clone(), 0, UnknownTopicHandling::Retry)
+        .await
+        .unwrap();
 
     assert_eq!(
         partition_client
@@ -270,7 +420,7 @@ async fn test_get_offset() {
     // use out-of order timestamps to ensure our "lastest offset" logic works
     let record_early = record(b"");
     let record_late = Record {
-        timestamp: record_early.timestamp + time::Duration::SECOND,
+        timestamp: record_early.timestamp + chrono::Duration::seconds(1),
         ..record_early.clone()
     };
     let offsets = partition_client
@@ -303,17 +453,25 @@ async fn test_get_offset() {
 async fn test_produce_consume_size_cutoff() {
     maybe_start_logging();
 
-    let connection = maybe_skip_kafka_integration!();
+    let test_cfg = maybe_skip_kafka_integration!();
     let topic_name = random_topic_name();
 
-    let client = ClientBuilder::new(vec![connection]).build().await.unwrap();
+    let client = ClientBuilder::new(test_cfg.bootstrap_brokers)
+        .build()
+        .await
+        .unwrap();
     let controller_client = client.controller_client().unwrap();
     controller_client
         .create_topic(&topic_name, 1, 1, 5_000)
         .await
         .unwrap();
 
-    let partition_client = Arc::new(client.partition_client(&topic_name, 0).unwrap());
+    let partition_client = Arc::new(
+        client
+            .partition_client(&topic_name, 0, UnknownTopicHandling::Retry)
+            .await
+            .unwrap(),
+    );
 
     let record_1 = large_record();
     let record_2 = large_record();
@@ -376,17 +534,23 @@ async fn test_produce_consume_size_cutoff() {
 async fn test_consume_midbatch() {
     maybe_start_logging();
 
-    let connection = maybe_skip_kafka_integration!();
+    let test_cfg = maybe_skip_kafka_integration!();
     let topic_name = random_topic_name();
 
-    let client = ClientBuilder::new(vec![connection]).build().await.unwrap();
+    let client = ClientBuilder::new(test_cfg.bootstrap_brokers)
+        .build()
+        .await
+        .unwrap();
     let controller_client = client.controller_client().unwrap();
     controller_client
         .create_topic(&topic_name, 1, 1, 5_000)
         .await
         .unwrap();
 
-    let partition_client = client.partition_client(&topic_name, 0).unwrap();
+    let partition_client = client
+        .partition_client(&topic_name, 0, UnknownTopicHandling::Retry)
+        .await
+        .unwrap();
 
     // produce two records into a single batch
     let record_1 = record(b"x");
@@ -421,17 +585,23 @@ async fn test_consume_midbatch() {
 async fn test_delete_records() {
     maybe_start_logging();
 
-    let connection = maybe_skip_kafka_integration!();
+    let test_cfg = maybe_skip_kafka_integration!(delete);
     let topic_name = random_topic_name();
 
-    let client = ClientBuilder::new(vec![connection]).build().await.unwrap();
+    let client = ClientBuilder::new(test_cfg.bootstrap_brokers)
+        .build()
+        .await
+        .unwrap();
     let controller_client = client.controller_client().unwrap();
     controller_client
         .create_topic(&topic_name, 1, 1, 5_000)
         .await
         .unwrap();
 
-    let partition_client = client.partition_client(&topic_name, 0).unwrap();
+    let partition_client = client
+        .partition_client(&topic_name, 0, UnknownTopicHandling::Retry)
+        .await
+        .unwrap();
 
     // produce the following record batches:
     // - record_1
@@ -465,7 +635,10 @@ async fn test_delete_records() {
     let offset_4 = offsets[0];
 
     // delete from the middle of the 2nd batch
-    maybe_skip_delete!(partition_client, offset_3);
+    partition_client
+        .delete_records(offset_3, 1_000)
+        .await
+        .unwrap();
 
     // fetching data before the record fails
     let err = partition_client
@@ -474,7 +647,11 @@ async fn test_delete_records() {
         .unwrap_err();
     assert_matches!(
         err,
-        ClientError::ServerError(ProtocolError::OffsetOutOfRange, _)
+        ClientError::ServerError {
+            protocol_error: ProtocolError::OffsetOutOfRange,
+            response: Some(ServerErrorResponse::PartitionFetchState { .. }),
+            ..
+        }
     );
     let err = partition_client
         .fetch_records(offset_2, 1..10_000, 1_000)
@@ -482,7 +659,11 @@ async fn test_delete_records() {
         .unwrap_err();
     assert_matches!(
         err,
-        ClientError::ServerError(ProtocolError::OffsetOutOfRange, _)
+        ClientError::ServerError {
+            protocol_error: ProtocolError::OffsetOutOfRange,
+            response: Some(ServerErrorResponse::PartitionFetchState { .. }),
+            ..
+        }
     );
 
     // fetching untouched records still works, however the middle record batch is NOT half-deleted and still contains
@@ -524,6 +705,6 @@ pub fn large_record() -> Record {
         key: Some(b"".to_vec()),
         value: Some(vec![b'x'; 1024]),
         headers: BTreeMap::from([("foo".to_owned(), b"bar".to_vec())]),
-        timestamp: now(),
+        timestamp: Utc.timestamp_millis_opt(1337).unwrap(),
     }
 }

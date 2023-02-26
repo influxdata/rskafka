@@ -24,6 +24,8 @@ mod create_topics;
 pub use create_topics::*;
 mod delete_records;
 pub use delete_records::*;
+mod delete_topics;
+pub use delete_topics::*;
 mod fetch;
 pub use fetch::*;
 mod header;
@@ -40,6 +42,7 @@ pub use sasl_msg::*;
 mod test_utils;
 
 #[derive(Error, Debug)]
+#[non_exhaustive]
 pub enum ReadVersionedError {
     #[error("Read error: {0}")]
     ReadError(#[from] ReadError),
@@ -53,6 +56,7 @@ where
 }
 
 #[derive(Error, Debug)]
+#[non_exhaustive]
 pub enum WriteVersionedError {
     #[error("Write error: {0}")]
     WriteError(#[from] WriteError),
@@ -112,7 +116,7 @@ pub trait RequestBody {
         Self::FIRST_TAGGED_FIELD_IN_REQUEST_VERSION;
 }
 
-impl<'a, T: RequestBody> RequestBody for &T {
+impl<T: RequestBody> RequestBody for &T {
     type ResponseBody = T::ResponseBody;
     const API_KEY: ApiKey = T::API_KEY;
     const API_VERSION_RANGE: ApiVersionRange = T::API_VERSION_RANGE;

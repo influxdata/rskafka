@@ -5,6 +5,25 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 
+## 0.3.0 -- Bug Fixes, Small API Improvements
+
+### Improvements
+- assorted DX and infrastructure improvements (#116, #123, #127, #128, #135, #138, #145, #146)
+- convert some `as` casts to proper conversion (#117, #118, #120, #121)
+- make `Client::{controller,partition}_client` sync (#136)
+
+### Dependency Updates
+- `rustls-pemfile` to 1.0 (#126)
+- `uuid` to 1.0 (#131)
+
+### Bug Fixes
+- multiple cancellation and panic safety fixes (#113, #115)
+- Java interopt, esp. for Snappy-compressed messages (#108)
+- fix potential OOM cases (#138, #141)
+- remove potentially buggy Redpanda quirk (#150)
+- documentation (#151)
+
+
 ## 0.2.0 -- Essential Bug Fixes, Compression
 
 ### Breaking Changes

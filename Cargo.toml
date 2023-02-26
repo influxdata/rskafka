@@ -1,6 +1,6 @@
 [package]
 name = "rskafka"
-version = "0.2.0"
+version = "0.3.0"
 edition = "2021"
 license = "MIT/Apache-2.0"
 readme = "README.md"
@@ -21,6 +21,7 @@ documentation = "https://docs.rs/rskafka/"
 async-socks5 = { version = "0.5", optional = true }
 async-trait = "0.1"
 bytes = "1.1"
+chrono = { version = "0.4", default-features = false }
 crc32c = "0.6"
 flate2 = { version = "1", optional = true }
 futures = "0.3"
@@ -32,24 +33,23 @@ rand = "0.8"
 rustls = { version = "0.20", optional = true }
 snap = { version = "1", optional = true }
 thiserror = "1.0"
-time = "0.3"
-tokio = { version = "1.14", default-features = false, features = ["io-util", "net", "rt", "sync", "time", "macros"] }
+tokio = { version = "1.19", default-features = false, features = ["io-util", "net", "rt", "sync", "time", "macros"] }
 tokio-rustls = { version = "0.23", optional = true }
 tracing = "0.1"
-zstd = { version = "0.10", optional = true }
+zstd = { version = "0.12", optional = true }
 
 [dev-dependencies]
 assert_matches = "1.5"
-criterion = { version = "0.3", features = ["async_tokio"] }
-dotenv = "0.15"
+criterion = { version = "0.4", features = ["async_tokio"] }
+dotenvy = "0.15.1"
 futures = "0.3"
-j4rs = "0.13"
+j4rs = "0.14"
 once_cell = "1.9"
 procspawn = "0.10"
 proptest = "1"
 proptest-derive = "0.3"
 rustls-pemfile = "1.0"
-rdkafka = { version = "0.28", default-features = false, features = ["libz", "tokio", "zstd"] }
+rdkafka = { version = "0.29", default-features = false, features = ["libz", "tokio", "zstd"] }
 tokio = { version = "1.14", features = ["macros", "rt-multi-thread"] }
 tracing-log = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
@@ -82,8 +82,13 @@ transport-tls = ["rustls", "tokio-rustls"]
 
 unstable-fuzzing = []
 
+[lib]
+# For `cargo bench -- --save-baseline ...`
+# See https://github.com/bheisler/criterion.rs/issues/275.
+bench = false
+
 [[bench]]
-name = "write_throughput"
+name = "throughput"
 harness = false
 
 [workspace]

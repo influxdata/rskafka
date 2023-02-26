@@ -1,37 +1,45 @@
 use std::{
     collections::HashMap,
+    future::Future,
     io::Cursor,
     ops::DerefMut,
     sync::{
         atomic::{AtomicI32, Ordering},
-        Arc, RwLock,
+        Arc,
     },
+    task::Poll,
 };
 
+use futures::future::BoxFuture;
+use parking_lot::Mutex;
 use thiserror::Error;
 use tokio::{
     io::{AsyncRead, AsyncWrite, AsyncWriteExt, WriteHalf},
     sync::{
         oneshot::{channel, Sender},
-        Mutex,
+        Mutex as AsyncMutex,
     },
     task::JoinHandle,
 };
-use tracing::{debug, warn};
+use tracing::{debug, info, warn};
 
-use crate::protocol::{
-    api_key::ApiKey,
-    api_version::ApiVersion,
-    error::Error as ApiError,
-    frame::{AsyncMessageRead, AsyncMessageWrite},
-    messages::{
-        ReadVersionedError, ReadVersionedType, RequestBody, RequestHeader, ResponseHeader,
-        SaslAuthenticateRequest, SaslHandshakeRequest, WriteVersionedError, WriteVersionedType,
-    },
-    primitives::{Int16, Int32, NullableString, TaggedFields},
-};
 use crate::protocol::{api_version::ApiVersionRange, primitives::CompactString};
 use crate::protocol::{messages::ApiVersionsRequest, traits::ReadType};
+use crate::{
+    backoff::ErrorOrThrottle,
+    protocol::{
+        api_key::ApiKey,
+        api_version::ApiVersion,
+        error::Error as ApiError,
+        frame::{AsyncMessageRead, AsyncMessageWrite},
+        messages::{
+            ReadVersionedError, ReadVersionedType, RequestBody, RequestHeader, ResponseHeader,
+            SaslAuthenticateRequest, SaslHandshakeRequest, WriteVersionedError, WriteVersionedType,
+        },
+        primitives::{Int16, Int32, NullableString, TaggedFields},
+    },
+    throttle::maybe_throttle,
+};
 
 #[derive(Debug)]
 struct Response {
@@ -58,7 +66,7 @@ enum MessengerState {
 }
 
 impl MessengerState {
-    async fn poison(&mut self, err: RequestError) -> Arc<RequestError> {
+    fn poison(&mut self, err: RequestError) -> Arc<RequestError> {
         match self {
             Self::RequestMap(map) => {
                 let err = Arc::new(err);
@@ -92,9 +100,12 @@ pub struct Messenger<RW> {
     /// The half of the stream that we use to send data TO the broker.
     ///
     /// This will be used by [`request`](Self::request) to queue up messages.
-    stream_write: Arc<Mutex<WriteHalf<RW>>>,
+    stream_write: Arc<AsyncMutex<WriteHalf<RW>>>,
 
-    /// The next correction ID.
+    /// Client ID.
+    client_id: Arc<str>,
+
+    /// The next correlation ID.
     ///
     /// This is used to map responses to active requests.
     correlation_id: AtomicI32,
@@ -102,7 +113,7 @@ pub struct Messenger<RW> {
     /// Version ranges that we think are supported by the broker.
     ///
     /// This needs to be bootstrapped by [`sync_versions`](Self::sync_versions).
-    version_ranges: RwLock<HashMap<ApiKey, ApiVersionRange>>,
+    version_ranges: HashMap<ApiKey, ApiVersionRange>,
 
     /// Current stream state.
     ///
@@ -114,6 +125,7 @@ pub struct Messenger<RW> {
 }
 
 #[derive(Error, Debug)]
+#[non_exhaustive]
 pub enum RequestError {
     #[error("Cannot find matching version for: {api_key:?}")]
     NoVersionMatch { api_key: ApiKey },
@@ -146,11 +158,12 @@ pub enum RequestError {
     #[error("Cannot read framed message: {0}")]
     ReadFramedMessageError(#[from] crate::protocol::frame::ReadError),
 
-    #[error("Connection is poisened: {0}")]
+    #[error("Connection is poisoned: {0}")]
     Poisoned(Arc<RequestError>),
 }
 
 #[derive(Error, Debug)]
+#[non_exhaustive]
 pub enum SyncVersionsError {
     #[error("Did not found a version for ApiVersion that works with that broker")]
     NoWorkingVersion,
@@ -179,7 +192,7 @@ impl<RW> Messenger<RW>
 where
     RW: AsyncRead + AsyncWrite + Send + 'static,
 {
-    pub fn new(stream: RW, max_message_size: usize) -> Self {
+    pub fn new(stream: RW, max_message_size: usize, client_id: Arc<str>) -> Self {
         let (stream_read, stream_write) = tokio::io::split(stream);
         let state = Arc::new(Mutex::new(MessengerState::RequestMap(HashMap::default())));
         let state_captured = Arc::clone(&state);
@@ -205,7 +218,7 @@ where
                                 }
                             };
 
-                        let active_request = match state_captured.lock().await.deref_mut() {
+                        let active_request = match state_captured.lock().deref_mut() {
                             MessengerState::RequestMap(map) => {
                                 if let Some(active_request) = map.remove(&header.correlation_id.0) {
                                     active_request
@@ -250,9 +263,7 @@ where
                     Err(e) => {
                         state_captured
                             .lock()
-                            .await
-                            .poison(RequestError::ReadFramedMessageError(e))
-                            .await;
+                            .poison(RequestError::ReadFramedMessageError(e));
                         return;
                     }
                 }
@@ -260,21 +271,23 @@ where
         });
 
         Self {
-            stream_write: Arc::new(Mutex::new(stream_write)),
+            stream_write: Arc::new(AsyncMutex::new(stream_write)),
+            client_id,
             correlation_id: AtomicI32::new(0),
-            version_ranges: RwLock::new(HashMap::new()),
+            version_ranges: HashMap::new(),
             state,
             join_handle,
         }
     }
 
     #[cfg(feature = "unstable-fuzzing")]
-    pub fn override_version_ranges(&self, ranges: HashMap<ApiKey, ApiVersionRange>) {
+    pub fn override_version_ranges(&mut self, ranges: HashMap<ApiKey, ApiVersionRange>) {
         self.set_version_ranges(ranges);
     }
 
-    fn set_version_ranges(&self, ranges: HashMap<ApiKey, ApiVersionRange>) {
-        *self.version_ranges.write().expect("lock poisoned") = ranges;
+    /// Set supported version range.
+    fn set_version_ranges(&mut self, ranges: HashMap<ApiKey, ApiVersionRange>) {
+        self.version_ranges = ranges;
     }
 
     pub async fn request<R>(&self, msg: R) -> Result<R::ResponseBody, RequestError>
@@ -282,10 +295,20 @@ where
         R: RequestBody + Send + WriteVersionedType<Vec<u8>>,
         R::ResponseBody: ReadVersionedType<Cursor<Vec<u8>>>,
     {
-        let body_api_version = self
-            .version_ranges
-            .read()
-            .expect("lock poisoned")
+        self.request_with_version_ranges(msg, &self.version_ranges)
+            .await
+    }
+
+    async fn request_with_version_ranges<R>(
+        &self,
+        msg: R,
+        version_ranges: &HashMap<ApiKey, ApiVersionRange>,
+    ) -> Result<R::ResponseBody, RequestError>
+    where
+        R: RequestBody + Send + WriteVersionedType<Vec<u8>>,
+        R::ResponseBody: ReadVersionedType<Cursor<Vec<u8>>>,
+    {
+        let body_api_version = version_ranges
             .get(&R::API_KEY)
             .and_then(|range_server| match_versions(*range_server, R::API_VERSION_RANGE))
             .ok_or(RequestError::NoVersionMatch {
@@ -308,7 +331,9 @@ where
             request_api_key: R::API_KEY,
             request_api_version: body_api_version,
             correlation_id: Int32(correlation_id),
-            client_id: Some(NullableString(None)),
+            // Technically we don't need to send a client_id, but newer redpanda version fail to parse the message
+            // without it. See https://github.com/influxdata/rskafka/issues/169 .
+            client_id: Some(NullableString(Some(String::from(self.client_id.as_ref())))),
             tagged_fields: Some(TaggedFields::default()),
         };
         let header_version = if use_tagged_fields_in_request {
@@ -325,7 +350,12 @@ where
 
         let (tx, rx) = channel();
 
-        match self.state.lock().await.deref_mut() {
+        // to prevent stale data in inner state, ensure that we would remove the request again if we are cancelled while
+        // sending the request
+        let cleanup_on_cancel =
+            CleanupRequestStateOnCancel::new(Arc::clone(&self.state), correlation_id);
+
+        match self.state.lock().deref_mut() {
             MessengerState::RequestMap(map) => {
                 map.insert(
                     correlation_id,
@@ -341,6 +371,7 @@ where
         }
 
         self.send_message(buf).await?;
+        cleanup_on_cancel.message_sent();
 
         let mut response = rx.await.expect("Who closed this channel?!")?;
         let body = R::ResponseBody::read_versioned(&mut response.data, body_api_version)?;
@@ -365,8 +396,8 @@ where
             Ok(()) => Ok(()),
             Err(e) => {
                 // need to poison the stream because message framing might be out-of-sync
-                let mut state = self.state.lock().await;
-                Err(RequestError::Poisoned(state.poison(e).await))
+                let mut state = self.state.lock();
+                Err(RequestError::Poisoned(state.poison(e)))
             }
         }
     }
@@ -374,28 +405,31 @@ where
     async fn send_message_inner(&self, msg: Vec<u8>) -> Result<(), RequestError> {
         let mut stream_write = Arc::clone(&self.stream_write).lock_owned().await;
 
-        // use a task so that cancelation doesn't cancel the send operation and leaves half-send messages on the wire
-        let handle = tokio::spawn(async move {
+        // use a wrapper so that cancelation doesn't cancel the send operation and leaves half-send messages on the wire
+        let fut = CancellationSafeFuture::new(async move {
             stream_write.write_message(&msg).await?;
             stream_write.flush().await?;
             Ok(())
         });
 
-        handle.await.expect("background task died")
+        fut.await
     }
 
-    pub async fn sync_versions(&self) -> Result<(), SyncVersionsError> {
-        for upper_bound in (ApiVersionsRequest::API_VERSION_RANGE.min().0 .0
+    /// Sync supported version range.
+    ///
+    /// Takes `&self mut` to ensure exclusive access.
+    pub async fn sync_versions(&mut self) -> Result<(), SyncVersionsError> {
+        'iter_upper_bound: for upper_bound in (ApiVersionsRequest::API_VERSION_RANGE.min().0 .0
             ..=ApiVersionsRequest::API_VERSION_RANGE.max().0 .0)
             .rev()
         {
-            self.set_version_ranges(HashMap::from([(
+            let version_ranges = HashMap::from([(
                 ApiKey::ApiVersions,
                 ApiVersionRange::new(
                     ApiVersionsRequest::API_VERSION_RANGE.min(),
                     ApiVersion(Int16(upper_bound)),
                 ),
-            )]));
+            )]);
 
             let body = ApiVersionsRequest {
                 client_software_name: Some(CompactString(String::from(env!("CARGO_PKG_NAME")))),
@@ -405,74 +439,91 @@ where
                 tagged_fields: Some(TaggedFields::default()),
             };
 
-            match self.request(body).await {
-                Ok(response) => {
-                    if let Some(e) = response.error_code {
+            'throttle: loop {
+                match self
+                    .request_with_version_ranges(&body, &version_ranges)
+                    .await
+                {
+                    Ok(response) => {
+                        if let Err(ErrorOrThrottle::Throttle(throttle)) =
+                            maybe_throttle::<SyncVersionsError>(response.throttle_time_ms)
+                        {
+                            info!(
+                                ?throttle,
+                                request_name = "version sync",
+                                "broker asked us to throttle"
+                            );
+                            tokio::time::sleep(throttle).await;
+                            continue 'throttle;
+                        }
+
+                        if let Some(e) = response.error_code {
+                            debug!(
+                                %e,
+                                version=upper_bound,
+                                "Got error during version sync, cannot use version for ApiVersionRequest",
+                            );
+                            continue 'iter_upper_bound;
+                        }
+
+                        // check range sanity
+                        for api_key in &response.api_keys {
+                            if api_key.min_version.0 > api_key.max_version.0 {
+                                return Err(SyncVersionsError::FlippedVersionRange {
+                                    api_key: api_key.api_key,
+                                    min: api_key.min_version,
+                                    max: api_key.max_version,
+                                });
+                            }
+                        }
+
+                        let ranges = response
+                            .api_keys
+                            .into_iter()
+                            .map(|x| {
+                                (
+                                    x.api_key,
+                                    ApiVersionRange::new(x.min_version, x.max_version),
+                                )
+                            })
+                            .collect();
+                        debug!(
+                            versions=%sorted_ranges_repr(&ranges),
+                            "Detected supported broker versions",
+                        );
+                        self.set_version_ranges(ranges);
+                        return Ok(());
+                    }
+                    Err(RequestError::NoVersionMatch { .. }) => {
+                        unreachable!("Just set to version range to a non-empty range")
+                    }
+                    Err(RequestError::ReadVersionedError(e)) => {
                         debug!(
                             %e,
                             version=upper_bound,
-                            "Got error during version sync, cannot use version for ApiVersionRequest",
+                            "Cannot read ApiVersionResponse for version",
                         );
-                        continue;
+                        continue 'iter_upper_bound;
                     }
-
-                    // check range sanity
-                    for api_key in &response.api_keys {
-                        if api_key.min_version.0 > api_key.max_version.0 {
-                            return Err(SyncVersionsError::FlippedVersionRange {
-                                api_key: api_key.api_key,
-                                min: api_key.min_version,
-                                max: api_key.max_version,
-                            });
-                        }
+                    Err(RequestError::ReadError(e)) => {
+                        debug!(
+                            %e,
+                            version=upper_bound,
+                            "Cannot read ApiVersionResponse for version",
+                        );
+                        continue 'iter_upper_bound;
                     }
-
-                    let ranges = response
-                        .api_keys
-                        .into_iter()
-                        .map(|x| {
-                            (
-                                x.api_key,
-                                ApiVersionRange::new(x.min_version, x.max_version),
-                            )
-                        })
-                        .collect();
-                    debug!(
-                        versions=%sorted_ranges_repr(&ranges),
-                        "Detected supported broker versions",
-                    );
-                    self.set_version_ranges(ranges);
-                    return Ok(());
-                }
-                Err(RequestError::NoVersionMatch { .. }) => {
-                    unreachable!("Just set to version range to a non-empty range")
-                }
-                Err(RequestError::ReadVersionedError(e)) => {
-                    debug!(
-                        %e,
-                        version=upper_bound,
-                        "Cannot read ApiVersionResponse for version",
-                    );
-                    continue;
-                }
-                Err(RequestError::ReadError(e)) => {
-                    debug!(
-                        %e,
-                        version=upper_bound,
-                        "Cannot read ApiVersionResponse for version",
-                    );
-                    continue;
-                }
-                Err(e @ RequestError::TooMuchData { .. }) => {
-                    debug!(
-                        %e,
-                        version=upper_bound,
-                        "Cannot read ApiVersionResponse for version",
-                    );
-                    continue;
-                }
-                Err(e) => {
-                    return Err(SyncVersionsError::RequestError(e));
+                    Err(e @ RequestError::TooMuchData { .. }) => {
+                        debug!(
+                            %e,
+                            version=upper_bound,
+                            "Cannot read ApiVersionResponse for version",
+                        );
+                        continue 'iter_upper_bound;
+                    }
+                    Err(e) => {
+                        return Err(SyncVersionsError::RequestError(e));
+                    }
                 }
             }
         }
@@ -526,9 +577,109 @@ fn match_versions(range_a: ApiVersionRange, range_b: ApiVersionRange) -> Option<
     }
 }
 
+/// Helper that ensures that a request is removed when a request is cancelled before it was actually sent out.
+struct CleanupRequestStateOnCancel {
+    state: Arc<Mutex<MessengerState>>,
+    correlation_id: i32,
+    message_sent: bool,
+}
+
+impl CleanupRequestStateOnCancel {
+    /// Create new helper.
+    ///
+    /// You must call [`message_sent`](Self::message_sent) when the request was sent.
+    fn new(state: Arc<Mutex<MessengerState>>, correlation_id: i32) -> Self {
+        Self {
+            state,
+            correlation_id,
+            message_sent: false,
+        }
+    }
+
+    /// Request was sent. Do NOT clean the state any longer.
+    fn message_sent(mut self) {
+        self.message_sent = true;
+    }
+}
+
+impl Drop for CleanupRequestStateOnCancel {
+    fn drop(&mut self) {
+        if !self.message_sent {
+            if let MessengerState::RequestMap(map) = self.state.lock().deref_mut() {
+                map.remove(&self.correlation_id);
+            }
+        }
+    }
+}
+
+/// Wrapper around a future that cannot be cancelled.
+///
+/// When the future is dropped/cancelled, we'll spawn a tokio task to _rescue_ it.
+struct CancellationSafeFuture<F>
+where
+    F: Future + Send + 'static,
+{
+    /// Mark if the inner future finished. If not, we must spawn a helper task on drop.
+    done: bool,
+
+    /// Inner future.
+    ///
+    /// Wrapped in an `Option` so we can extract it during drop. Inside that option however we also need a pinned
+    /// box because once this wrapper is polled, it will be pinned in memory -- even during drop. Now the inner
+    /// future does not necessarily implement `Unpin`, so we need a heap allocation to pin it in memory even when we
+    /// move it out of this option.
+    inner: Option<BoxFuture<'static, F::Output>>,
+}
+
+impl<F> Drop for CancellationSafeFuture<F>
+where
+    F: Future + Send + 'static,
+{
+    fn drop(&mut self) {
+        if !self.done {
+            let inner = self.inner.take().expect("Double-drop?");
+            tokio::task::spawn(async move {
+                inner.await;
+            });
+        }
+    }
+}
+
+impl<F> CancellationSafeFuture<F>
+where
+    F: Future + Send,
+{
+    fn new(fut: F) -> Self {
+        Self {
+            done: false,
+            inner: Some(Box::pin(fut)),
+        }
+    }
+}
+
+impl<F> Future for CancellationSafeFuture<F>
+where
+    F: Future + Send,
+{
+    type Output = F::Output;
+
+    fn poll(
+        mut self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> Poll<Self::Output> {
+        match self.inner.as_mut().expect("no dropped").as_mut().poll(cx) {
+            Poll::Ready(res) => {
+                self.done = true;
+                Poll::Ready(res)
+            }
+            Poll::Pending => Poll::Pending,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use std::{ops::Deref, time::Duration};
+    use std::time::Duration;
 
     use assert_matches::assert_matches;
     use futures::{pin_mut, FutureExt};
@@ -539,12 +690,15 @@ mod tests {
 
     use super::*;
 
-    use crate::protocol::{
-        error::Error as ApiError,
-        messages::{
-            ApiVersionsResponse, ApiVersionsResponseApiKey, ListOffsetsRequest, NORMAL_CONSUMER,
+    use crate::{
+        build_info::DEFAULT_CLIENT_ID,
+        protocol::{
+            error::Error as ApiError,
+            messages::{
+                ApiVersionsResponse, ApiVersionsResponseApiKey, ListOffsetsRequest, NORMAL_CONSUMER,
+            },
+            traits::WriteType,
         },
-        traits::WriteType,
     };
 
     #[test]
@@ -585,7 +739,7 @@ mod tests {
     #[tokio::test]
     async fn test_sync_versions_ok() {
         let (sim, rx) = MessageSimulator::new();
-        let messenger = Messenger::new(rx, 1_000);
+        let mut messenger = Messenger::new(rx, 1_000, Arc::from(DEFAULT_CLIENT_ID));
 
         // construct response
         let mut msg = vec![];
@@ -616,13 +770,13 @@ mod tests {
             (ApiKey::Produce),
             ApiVersionRange::new(ApiVersion(Int16(1)), ApiVersion(Int16(5))),
         )]);
-        assert_eq!(messenger.version_ranges.read().unwrap().deref(), &expected);
+        assert_eq!(messenger.version_ranges, expected);
     }
 
     #[tokio::test]
     async fn test_sync_versions_ignores_error_code() {
         let (sim, rx) = MessageSimulator::new();
-        let messenger = Messenger::new(rx, 1_000);
+        let mut messenger = Messenger::new(rx, 1_000, Arc::from(DEFAULT_CLIENT_ID));
 
         // construct error response
         let mut msg = vec![];
@@ -679,13 +833,13 @@ mod tests {
             (ApiKey::Produce),
             ApiVersionRange::new(ApiVersion(Int16(1)), ApiVersion(Int16(5))),
         )]);
-        assert_eq!(messenger.version_ranges.read().unwrap().deref(), &expected);
+        assert_eq!(messenger.version_ranges, expected);
     }
 
     #[tokio::test]
     async fn test_sync_versions_ignores_read_code() {
         let (sim, rx) = MessageSimulator::new();
-        let messenger = Messenger::new(rx, 1_000);
+        let mut messenger = Messenger::new(rx, 1_000, Arc::from(DEFAULT_CLIENT_ID));
 
         // construct error response
         let mut msg = vec![];
@@ -730,13 +884,13 @@ mod tests {
             (ApiKey::Produce),
             ApiVersionRange::new(ApiVersion(Int16(1)), ApiVersion(Int16(5))),
         )]);
-        assert_eq!(messenger.version_ranges.read().unwrap().deref(), &expected);
+        assert_eq!(messenger.version_ranges, expected);
     }
 
     #[tokio::test]
     async fn test_sync_versions_err_flipped_range() {
         let (sim, rx) = MessageSimulator::new();
-        let messenger = Messenger::new(rx, 1_000);
+        let mut messenger = Messenger::new(rx, 1_000, Arc::from(DEFAULT_CLIENT_ID));
 
         // construct response
         let mut msg = vec![];
@@ -769,7 +923,7 @@ mod tests {
     #[tokio::test]
     async fn test_sync_versions_ignores_garbage() {
         let (sim, rx) = MessageSimulator::new();
-        let messenger = Messenger::new(rx, 1_000);
+        let mut messenger = Messenger::new(rx, 1_000, Arc::from(DEFAULT_CLIENT_ID));
 
         // construct response
         let mut msg = vec![];
@@ -827,13 +981,13 @@ mod tests {
             (ApiKey::Produce),
             ApiVersionRange::new(ApiVersion(Int16(1)), ApiVersion(Int16(5))),
         )]);
-        assert_eq!(messenger.version_ranges.read().unwrap().deref(), &expected);
+        assert_eq!(messenger.version_ranges, expected);
     }
 
     #[tokio::test]
     async fn test_sync_versions_err_no_working_version() {
         let (sim, rx) = MessageSimulator::new();
-        let messenger = Messenger::new(rx, 1_000);
+        let mut messenger = Messenger::new(rx, 1_000, Arc::from(DEFAULT_CLIENT_ID));
 
         // construct error response
         for (i, v) in ((ApiVersionsRequest::API_VERSION_RANGE.min().0 .0)
@@ -872,7 +1026,7 @@ mod tests {
     #[tokio::test]
     async fn test_poison_hangup() {
         let (sim, rx) = MessageSimulator::new();
-        let messenger = Messenger::new(rx, 1_000);
+        let mut messenger = Messenger::new(rx, 1_000, Arc::from(DEFAULT_CLIENT_ID));
         messenger.set_version_ranges(HashMap::from([(
             ApiKey::ListOffsets,
             ListOffsetsRequest::API_VERSION_RANGE,
@@ -894,7 +1048,7 @@ mod tests {
     #[tokio::test]
     async fn test_poison_negative_message_size() {
         let (sim, rx) = MessageSimulator::new();
-        let messenger = Messenger::new(rx, 1_000);
+        let mut messenger = Messenger::new(rx, 1_000, Arc::from(DEFAULT_CLIENT_ID));
         messenger.set_version_ranges(HashMap::from([(
             ApiKey::ListOffsets,
             ListOffsetsRequest::API_VERSION_RANGE,
@@ -927,7 +1081,7 @@ mod tests {
     #[tokio::test]
     async fn test_broken_msg_header_does_not_poison() {
         let (sim, rx) = MessageSimulator::new();
-        let messenger = Messenger::new(rx, 1_000);
+        let mut messenger = Messenger::new(rx, 1_000, Arc::from(DEFAULT_CLIENT_ID));
         messenger.set_version_ranges(HashMap::from([(
             ApiKey::ApiVersions,
             ApiVersionsRequest::API_VERSION_RANGE,
@@ -972,7 +1126,7 @@ mod tests {
         let (tx_front, rx_middle) = tokio::io::duplex(1);
         let (tx_middle, mut rx_back) = tokio::io::duplex(1);
 
-        let messenger = Messenger::new(tx_front, 1_000);
+        let mut messenger = Messenger::new(tx_front, 1_000, Arc::from(DEFAULT_CLIENT_ID));
 
         // create two barriers:
         // - pause: will be passed after 3 bytes were sent by the client
@@ -1031,7 +1185,7 @@ mod tests {
                         request_api_key: ApiKey::ApiVersions,
                         request_api_version: ApiVersion(Int16(0)),
                         correlation_id: Int32(correlation_id),
-                        client_id: Some(NullableString(None)),
+                        client_id: Some(NullableString(Some(String::from(env!("CARGO_PKG_NAME"))))),
                         tagged_fields: None,
                     }
                 );

@@ -199,7 +199,12 @@ where
         assert!(v <= 5);
 
         self.partition_index.write(writer)?;
-        self.broker_ids.write(writer)?;
+
+        if v >= 5 {
+            CompactArrayRef(self.broker_ids.0.as_deref()).write(writer)?;
+        } else {
+            self.broker_ids.write(writer)?;
+        }
 
         if v >= 5 {
             match self.tagged_fields.as_ref() {

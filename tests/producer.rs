@@ -1,5 +1,6 @@
 use futures::{future::FusedFuture, pin_mut, FutureExt};
 use rskafka::client::{
+    partition::UnknownTopicHandling,
     producer::{aggregator::RecordAggregator, BatchProducerBuilder},
     ClientBuilder,
 };
@@ -13,8 +14,11 @@ use test_helpers::{maybe_start_logging, random_topic_name, record};
 async fn test_batch_producer() {
     maybe_start_logging();
 
-    let connection = maybe_skip_kafka_integration!();
-    let client = ClientBuilder::new(vec![connection]).build().await.unwrap();
+    let test_cfg = maybe_skip_kafka_integration!();
+    let client = ClientBuilder::new(test_cfg.bootstrap_brokers)
+        .build()
+        .await
+        .unwrap();
     let controller_client = client.controller_client().unwrap();
 
     let topic = random_topic_name();
@@ -25,7 +29,13 @@ async fn test_batch_producer() {
 
     let record = record(b"");
 
-    let partition_client = Arc::new(client.partition_client(&topic, 0).unwrap());
+    let partition_client = Arc::new(
+        client
+            .partition_client(&topic, 0, UnknownTopicHandling::Retry)
+            .await
+            .unwrap(),
+    );
+
     let producer = BatchProducerBuilder::new(partition_client)
         .with_linger(Duration::from_secs(5))
         .build(RecordAggregator::new(record.approximate_size() * 2 + 1));

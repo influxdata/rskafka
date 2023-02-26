@@ -9,12 +9,12 @@ use rskafka::{
     client::{
         consumer::{StartOffset, StreamConsumer, StreamConsumerBuilder},
         error::{Error, ProtocolError},
-        partition::Compression,
+        partition::{Compression, UnknownTopicHandling},
         ClientBuilder,
     },
     record::RecordAndOffset,
 };
-use test_helpers::{maybe_start_logging, random_topic_name, record};
+use test_helpers::{maybe_start_logging, random_topic_name, record, TEST_TIMEOUT};
 
 mod test_helpers;
 
@@ -22,8 +22,11 @@ mod test_helpers;
 async fn test_stream_consumer_start_at_0() {
     maybe_start_logging();
 
-    let connection = maybe_skip_kafka_integration!();
-    let client = ClientBuilder::new(vec![connection]).build().await.unwrap();
+    let test_cfg = maybe_skip_kafka_integration!();
+    let client = ClientBuilder::new(test_cfg.bootstrap_brokers)
+        .build()
+        .await
+        .unwrap();
     let controller_client = client.controller_client().unwrap();
 
     let topic = random_topic_name();
@@ -34,7 +37,12 @@ async fn test_stream_consumer_start_at_0() {
 
     let record = record(b"x");
 
-    let partition_client = Arc::new(client.partition_client(&topic, 0).unwrap());
+    let partition_client = Arc::new(
+        client
+            .partition_client(&topic, 0, UnknownTopicHandling::Retry)
+            .await
+            .unwrap(),
+    );
     partition_client
         .produce(vec![record.clone()], Compression::NoCompression)
         .await
@@ -45,7 +53,7 @@ async fn test_stream_consumer_start_at_0() {
         .build();
 
     // Fetch first record
-    assert_ok(timeout(Duration::from_millis(100), stream.next()).await);
+    assert_ok(timeout(TEST_TIMEOUT, stream.next()).await);
 
     // No further records
     assert_stream_pending(&mut stream).await;
@@ -59,10 +67,10 @@ async fn test_stream_consumer_start_at_0() {
         .unwrap();
 
     // Get second record
-    assert_ok(timeout(Duration::from_millis(100), stream.next()).await);
+    assert_ok(timeout(TEST_TIMEOUT, stream.next()).await);
 
     // Get third record
-    assert_ok(timeout(Duration::from_millis(100), stream.next()).await);
+    assert_ok(timeout(TEST_TIMEOUT, stream.next()).await);
 
     // No further records
     assert_stream_pending(&mut stream).await;
@@ -72,8 +80,11 @@ async fn test_stream_consumer_start_at_0() {
 async fn test_stream_consumer_start_at_1() {
     maybe_start_logging();
 
-    let connection = maybe_skip_kafka_integration!();
-    let client = ClientBuilder::new(vec![connection]).build().await.unwrap();
+    let test_cfg = maybe_skip_kafka_integration!();
+    let client = ClientBuilder::new(test_cfg.bootstrap_brokers)
+        .build()
+        .await
+        .unwrap();
     let controller_client = client.controller_client().unwrap();
 
     let topic = random_topic_name();
@@ -85,7 +96,12 @@ async fn test_stream_consumer_start_at_1() {
     let record_1 = record(b"x");
     let record_2 = record(b"y");
 
-    let partition_client = Arc::new(client.partition_client(&topic, 0).unwrap());
+    let partition_client = Arc::new(
+        client
+            .partition_client(&topic, 0, UnknownTopicHandling::Retry)
+            .await
+            .unwrap(),
+    );
     partition_client
         .produce(
             vec![record_1.clone(), record_2.clone()],
@@ -99,8 +115,7 @@ async fn test_stream_consumer_start_at_1() {
         .build();
 
     // Skips first record
-    let (record_and_offset, _watermark) =
-        assert_ok(timeout(Duration::from_millis(100), stream.next()).await);
+    let (record_and_offset, _watermark) = assert_ok(timeout(TEST_TIMEOUT, stream.next()).await);
     assert_eq!(record_and_offset.record, record_2);
 
     // No further records
@@ -111,8 +126,11 @@ async fn test_stream_consumer_start_at_1() {
 async fn test_stream_consumer_offset_out_of_range() {
     maybe_start_logging();
 
-    let connection = maybe_skip_kafka_integration!();
-    let client = ClientBuilder::new(vec![connection]).build().await.unwrap();
+    let test_cfg = maybe_skip_kafka_integration!();
+    let client = ClientBuilder::new(test_cfg.bootstrap_brokers)
+        .build()
+        .await
+        .unwrap();
     let controller_client = client.controller_client().unwrap();
 
     let topic = random_topic_name();
@@ -121,14 +139,22 @@ async fn test_stream_consumer_offset_out_of_range() {
         .await
         .unwrap();
 
-    let partition_client = Arc::new(client.partition_client(&topic, 0).unwrap());
+    let partition_client = Arc::new(
+        client
+            .partition_client(&topic, 0, UnknownTopicHandling::Retry)
+            .await
+            .unwrap(),
+    );
 
     let mut stream = StreamConsumerBuilder::new(partition_client, StartOffset::At(1)).build();
 
     let error = stream.next().await.expect("stream not empty").unwrap_err();
     assert_matches!(
         error,
-        Error::ServerError(ProtocolError::OffsetOutOfRange, _)
+        Error::ServerError {
+            protocol_error: ProtocolError::OffsetOutOfRange,
+            ..
+        }
     );
 
     // stream ends
@@ -139,8 +165,11 @@ async fn test_stream_consumer_offset_out_of_range() {
 async fn test_stream_consumer_start_at_earliest() {
     maybe_start_logging();
 
-    let connection = maybe_skip_kafka_integration!();
-    let client = ClientBuilder::new(vec![connection]).build().await.unwrap();
+    let test_cfg = maybe_skip_kafka_integration!();
+    let client = ClientBuilder::new(test_cfg.bootstrap_brokers)
+        .build()
+        .await
+        .unwrap();
     let controller_client = client.controller_client().unwrap();
 
     let topic = random_topic_name();
@@ -152,7 +181,12 @@ async fn test_stream_consumer_start_at_earliest() {
     let record_1 = record(b"x");
     let record_2 = record(b"y");
 
-    let partition_client = Arc::new(client.partition_client(&topic, 0).unwrap());
+    let partition_client = Arc::new(
+        client
+            .partition_client(&topic, 0, UnknownTopicHandling::Retry)
+            .await
+            .unwrap(),
+    );
     partition_client
         .produce(vec![record_1.clone()], Compression::NoCompression)
         .await
@@ -164,8 +198,7 @@ async fn test_stream_consumer_start_at_earliest() {
             .build();
 
     // Fetch first record
-    let (record_and_offset, _) =
-        assert_ok(timeout(Duration::from_millis(100), stream.next()).await);
+    let (record_and_offset, _) = assert_ok(timeout(TEST_TIMEOUT, stream.next()).await);
     assert_eq!(record_and_offset.record, record_1);
 
     // No further records
@@ -177,8 +210,7 @@ async fn test_stream_consumer_start_at_earliest() {
         .unwrap();
 
     // Get second record
-    let (record_and_offset, _) =
-        assert_ok(timeout(Duration::from_millis(100), stream.next()).await);
+    let (record_and_offset, _) = assert_ok(timeout(TEST_TIMEOUT, stream.next()).await);
     assert_eq!(record_and_offset.record, record_2);
 
     // No further records
@@ -189,8 +221,11 @@ async fn test_stream_consumer_start_at_earliest() {
 async fn test_stream_consumer_start_at_earliest_empty() {
     maybe_start_logging();
 
-    let connection = maybe_skip_kafka_integration!();
-    let client = ClientBuilder::new(vec![connection]).build().await.unwrap();
+    let test_cfg = maybe_skip_kafka_integration!();
+    let client = ClientBuilder::new(test_cfg.bootstrap_brokers)
+        .build()
+        .await
+        .unwrap();
     let controller_client = client.controller_client().unwrap();
 
     let topic = random_topic_name();
@@ -201,7 +236,12 @@ async fn test_stream_consumer_start_at_earliest_empty() {
 
     let record = record(b"x");
 
-    let partition_client = Arc::new(client.partition_client(&topic, 0).unwrap());
+    let partition_client = Arc::new(
+        client
+            .partition_client(&topic, 0, UnknownTopicHandling::Retry)
+            .await
+            .unwrap(),
+    );
 
     let mut stream =
         StreamConsumerBuilder::new(Arc::clone(&partition_client), StartOffset::Earliest)
@@ -217,8 +257,7 @@ async fn test_stream_consumer_start_at_earliest_empty() {
         .unwrap();
 
     // Get second record
-    let (record_and_offset, _) =
-        assert_ok(timeout(Duration::from_millis(200), stream.next()).await);
+    let (record_and_offset, _) = assert_ok(timeout(TEST_TIMEOUT, stream.next()).await);
     assert_eq!(record_and_offset.record, record);
 
     // No further records
@@ -229,8 +268,16 @@ async fn test_stream_consumer_start_at_earliest_empty() {
 async fn test_stream_consumer_start_at_earliest_after_deletion() {
     maybe_start_logging();
 
-    let connection = maybe_skip_kafka_integration!();
-    let client = ClientBuilder::new(vec![connection]).build().await.unwrap();
+    let test_cfg = maybe_skip_kafka_integration!(delete);
+    if !test_cfg.broker_impl.supports_deletes() {
+        println!("Skipping due to missing delete support");
+        return;
+    }
+
+    let client = ClientBuilder::new(test_cfg.bootstrap_brokers)
+        .build()
+        .await
+        .unwrap();
     let controller_client = client.controller_client().unwrap();
 
     let topic = random_topic_name();
@@ -242,7 +289,12 @@ async fn test_stream_consumer_start_at_earliest_after_deletion() {
     let record_1 = record(b"x");
     let record_2 = record(b"y");
 
-    let partition_client = Arc::new(client.partition_client(&topic, 0).unwrap());
+    let partition_client = Arc::new(
+        client
+            .partition_client(&topic, 0, UnknownTopicHandling::Retry)
+            .await
+            .unwrap(),
+    );
     partition_client
         .produce(
             vec![record_1.clone(), record_2.clone()],
@@ -251,7 +303,7 @@ async fn test_stream_consumer_start_at_earliest_after_deletion() {
         .await
         .unwrap();
 
-    maybe_skip_delete!(partition_client, 1);
+    partition_client.delete_records(1, 1_000).await.unwrap();
 
     let mut stream =
         StreamConsumerBuilder::new(Arc::clone(&partition_client), StartOffset::Earliest)
@@ -259,8 +311,7 @@ async fn test_stream_consumer_start_at_earliest_after_deletion() {
             .build();
 
     // First record skipped / deleted
-    let (record_and_offset, _) =
-        assert_ok(timeout(Duration::from_millis(100), stream.next()).await);
+    let (record_and_offset, _) = assert_ok(timeout(TEST_TIMEOUT, stream.next()).await);
     assert_eq!(record_and_offset.record, record_2);
 
     // No further records
@@ -271,8 +322,11 @@ async fn test_stream_consumer_start_at_earliest_after_deletion() {
 async fn test_stream_consumer_start_at_latest() {
     maybe_start_logging();
 
-    let connection = maybe_skip_kafka_integration!();
-    let client = ClientBuilder::new(vec![connection]).build().await.unwrap();
+    let test_cfg = maybe_skip_kafka_integration!();
+    let client = ClientBuilder::new(test_cfg.bootstrap_brokers)
+        .build()
+        .await
+        .unwrap();
     let controller_client = client.controller_client().unwrap();
 
     let topic = random_topic_name();
@@ -284,7 +338,12 @@ async fn test_stream_consumer_start_at_latest() {
     let record_1 = record(b"x");
     let record_2 = record(b"y");
 
-    let partition_client = Arc::new(client.partition_client(&topic, 0).unwrap());
+    let partition_client = Arc::new(
+        client
+            .partition_client(&topic, 0, UnknownTopicHandling::Retry)
+            .await
+            .unwrap(),
+    );
     partition_client
         .produce(vec![record_1.clone()], Compression::NoCompression)
         .await
@@ -303,8 +362,7 @@ async fn test_stream_consumer_start_at_latest() {
         .unwrap();
 
     // Get second record
-    let (record_and_offset, _) =
-        assert_ok(timeout(Duration::from_millis(100), stream.next()).await);
+    let (record_and_offset, _) = assert_ok(timeout(TEST_TIMEOUT, stream.next()).await);
     assert_eq!(record_and_offset.record, record_2);
 
     // No further records
@@ -315,8 +373,11 @@ async fn test_stream_consumer_start_at_latest() {
 async fn test_stream_consumer_start_at_latest_empty() {
     maybe_start_logging();
 
-    let connection = maybe_skip_kafka_integration!();
-    let client = ClientBuilder::new(vec![connection]).build().await.unwrap();
+    let test_cfg = maybe_skip_kafka_integration!();
+    let client = ClientBuilder::new(test_cfg.bootstrap_brokers)
+        .build()
+        .await
+        .unwrap();
     let controller_client = client.controller_client().unwrap();
 
     let topic = random_topic_name();
@@ -327,7 +388,12 @@ async fn test_stream_consumer_start_at_latest_empty() {
 
     let record = record(b"x");
 
-    let partition_client = Arc::new(client.partition_client(&topic, 0).unwrap());
+    let partition_client = Arc::new(
+        client
+            .partition_client(&topic, 0, UnknownTopicHandling::Retry)
+            .await
+            .unwrap(),
+    );
 
     let mut stream = StreamConsumerBuilder::new(Arc::clone(&partition_client), StartOffset::Latest)
         .with_max_wait_ms(50)
@@ -342,8 +408,7 @@ async fn test_stream_consumer_start_at_latest_empty() {
         .unwrap();
 
     // Get second record
-    let (record_and_offset, _) =
-        assert_ok(timeout(Duration::from_millis(100), stream.next()).await);
+    let (record_and_offset, _) = assert_ok(timeout(TEST_TIMEOUT, stream.next()).await);
     assert_eq!(record_and_offset.record, record);
 
     // No further records
@@ -368,6 +433,6 @@ where
 {
     tokio::select! {
         e = stream.next() => panic!("stream is not pending, yielded: {e:?}"),
-        _ = tokio::time::sleep(Duration::from_millis(200)) => {},
+        _ = tokio::time::sleep(Duration::from_secs(1)) => {},
     };
 }

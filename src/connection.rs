@@ -6,12 +6,18 @@ use thiserror::Error;
 use tokio::{io::BufStream, sync::Mutex};
 use tracing::{debug, error, info, warn};
 
-use crate::backoff::{Backoff, BackoffConfig, BackoffError};
+use crate::backoff::ErrorOrThrottle;
+use crate::client::metadata_cache::MetadataCacheGeneration;
 use crate::connection::topology::{Broker, BrokerTopology};
 use crate::connection::transport::Transport;
 use crate::messenger::{Messenger, RequestError};
 use crate::protocol::messages::{MetadataRequest, MetadataRequestTopic, MetadataResponse};
 use crate::protocol::primitives::String_;
+use crate::throttle::maybe_throttle;
+use crate::{
+    backoff::{Backoff, BackoffConfig, BackoffError},
+    client::metadata_cache::MetadataCache,
+};
 
 pub use self::transport::SaslConfig;
 pub use self::transport::TlsConfig;
@@ -24,6 +30,7 @@ pub type BrokerConnection = Arc<MessengerTransport>;
 pub type MessengerTransport = Messenger<BufStream<transport::Transport>>;
 
 #[derive(Debug, Error)]
+#[non_exhaustive]
 pub enum Error {
     #[error("error getting cluster metadata: {0}")]
     Metadata(#[from] RequestError),
@@ -53,11 +60,35 @@ trait ConnectionHandler {
 
     async fn connect(
         &self,
+        client_id: Arc<str>,
         tls_config: TlsConfig,
         socks5_proxy: Option<String>,
         sasl_config: Option<SaslConfig>,
         max_message_size: usize,
     ) -> Result<Arc<Self::R>>;
+}
+
+/// Defines the possible request modes of metadata retrieval.
+pub enum MetadataLookupMode<B = BrokerConnection> {
+    /// Perform a metadata request using an arbitrary, cached broker connection.
+    ArbitraryBroker,
+    /// Request metadata using the specified [`BrokerCache`] implementation.
+    SpecificBroker(B),
+    /// Use cached metadata from an arbitrary broker (if available).
+    ///
+    /// If a cached entry is not available, the request is satisfied as if
+    /// [`MetadataLookupMode::ArbitraryBroker`] was specified.
+    CachedArbitrary,
+}
+
+impl<B> std::fmt::Display for MetadataLookupMode<B> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::ArbitraryBroker => write!(f, "ArbitraryBroker"),
+            Self::SpecificBroker(_) => f.debug_tuple("SpecificBroker").field(&"...").finish(),
+            Self::CachedArbitrary => write!(f, "CachedArbitrary"),
+        }
+    }
 }
 
 /// Info needed to connect to a broker, with [optional broker ID](Self::id) for debugging
@@ -72,15 +103,15 @@ enum BrokerRepresentation {
 impl BrokerRepresentation {
     fn id(&self) -> Option<i32> {
         match self {
-            BrokerRepresentation::Bootstrap(_) => None,
-            BrokerRepresentation::Topology(broker) => Some(broker.id),
+            Self::Bootstrap(_) => None,
+            Self::Topology(broker) => Some(broker.id),
         }
     }
 
     fn url(&self) -> String {
         match self {
-            BrokerRepresentation::Bootstrap(inner) => inner.clone(),
-            BrokerRepresentation::Topology(broker) => broker.to_string(),
+            Self::Bootstrap(inner) => inner.clone(),
+            Self::Topology(broker) => broker.to_string(),
         }
     }
 }
@@ -91,6 +122,7 @@ impl ConnectionHandler for BrokerRepresentation {
 
     async fn connect(
         &self,
+        client_id: Arc<str>,
         tls_config: TlsConfig,
         socks5_proxy: Option<String>,
         sasl_config: Option<SaslConfig>,
@@ -109,14 +141,14 @@ impl ConnectionHandler for BrokerRepresentation {
                 error,
             })?;
 
-        let messenger = Arc::new(Messenger::new(BufStream::new(transport), max_message_size));
+        let mut messenger = Messenger::new(BufStream::new(transport), max_message_size, client_id);
         messenger.sync_versions().await?;
         if let Some(sasl_config) = sasl_config {
             messenger
                 .sasl_handshake(sasl_config.mechanism(), sasl_config.auth_bytes())
                 .await?;
         }
-        Ok(messenger)
+        Ok(Arc::new(messenger))
     }
 }
 
@@ -130,13 +162,21 @@ pub struct BrokerConnector {
     /// Broker URLs used to boostrap this pool
     bootstrap_brokers: Vec<String>,
 
+    /// Client ID.
+    client_id: Arc<str>,
+
     /// Discovered brokers in the cluster, including bootstrap brokers
     topology: BrokerTopology,
 
     /// The cached arbitrary broker.
     ///
     /// This one is used for metadata queries.
-    cached_arbitrary_broker: Mutex<Option<BrokerConnection>>,
+    cached_arbitrary_broker: Mutex<(Option<BrokerConnection>, BrokerCacheGeneration)>,
+
+    /// A cache of [`MetadataResponse`].
+    ///
+    /// Used during leader discovery.
+    cached_metadata: MetadataCache,
 
     /// The backoff configuration on error
     backoff_config: BackoffConfig,
@@ -157,6 +197,7 @@ pub struct BrokerConnector {
 impl BrokerConnector {
     pub fn new(
         bootstrap_brokers: Vec<String>,
+        client_id: Arc<str>,
         tls_config: TlsConfig,
         socks5_proxy: Option<String>,
         sasl_config: Option<SaslConfig>,
@@ -164,8 +205,10 @@ impl BrokerConnector {
     ) -> Self {
         Self {
             bootstrap_brokers,
+            client_id,
             topology: Default::default(),
-            cached_arbitrary_broker: Mutex::new(None),
+            cached_arbitrary_broker: Mutex::new((None, BrokerCacheGeneration::START)),
+            cached_metadata: Default::default(),
             backoff_config: Default::default(),
             tls_config,
             socks5_proxy,
@@ -174,10 +217,11 @@ impl BrokerConnector {
         }
     }
 
-    /// Fetch and cache broker metadata
+    /// Fetch and cache metadata
     pub async fn refresh_metadata(&self) -> Result<()> {
-        // Not interested in topic metadata
-        self.request_metadata(None, Some(vec![])).await?;
+        self.request_metadata(&MetadataLookupMode::ArbitraryBroker, None)
+            .await?;
+
         Ok(())
     }
 
@@ -187,13 +231,42 @@ impl BrokerConnector {
     ///
     /// If `broker_override` is provided this will request metadata from that specific broker.
     ///
-    /// Note: overriding the broker prevents automatic handling of connection-invalidating errors,
-    /// which will instead be returned to the caller
+    /// Note: overriding the broker prevents automatic handling of connection-invalidating errors, which will instead be
+    /// returned to the caller
+    ///
+    /// # Cache
+    ///
+    /// The caller can request a cached metadata entry by specifying `use_cache: true` in the call. If no cached entry
+    /// is available the request will be dispatched to an arbitrary broker.
+    ///
+    /// Using a cached entry is only valid if:
+    ///  * An arbitrary broker was to be queried
+    ///  * The caller can tolerate, or validate, a potentially infinitely stale cached entry
+    ///
+    /// # Panics
+    ///
+    /// It is invalid to request metadata from a specific broker (by specifying `broker_override`), and request a cached
+    /// entry - doing so will panic.
     pub async fn request_metadata(
         &self,
-        broker_override: Option<BrokerConnection>,
+        metadata_mode: &MetadataLookupMode,
         topics: Option<Vec<String>>,
-    ) -> Result<MetadataResponse> {
+    ) -> Result<(MetadataResponse, Option<MetadataCacheGeneration>)> {
+        // Return a cached metadata response as an optimisation to prevent
+        // multiple successive metadata queries for the same topic across
+        // multiple PartitionClient instances.
+        //
+        // NOTE: no serialisation / locking is imposed over the cache during
+        // this call  - multiple parallel calls to this function will still
+        // perform multiple requests until the cache is populated. However, the
+        // Client initialises this cache at construction time, so unless
+        // invalidated, there will always be a cached entry available.
+        if matches!(metadata_mode, MetadataLookupMode::CachedArbitrary) {
+            if let Some((m, gen)) = self.cached_metadata.get(&topics) {
+                return Ok((m, Some(gen)));
+            }
+        }
+
         let backoff = Backoff::new(&self.backoff_config);
         let request = MetadataRequest {
             topics: topics.map(|t| {
@@ -204,13 +277,26 @@ impl BrokerConnector {
             allow_auto_topic_creation: None,
         };
 
-        let response =
-            metadata_request_with_retry(broker_override, &request, backoff, self).await?;
+        let response = metadata_request_with_retry(metadata_mode, &request, backoff, self).await?;
+
+        // If the request was for a full, unfiltered set of topics, cache the
+        // response for later calls to make use of.
+        if request.topics.is_none() {
+            self.cached_metadata.update(response.clone());
+        }
 
         // Since the metadata request contains information about the cluster state, use it to update our view.
         self.topology.update(&response.brokers);
 
-        Ok(response)
+        Ok((response, None))
+    }
+
+    pub(crate) fn invalidate_metadata_cache(
+        &self,
+        reason: &'static str,
+        gen: MetadataCacheGeneration,
+    ) {
+        self.cached_metadata.invalidate(reason, gen)
     }
 
     /// Returns a new connection to the broker with the provided id
@@ -219,6 +305,7 @@ impl BrokerConnector {
             Some(broker) => {
                 let connection = BrokerRepresentation::Topology(broker)
                     .connect(
+                        Arc::clone(&self.client_id),
                         self.tls_config.clone(),
                         self.socks5_proxy.clone(),
                         self.sasl_config.clone(),
@@ -281,14 +368,38 @@ impl RequestHandler for MessengerTransport {
     }
 }
 
+/// Cache generation for [`BrokerCache`].
+///
+/// This is used to avoid double-invalidating a cache.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct BrokerCacheGeneration(usize);
+
+impl BrokerCacheGeneration {
+    /// First generation.
+    pub const START: Self = Self(0);
+
+    /// Bump generation.
+    pub fn bump(&mut self) -> Self {
+        self.0 += 1;
+        *self
+    }
+
+    /// Gen numeric value of this generation.
+    ///
+    /// This is mostly useful for logging.
+    pub fn get(&self) -> usize {
+        self.0
+    }
+}
+
 #[async_trait]
 pub trait BrokerCache: Send + Sync {
     type R: Send + Sync;
     type E: std::error::Error + Send + Sync;
 
-    async fn get(&self) -> Result<Arc<Self::R>, Self::E>;
+    async fn get(&self) -> Result<(Arc<Self::R>, BrokerCacheGeneration), Self::E>;
 
-    async fn invalidate(&self);
+    async fn invalidate(&self, reason: &'static str, gen: BrokerCacheGeneration);
 }
 
 /// BrokerConnector caches an arbitrary broker that can successfully connect.
@@ -297,14 +408,15 @@ impl BrokerCache for &BrokerConnector {
     type R = MessengerTransport;
     type E = Error;
 
-    async fn get(&self) -> Result<Arc<Self::R>, Self::E> {
+    async fn get(&self) -> Result<(Arc<Self::R>, BrokerCacheGeneration), Self::E> {
         let mut current_broker = self.cached_arbitrary_broker.lock().await;
-        if let Some(broker) = &*current_broker {
-            return Ok(Arc::clone(broker));
+        if let Some(broker) = &current_broker.0 {
+            return Ok((Arc::clone(broker), current_broker.1));
         }
 
         let connection = connect_to_a_broker_with_retry(
             self.brokers(),
+            Arc::clone(&self.client_id),
             &self.backoff_config,
             self.tls_config.clone(),
             self.socks5_proxy.clone(),
@@ -313,18 +425,34 @@ impl BrokerCache for &BrokerConnector {
         )
         .await?;
 
-        *current_broker = Some(Arc::clone(&connection));
-        Ok(connection)
+        current_broker.0 = Some(Arc::clone(&connection));
+        current_broker.1.bump();
+
+        Ok((connection, current_broker.1))
     }
 
-    async fn invalidate(&self) {
-        debug!("Invalidating cached arbitrary broker");
-        self.cached_arbitrary_broker.lock().await.take();
+    async fn invalidate(&self, reason: &'static str, gen: BrokerCacheGeneration) {
+        let mut guard = self.cached_arbitrary_broker.lock().await;
+
+        if guard.1 != gen {
+            // stale request
+            debug!(
+                reason,
+                current_gen = guard.1 .0,
+                request_gen = gen.0,
+                "stale invalidation request for arbitrary broker cache",
+            );
+            return;
+        }
+
+        info!(reason, "Invalidating cached arbitrary broker",);
+        guard.0.take();
     }
 }
 
 async fn connect_to_a_broker_with_retry<B>(
     mut brokers: Vec<B>,
+    client_id: Arc<str>,
     backoff_config: &BackoffConfig,
     tls_config: TlsConfig,
     socks5_proxy: Option<String>,
@@ -343,6 +471,7 @@ where
             for broker in &brokers {
                 let conn = broker
                     .connect(
+                        Arc::clone(&client_id),
                         tls_config.clone(),
                         socks5_proxy.clone(),
                         sasl_config.clone(),
@@ -365,14 +494,14 @@ where
                 "Failed to connect to any broker, backing off".to_string(),
             );
             let err: Arc<dyn std::error::Error + Send + Sync> = err.into();
-            ControlFlow::Continue(err)
+            ControlFlow::Continue(ErrorOrThrottle::Error(err))
         })
         .await
         .map_err(Error::RetryFailed)
 }
 
 async fn metadata_request_with_retry<A>(
-    broker_override: Option<Arc<A::R>>,
+    metadata_mode: &MetadataLookupMode<Arc<A::R>>,
     request_params: &MetadataRequest,
     mut backoff: Backoff,
     arbitrary_broker_cache: A,
@@ -385,21 +514,36 @@ where
     backoff
         .retry_with_backoff("metadata", || async {
             // Retrieve the broker within the loop, in case it is invalidated
-            let broker = match broker_override.as_ref() {
-                Some(b) => Arc::clone(b),
-                None => match arbitrary_broker_cache.get().await {
-                    Ok(inner) => inner,
-                    Err(e) => return ControlFlow::Break(Err(e.into())),
-                },
+            let (broker, cache_gen) = match metadata_mode {
+                MetadataLookupMode::SpecificBroker(b) => (Arc::clone(b), None),
+                MetadataLookupMode::ArbitraryBroker | MetadataLookupMode::CachedArbitrary => {
+                    match arbitrary_broker_cache.get().await {
+                        Ok((broker, cache_gen)) => (broker, Some(cache_gen)),
+                        Err(e) => return ControlFlow::Break(Err(e.into())),
+                    }
+                }
             };
 
             match broker.metadata_request(request_params).await {
-                Ok(response) => ControlFlow::Break(Ok(response)),
+                Ok(response) => {
+                    if let Err(e) = maybe_throttle(response.throttle_time_ms) {
+                        return ControlFlow::Continue(e);
+                    }
+
+                    ControlFlow::Break(Ok(response))
+                }
                 Err(e @ RequestError::Poisoned(_) | e @ RequestError::IO(_))
-                    if broker_override.is_none() =>
+                    if !matches!(metadata_mode, MetadataLookupMode::SpecificBroker(_)) =>
                 {
-                    arbitrary_broker_cache.invalidate().await;
-                    ControlFlow::Continue(e)
+                    if let Some(gen) = cache_gen {
+                        arbitrary_broker_cache
+                            .invalidate(
+                                "metadata request: arbitrary/cached broker is connection is broken",
+                                gen,
+                            )
+                            .await;
+                    }
+                    ControlFlow::Continue(ErrorOrThrottle::Error(e))
                 }
                 Err(error) => {
                     error!(
@@ -417,7 +561,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::protocol::api_key::ApiKey;
+    use crate::{build_info::DEFAULT_CLIENT_ID, protocol::api_key::ApiKey};
     use std::sync::atomic::{AtomicBool, Ordering};
 
     struct FakeBroker(Box<dyn Fn() -> Result<MetadataResponse, RequestError> + Send + Sync>);
@@ -456,11 +600,11 @@ mod tests {
         type R = FakeBroker;
         type E = Error;
 
-        async fn get(&self) -> Result<Arc<Self::R>> {
-            (self.get)()
+        async fn get(&self) -> Result<(Arc<Self::R>, BrokerCacheGeneration)> {
+            (self.get)().map(|b| (b, BrokerCacheGeneration::START))
         }
 
-        async fn invalidate(&self) {
+        async fn invalidate(&self, _reason: &'static str, _gen: BrokerCacheGeneration) {
             (self.invalidate)()
         }
     }
@@ -476,7 +620,7 @@ mod tests {
         };
 
         let result = metadata_request_with_retry(
-            None,
+            &MetadataLookupMode::ArbitraryBroker,
             &metadata_request,
             Backoff::new(&Default::default()),
             broker_cache,
@@ -497,7 +641,7 @@ mod tests {
         };
 
         let result = metadata_request_with_retry(
-            None,
+            &MetadataLookupMode::ArbitraryBroker,
             &metadata_request,
             Backoff::new(&Default::default()),
             broker_cache,
@@ -538,7 +682,7 @@ mod tests {
         };
 
         let result = metadata_request_with_retry(
-            None,
+            &MetadataLookupMode::ArbitraryBroker,
             &metadata_request,
             Backoff::new(&Default::default()),
             broker_cache,
@@ -551,7 +695,7 @@ mod tests {
 
     #[tokio::test]
     async fn happy_broker_override() {
-        let broker_override = Some(Arc::new(FakeBroker::success()));
+        let broker_override = Arc::new(FakeBroker::success());
         let metadata_request = arbitrary_metadata_request();
         let success_response = arbitrary_metadata_response();
 
@@ -561,7 +705,7 @@ mod tests {
         };
 
         let result = metadata_request_with_retry(
-            broker_override,
+            &MetadataLookupMode::SpecificBroker(broker_override),
             &metadata_request,
             Backoff::new(&Default::default()),
             broker_cache,
@@ -574,7 +718,7 @@ mod tests {
 
     #[tokio::test]
     async fn sad_broker_override() {
-        let broker_override = Some(Arc::new(FakeBroker::recoverable()));
+        let broker_override = Arc::new(FakeBroker::recoverable());
         let metadata_request = arbitrary_metadata_request();
 
         let broker_cache = FakeBrokerCache {
@@ -583,7 +727,7 @@ mod tests {
         };
 
         let result = metadata_request_with_retry(
-            broker_override,
+            &MetadataLookupMode::SpecificBroker(broker_override),
             &metadata_request,
             Backoff::new(&Default::default()),
             broker_cache,
@@ -644,6 +788,7 @@ mod tests {
 
         async fn connect(
             &self,
+            _client_id: Arc<str>,
             _tls_config: TlsConfig,
             _socks5_proxy: Option<String>,
             _sasl_config: Option<SaslConfig>,
@@ -670,6 +815,7 @@ mod tests {
         // connects successfully.
         let conn = connect_to_a_broker_with_retry(
             brokers,
+            Arc::from(DEFAULT_CLIENT_ID),
             &Default::default(),
             Default::default(),
             Default::default(),

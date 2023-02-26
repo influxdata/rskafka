@@ -1,9 +1,10 @@
 use std::time::Duration;
 
+use chrono::{TimeZone, Utc};
 use futures::{StreamExt, TryStreamExt};
 use rdkafka::{
     consumer::{Consumer, StreamConsumer},
-    message::{Headers, OwnedHeaders},
+    message::{Header, Headers, OwnedHeaders},
     producer::{FutureProducer, FutureRecord},
     util::Timeout,
     ClientConfig, Message, TopicPartitionList,
@@ -12,17 +13,16 @@ use rskafka::{
     client::partition::Compression,
     record::{Record, RecordAndOffset},
 };
-use time::OffsetDateTime;
 
 /// Produce.
 pub async fn produce(
-    connection: &str,
+    connection: &[String],
     records: Vec<(String, i32, Record)>,
     compression: Compression,
 ) -> Vec<i64> {
     // create client
     let mut cfg = ClientConfig::new();
-    cfg.set("bootstrap.servers", connection);
+    cfg.set("bootstrap.servers", connection.join(","));
     match compression {
         Compression::NoCompression => {}
         #[cfg(feature = "compression-gzip")]
@@ -49,13 +49,16 @@ pub async fn produce(
     for (topic_name, partition_index, record) in records {
         let mut headers = OwnedHeaders::new();
         for (k, v) in record.headers {
-            headers = headers.add(&k, &v);
+            headers = headers.insert(Header {
+                key: &k,
+                value: Some(&v),
+            });
         }
 
         let mut f_record = FutureRecord::to(&topic_name)
             .partition(partition_index)
             .headers(headers)
-            .timestamp((record.timestamp.unix_timestamp_nanos() / 1_000_000) as i64);
+            .timestamp(record.timestamp.timestamp_millis());
         let key_ref: Option<&Vec<u8>> = record.key.as_ref();
         let value_ref: Option<&Vec<u8>> = record.value.as_ref();
         if let Some(key) = key_ref {
@@ -73,7 +76,7 @@ pub async fn produce(
 
 /// Consume
 pub async fn consume(
-    connection: &str,
+    connection: &[String],
     topic_name: &str,
     partition_index: i32,
     n: usize,
@@ -82,7 +85,7 @@ pub async fn consume(
         loop {
             // create client
             let mut cfg = ClientConfig::new();
-            cfg.set("bootstrap.servers", connection);
+            cfg.set("bootstrap.servers", connection.join(","));
             cfg.set("message.timeout.ms", "5000");
             cfg.set("group.id", "foo");
             cfg.set("auto.offset.reset", "smallest");
@@ -104,16 +107,15 @@ pub async fn consume(
                             .map(|headers| {
                                 (0..headers.count())
                                     .map(|i| {
-                                        let (k, v) = headers.get(i).unwrap();
-                                        (k.to_owned(), v.to_vec())
+                                        let header = headers.get(i);
+                                        (header.key.to_owned(), header.value.unwrap().to_vec())
                                     })
                                     .collect()
                             })
                             .unwrap_or_default(),
-                        timestamp: OffsetDateTime::from_unix_timestamp_nanos(
-                            msg.timestamp().to_millis().unwrap_or_default() as i128 * 1_000_000,
-                        )
-                        .unwrap(),
+                        timestamp: Utc
+                            .timestamp_millis_opt(msg.timestamp().to_millis().unwrap_or_default())
+                            .unwrap(),
                     },
                     offset: msg.offset(),
                 })

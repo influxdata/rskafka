@@ -81,6 +81,15 @@ jobs:
       - run:
           name: Clippy
           command: cargo clippy --all-targets --all-features --workspace -- -D warnings
+      - run:
+          name: Check versions
+          command: .circleci/check_versions.sh
+      - run:
+          name: yamllint
+          command: yamllint --strict .
+      - run:
+          name: shellcheck
+          command: find . \( -name target -prune \) -o -type f \( -iname '*.sh' -or -iname '*.bash' \) -exec shellcheck {} \;
       - cache_save
   cargo_audit:
     docker:
@@ -139,7 +148,7 @@ jobs:
     # setup multiple docker images (see https://circleci.com/docs/2.0/configuration-reference/#docker)
     docker:
       - image: quay.io/influxdb/rust:ci
-      - image: vectorized/redpanda:v21.11.2
+      - image: vectorized/redpanda:v22.2.1
         name: redpanda-0
         command:
           - redpanda
@@ -152,7 +161,8 @@ jobs:
           - --check=false
           - --kafka-addr redpanda-0:9092
           - --rpc-addr redpanda-0:33145
-      - image: vectorized/redpanda:v21.11.2
+          - --set redpanda.auto_create_topics_enabled=false
+      - image: vectorized/redpanda:v22.2.1
         name: redpanda-1
         command:
           - redpanda
@@ -166,7 +176,8 @@ jobs:
           - --kafka-addr redpanda-1:9092
           - --rpc-addr redpanda-1:33145
           - --seeds redpanda-0:33145
-      - image: vectorized/redpanda:v21.11.2
+          - --set redpanda.auto_create_topics_enabled=false
+      - image: vectorized/redpanda:v22.2.1
         name: redpanda-2
         command:
           - redpanda
@@ -180,6 +191,9 @@ jobs:
           - --kafka-addr redpanda-2:9092
           - --rpc-addr redpanda-2:33145
           - --seeds redpanda-0:33145
+          - --set redpanda.auto_create_topics_enabled=false
+      - image: serjs/go-socks5-proxy
+        name: proxy
     resource_class: xlarge  # use of a smaller executor tends crashes on link
     environment:
       # Disable incremental compilation to avoid overhead. We are not preserving these files anyway.
@@ -193,10 +207,12 @@ jobs:
       RUST_LOG: "trace"
       # Run integration tests
       TEST_INTEGRATION: 1
+      TEST_BROKER_IMPL: redpanda
       TEST_JAVA_INTEROPT: 1
       # Don't use the first node here since this is likely the controller and we want to ensure that we automatically
       # pick the controller for certain actions (e.g. topic creation) and don't just get lucky.
-      KAFKA_CONNECT: "redpanda-1:9092"
+      KAFKA_CONNECT: "invalid:9092,redpanda-1:9092"
+      SOCKS_PROXY: "proxy:1080"
     steps:
       - checkout
       - rust_components
@@ -205,6 +221,10 @@ jobs:
       - run:
           name: Cargo test
           command: cargo test --all-features --all-targets
+      # extra step required due to https://github.com/rust-lang/cargo/issues/11015
+      - run:
+          name: Cargo test doctests
+          command: cargo test --all-features --doc
       - cache_save
       - store_artifacts:
           path: proptest-regressions
@@ -227,6 +247,7 @@ jobs:
           - KAFKA_CFG_LISTENERS=CLIENT://:9092,EXTERNAL://:9093
           - KAFKA_CFG_ADVERTISED_LISTENERS=CLIENT://kafka-0:9092,EXTERNAL://kafka-0:9093
           - KAFKA_INTER_BROKER_LISTENER_NAME=CLIENT
+          - KAFKA_CFG_AUTO_CREATE_TOPICS_ENABLE=false
       - image: docker.io/bitnami/kafka:3
         name: kafka-1
         environment:
@@ -237,6 +258,7 @@ jobs:
           - KAFKA_CFG_LISTENERS=CLIENT://:9092,EXTERNAL://:9093
           - KAFKA_CFG_ADVERTISED_LISTENERS=CLIENT://kafka-1:9092,EXTERNAL://kafka-1:9093
           - KAFKA_INTER_BROKER_LISTENER_NAME=CLIENT
+          - KAFKA_CFG_AUTO_CREATE_TOPICS_ENABLE=false
       - image: docker.io/bitnami/kafka:3
         name: kafka-2
         environment:
@@ -247,6 +269,9 @@ jobs:
           - KAFKA_CFG_LISTENERS=CLIENT://:9092,EXTERNAL://:9093
           - KAFKA_CFG_ADVERTISED_LISTENERS=CLIENT://kafka-2:9092,EXTERNAL://kafka-2:9093
           - KAFKA_INTER_BROKER_LISTENER_NAME=CLIENT
+          - KAFKA_CFG_AUTO_CREATE_TOPICS_ENABLE=false
+      - image: serjs/go-socks5-proxy
+        name: proxy
     resource_class: xlarge  # use of a smaller executor tends crashes on link
     environment:
       # Disable incremental compilation to avoid overhead. We are not preserving these files anyway.
@@ -260,12 +285,12 @@ jobs:
       RUST_LOG: "trace"
       # Run integration tests
       TEST_INTEGRATION: 1
-      # Kafka support DeleteRecords
-      TEST_DELETE_RECORDS: 1
+      TEST_BROKER_IMPL: kafka
       TEST_JAVA_INTEROPT: 1
       # Don't use the first node here since this is likely the controller and we want to ensure that we automatically
       # pick the controller for certain actions (e.g. topic creation) and don't just get lucky.
-      KAFKA_CONNECT: "kafka-1:9093"
+      KAFKA_CONNECT: "invalid:9093,kafka-1:9093"
+      SOCKS_PROXY: "proxy:1080"
     steps:
       - checkout
       - rust_components
@@ -274,6 +299,10 @@ jobs:
       - run:
           name: Cargo test
           command: cargo test --all-features --all-targets
+      # extra step required due to https://github.com/rust-lang/cargo/issues/11015
+      - run:
+          name: Cargo test doctests
+          command: cargo test --all-features --doc
       - cache_save
       - store_artifacts:
           path: proptest-regressions
@@ -440,14 +469,11 @@ workflows:
       - build-fuzz
       - doc
 
-  # Run fuzzers every 30mins
+  # Run fuzzers based on a project-wide trigger
   fuzz:
-    triggers:
-      - schedule:
-          cron: "0,30 * * * *"
-          filters:
-            branches:
-              only:
-                - main
+    when:
+      and:
+        - equal: [scheduled_pipeline, << pipeline.trigger_source >>]
+        - equal: ["fuzz", << pipeline.schedule.name >>]
     jobs:
       - run-fuzz
