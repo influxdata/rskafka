@@ -30,7 +30,7 @@ lz4 = { version = "1.23", optional = true }
 parking_lot = "0.12"
 pin-project-lite = "0.2"
 rand = "0.8"
-rustls = { version = "0.20", optional = true }
+rustls = { version = "0.21", optional = true }
 snap = { version = "1", optional = true }
 thiserror = "1.0"
 tokio = { version = "1.19", default-features = false, features = ["io-util", "net", "rt", "sync", "time", "macros"] }
