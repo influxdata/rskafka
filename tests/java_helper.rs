@@ -195,9 +195,9 @@ pub async fn consume(
         .expect("creating TopicPartition");
 
     let partitions = jvm
-        .create_java_list(
+        .java_list(
             "org.apache.kafka.common.TopicPartition",
-            &[InvocationArg::from(topic_partition)],
+            vec![Ok(InvocationArg::from(topic_partition))],
         )
         .expect("creating partitions array");
 
