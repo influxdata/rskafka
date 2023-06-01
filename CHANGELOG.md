@@ -5,6 +5,46 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 
+## 0.4.0 -- More Stability
+
+### Breaking
+- switch from `time` to `chrono` (#176, #196)
+- make errors non-exhaustive (#159)
+
+### Features
+- topic deletion (#191)
+- respect throttling (#184)
+- allow setting a custom client ID (#180)
+- pub ProducerClient for instrumentation hook (#162)
+- add some getters to `PartitionClient` (#154)
+
+### Improvements
+- log metadata mode in `get_leader`(#188)
+- log reason about WHY we invalidate caches (#185)
+- remove interior mutable from `Messenger::version_ranges` (#183)
+- async flushing & buffering + lock contention (#173)
+- pre-warm cache broker connections (#166)
+- support pre-warming PartitionClient (#165)
+- metadata cache for leader discovery (#163)
+- extend `ServerError` with helpful data (#160)
+- speed up IO (#156)
+
+### Bug Fixes
+- (potential) broker cache invalidation race (#187)
+- (potential) metadata cache invalidation race (#186)
+- Fix typo in error message (#158)
+- use compact arrays where needed (#155)
+
+### Dependency Updates
+- `dotenv` -> `dotenvy` (#161)
+- `rustls` to 0.21 (#200)
+- `zstd` to 0.12 (#195)
+- `criterion` (dev dependency) to 0.4 (#177, #204)
+- `j4rs` (dev dependency) to 0.15 (#193, #197)
+- `rdkafka` (dev dependency) to 0.31 (#189, #202, #203)
+- CI rust toolchain to 1.65 (#194)
+
+
 ## 0.3.0 -- Bug Fixes, Small API Improvements
 
 ### Improvements
