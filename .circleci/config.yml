@@ -35,13 +35,13 @@ commands:
           key: cargo-cache-{{ arch }}-{{ .Branch }}-{{ checksum "Cargo.toml" }}
 
   install_packages:
-    description: Install openjdk-11-jre and zlib-dev
+    description: Install zlib-dev
     steps:
       - run:
-          name: Install openjdk-11-jre and zlib-dev
+          name: Install zlib-dev
           command: |
             sudo apt-get update
-            sudo apt-get install -y openjdk-11-jre zlib1g-dev
+            sudo apt-get install -y zlib1g-dev
 
 jobs:
   fmt:
