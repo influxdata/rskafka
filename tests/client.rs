@@ -209,7 +209,7 @@ async fn test_tls() {
     let config = rustls::ClientConfig::builder()
         .with_safe_defaults()
         .with_root_certificates(root_store)
-        .with_single_cert(vec![producer_root], private_key)
+        .with_client_auth_cert(vec![producer_root], private_key)
         .unwrap();
 
     let test_cfg = maybe_skip_kafka_integration!();

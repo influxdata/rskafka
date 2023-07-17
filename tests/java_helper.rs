@@ -306,15 +306,17 @@ static JVM_SETUP: Lazy<()> = Lazy::new(|| {
             // Kafka client
             // Note that j4rs does NOT pull dependencies, so we need to add compression libs (except for gzip, which is
             // built into Java) manually.
-            "org.apache.kafka:kafka-clients:3.1.0",
+            "org.apache.kafka:kafka-clients:3.5.0",
             // Helper used in `from_java_bytes`
             "org.apache.commons:commons-lang3:3.12.0",
             // LZ4 compression support
             "org.lz4:lz4-java:1.8.0",
             // snappy compression support
-            "org.xerial.snappy:snappy-java:1.1.8.4",
+            "org.xerial.snappy:snappy-java:1.1.10.2",
             // zstd compression support
-            "com.github.luben:zstd-jni:1.5.0-4",
+            "com.github.luben:zstd-jni:1.5.5-5",
+            // logging from within java
+            "org.slf4j:slf4j-api:2.0.7",
         ] {
             let artifact = MavenArtifact::from(artifact_name);
             jvm_installation
