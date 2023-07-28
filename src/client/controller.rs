@@ -36,11 +36,11 @@ pub struct ControllerClient {
 impl ControllerClient {
     pub(super) fn new(
         brokers: Arc<BrokerConnector>,
-        backoff_config: Option<BackoffConfig>,
+        backoff_config: BackoffConfig,
     ) -> Self {
         Self {
             brokers,
-            backoff_config: backoff_config.unwrap_or_default(),
+            backoff_config,
             current_broker: Mutex::new((None, BrokerCacheGeneration::START)),
         }
     }

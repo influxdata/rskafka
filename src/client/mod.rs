@@ -44,7 +44,7 @@ pub struct ClientBuilder {
     max_message_size: usize,
     socks5_proxy: Option<String>,
     tls_config: TlsConfig,
-    backoff_config: Option<BackoffConfig>,
+    backoff_config: BackoffConfig,
 }
 
 impl ClientBuilder {
@@ -56,7 +56,7 @@ impl ClientBuilder {
             max_message_size: 100 * 1024 * 1024, // 100MB
             socks5_proxy: None,
             tls_config: TlsConfig::default(),
-            backoff_config: None,
+            backoff_config: Default::default(),
         }
     }
 
@@ -78,7 +78,7 @@ impl ClientBuilder {
 
     /// Set up backoff configuration
     pub fn backoff_config(mut self, backoff_config: BackoffConfig) -> Self {
-        self.backoff_config = Some(backoff_config);
+        self.backoff_config = backoff_config;
         self
     }
 
@@ -131,7 +131,7 @@ impl std::fmt::Debug for ClientBuilder {
 #[derive(Debug)]
 pub struct Client {
     brokers: Arc<BrokerConnector>,
-    backoff_config: Option<BackoffConfig>,
+    backoff_config: BackoffConfig,
 }
 
 impl Client {
