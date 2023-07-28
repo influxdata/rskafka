@@ -187,6 +187,7 @@ impl BrokerConnector {
         tls_config: TlsConfig,
         socks5_proxy: Option<String>,
         max_message_size: usize,
+        backoff_config: Option<BackoffConfig>,
     ) -> Self {
         Self {
             bootstrap_brokers,
@@ -194,7 +195,7 @@ impl BrokerConnector {
             topology: Default::default(),
             cached_arbitrary_broker: Mutex::new((None, BrokerCacheGeneration::START)),
             cached_metadata: Default::default(),
-            backoff_config: Default::default(),
+            backoff_config: backoff_config.unwrap_or_default(),
             tls_config,
             socks5_proxy,
             max_message_size,

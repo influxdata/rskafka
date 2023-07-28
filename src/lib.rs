@@ -17,7 +17,7 @@
     clippy::disallowed_methods
 )]
 
-mod backoff;
+pub mod backoff;
 
 pub mod build_info;
 
