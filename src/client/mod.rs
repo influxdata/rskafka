@@ -7,7 +7,7 @@ use crate::{
     client::partition::PartitionClient,
     connection::{BrokerConnector, MetadataLookupMode, TlsConfig},
     protocol::primitives::Boolean,
-    topic::Topic,
+    topic::Topic, backoff::BackoffConfig,
 };
 
 pub mod consumer;
@@ -43,6 +43,7 @@ pub struct ClientBuilder {
     max_message_size: usize,
     socks5_proxy: Option<String>,
     tls_config: TlsConfig,
+    backoff_config: Option<BackoffConfig>,
 }
 
 impl ClientBuilder {
@@ -54,6 +55,7 @@ impl ClientBuilder {
             max_message_size: 100 * 1024 * 1024, // 100MB
             socks5_proxy: None,
             tls_config: TlsConfig::default(),
+            backoff_config: None
         }
     }
 
@@ -70,6 +72,11 @@ impl ClientBuilder {
     /// failures all over the place since metadata requests cannot be handled any longer.
     pub fn max_message_size(mut self, max_message_size: usize) -> Self {
         self.max_message_size = max_message_size;
+        self
+    }
+
+    pub fn backoff_config(mut self, backoff_config: BackoffConfig) -> Self {
+        self.backoff_config = Some(backoff_config);
         self
     }
 
