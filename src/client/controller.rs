@@ -34,10 +34,7 @@ pub struct ControllerClient {
 }
 
 impl ControllerClient {
-    pub(super) fn new(
-        brokers: Arc<BrokerConnector>,
-        backoff_config: BackoffConfig
-    ) -> Self {
+    pub(super) fn new(brokers: Arc<BrokerConnector>, backoff_config: BackoffConfig) -> Self {
         Self {
             brokers,
             backoff_config,
