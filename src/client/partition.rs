@@ -123,7 +123,7 @@ pub struct PartitionClient {
     partition: i32,
     brokers: Arc<BrokerConnector>,
 
-    backoff_config: BackoffConfig,
+    backoff_config: Arc<BackoffConfig>,
 
     /// Current broker connection if any
     current_broker: Mutex<CurrentBroker>,
@@ -143,7 +143,7 @@ impl PartitionClient {
         partition: i32,
         brokers: Arc<BrokerConnector>,
         unknown_topic_handling: UnknownTopicHandling,
-        backoff_config: BackoffConfig,
+        backoff_config: Arc<BackoffConfig>,
     ) -> Result<Self> {
         let p = Self {
             topic,

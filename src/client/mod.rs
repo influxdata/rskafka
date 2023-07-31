@@ -44,7 +44,7 @@ pub struct ClientBuilder {
     max_message_size: usize,
     socks5_proxy: Option<String>,
     tls_config: TlsConfig,
-    backoff_config: BackoffConfig,
+    backoff_config: Arc<BackoffConfig>,
 }
 
 impl ClientBuilder {
@@ -78,7 +78,7 @@ impl ClientBuilder {
 
     /// Set up backoff configuration
     pub fn backoff_config(mut self, backoff_config: BackoffConfig) -> Self {
-        self.backoff_config = backoff_config;
+        self.backoff_config = Arc::from(backoff_config);
         self
     }
 
@@ -105,7 +105,7 @@ impl ClientBuilder {
             self.tls_config,
             self.socks5_proxy,
             self.max_message_size,
-            self.backoff_config,
+            Arc::clone(&self.backoff_config),
         ));
         brokers.refresh_metadata().await?;
 
@@ -131,7 +131,7 @@ impl std::fmt::Debug for ClientBuilder {
 #[derive(Debug)]
 pub struct Client {
     brokers: Arc<BrokerConnector>,
-    backoff_config: BackoffConfig,
+    backoff_config: Arc<BackoffConfig>,
 }
 
 impl Client {
@@ -139,7 +139,7 @@ impl Client {
     pub fn controller_client(&self) -> Result<ControllerClient> {
         Ok(ControllerClient::new(
             Arc::clone(&self.brokers),
-            self.backoff_config,
+            Arc::clone(&self.backoff_config),
         ))
     }
 
@@ -155,7 +155,7 @@ impl Client {
             partition,
             Arc::clone(&self.brokers),
             unknown_topic_handling,
-            self.backoff_config,
+            Arc::clone(&self.backoff_config),
         )
         .await
     }

@@ -6,7 +6,8 @@ use tracing::info;
 /// Exponential backoff with jitter
 ///
 /// See <https://aws.amazon.com/blogs/architecture/exponential-backoff-and-jitter/>
-#[derive(Debug, Clone, Copy)]
+#[allow(missing_copy_implementations)]
+#[derive(Debug, Clone)]
 pub struct BackoffConfig {
     pub init_backoff: Duration,
     pub max_backoff: Duration,

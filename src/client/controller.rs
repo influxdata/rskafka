@@ -27,14 +27,14 @@ use super::error::RequestContext;
 pub struct ControllerClient {
     brokers: Arc<BrokerConnector>,
 
-    backoff_config: BackoffConfig,
+    backoff_config: Arc<BackoffConfig>,
 
     /// Current broker connection if any
     current_broker: Mutex<(Option<BrokerConnection>, BrokerCacheGeneration)>,
 }
 
 impl ControllerClient {
-    pub(super) fn new(brokers: Arc<BrokerConnector>, backoff_config: BackoffConfig) -> Self {
+    pub(super) fn new(brokers: Arc<BrokerConnector>, backoff_config: Arc<BackoffConfig>) -> Self {
         Self {
             brokers,
             backoff_config,

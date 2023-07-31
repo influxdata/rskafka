@@ -168,7 +168,7 @@ pub struct BrokerConnector {
     cached_metadata: MetadataCache,
 
     /// The backoff configuration on error
-    backoff_config: BackoffConfig,
+    backoff_config: Arc<BackoffConfig>,
 
     /// TLS configuration if any
     tls_config: TlsConfig,
@@ -187,7 +187,7 @@ impl BrokerConnector {
         tls_config: TlsConfig,
         socks5_proxy: Option<String>,
         max_message_size: usize,
-        backoff_config: BackoffConfig,
+        backoff_config: Arc<BackoffConfig>,
     ) -> Self {
         Self {
             bootstrap_brokers,
