@@ -3,6 +3,7 @@ use std::sync::Arc;
 use thiserror::Error;
 
 use crate::{
+    backoff::BackoffConfig,
     build_info::DEFAULT_CLIENT_ID,
     client::partition::PartitionClient,
     connection::{BrokerConnector, MetadataLookupMode, TlsConfig},
@@ -43,6 +44,7 @@ pub struct ClientBuilder {
     max_message_size: usize,
     socks5_proxy: Option<String>,
     tls_config: TlsConfig,
+    backoff_config: Arc<BackoffConfig>,
 }
 
 impl ClientBuilder {
@@ -54,6 +56,7 @@ impl ClientBuilder {
             max_message_size: 100 * 1024 * 1024, // 100MB
             socks5_proxy: None,
             tls_config: TlsConfig::default(),
+            backoff_config: Default::default(),
         }
     }
 
@@ -70,6 +73,12 @@ impl ClientBuilder {
     /// failures all over the place since metadata requests cannot be handled any longer.
     pub fn max_message_size(mut self, max_message_size: usize) -> Self {
         self.max_message_size = max_message_size;
+        self
+    }
+
+    /// Set up backoff configuration
+    pub fn backoff_config(mut self, backoff_config: BackoffConfig) -> Self {
+        self.backoff_config = Arc::from(backoff_config);
         self
     }
 
@@ -96,10 +105,14 @@ impl ClientBuilder {
             self.tls_config,
             self.socks5_proxy,
             self.max_message_size,
+            Arc::clone(&self.backoff_config),
         ));
         brokers.refresh_metadata().await?;
 
-        Ok(Client { brokers })
+        Ok(Client {
+            brokers,
+            backoff_config: self.backoff_config,
+        })
     }
 }
 
@@ -118,12 +131,16 @@ impl std::fmt::Debug for ClientBuilder {
 #[derive(Debug)]
 pub struct Client {
     brokers: Arc<BrokerConnector>,
+    backoff_config: Arc<BackoffConfig>,
 }
 
 impl Client {
     /// Returns a client for performing certain cluster-wide operations.
     pub fn controller_client(&self) -> Result<ControllerClient> {
-        Ok(ControllerClient::new(Arc::clone(&self.brokers)))
+        Ok(ControllerClient::new(
+            Arc::clone(&self.brokers),
+            Arc::clone(&self.backoff_config),
+        ))
     }
 
     /// Returns a client for performing operations on a specific partition
@@ -138,6 +155,7 @@ impl Client {
             partition,
             Arc::clone(&self.brokers),
             unknown_topic_handling,
+            Arc::clone(&self.backoff_config),
         )
         .await
     }
