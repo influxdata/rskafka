@@ -35,10 +35,7 @@ type Er = Box<dyn std::error::Error + Send + Sync>;
 #[allow(missing_copy_implementations)]
 pub enum BackoffError {
     #[error("Retry exceeded deadline")]
-    DeadlineExceded {
-        deadline: Duration,
-        source: Er
-    },
+    DeadlineExceded { deadline: Duration, source: Er },
 }
 pub type BackoffResult<T> = Result<T, BackoffError>;
 
