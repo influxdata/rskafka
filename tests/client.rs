@@ -7,6 +7,7 @@ use rskafka::{
         ClientBuilder,
     },
     record::{Record, RecordAndOffset},
+    BackoffConfig,
 };
 use std::{collections::BTreeMap, str::FromStr, sync::Arc, time::Duration};
 
@@ -678,6 +679,31 @@ async fn test_delete_records() {
         partition_client.get_offset(OffsetAt::Latest).await.unwrap(),
         offset_4 + 1
     );
+}
+
+#[tokio::test]
+async fn test_client_backoff_terminates() {
+    maybe_start_logging();
+
+    let mut test_cfg = maybe_skip_kafka_integration!();
+
+    test_cfg.bootstrap_brokers = vec!["localhost:9000".to_owned()];
+
+    let client_builder =
+        ClientBuilder::new(test_cfg.bootstrap_brokers).backoff_config(BackoffConfig {
+            deadline: Some(Duration::from_millis(100)),
+            ..Default::default()
+        });
+
+    match client_builder.build().await {
+        Err(rskafka::client::error::Error::Connection(e)) => {
+            assert_eq!(e.to_string(), r#"all retries failed: Retry exceeded deadline"#);
+        }
+        _ => {
+            assert!(false);
+        }
+    };
+    println!("Some");
 }
 
 pub fn large_record() -> Record {

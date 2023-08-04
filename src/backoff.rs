@@ -26,7 +26,7 @@ impl Default for BackoffConfig {
     }
 }
 
-type Er = Box<dyn std::error::Error + Send + Sync>;
+type SourceError = Box<dyn std::error::Error + Send + Sync>;
 
 // TODO: Currently, retrying can't fail, but there should be a global maximum timeout that
 // causes an error if the total time retrying exceeds that amount.
@@ -35,7 +35,10 @@ type Er = Box<dyn std::error::Error + Send + Sync>;
 #[allow(missing_copy_implementations)]
 pub enum BackoffError {
     #[error("Retry exceeded deadline")]
-    DeadlineExceded { deadline: Duration, source: Er },
+    DeadlineExceded {
+        deadline: Duration,
+        source: SourceError
+    },
 }
 pub type BackoffResult<T> = Result<T, BackoffError>;
 
@@ -222,5 +225,17 @@ mod tests {
             value =
                 (init_backoff_secs + (value * base - init_backoff_secs) / 2.).min(max_backoff_secs);
         }
+
+        // deadline
+        let rng = Box::new(StepRng::new(u64::MAX, 0));
+        let deadline = Duration::from_secs_f64(init_backoff_secs);
+        let mut backoff = Backoff::new_with_rng(
+            &BackoffConfig {
+                deadline: Some(deadline),
+                ..config
+            },
+            Some(rng),
+        );
+        assert_eq!(backoff.next(), None);
     }
 }

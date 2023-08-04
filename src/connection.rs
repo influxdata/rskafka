@@ -64,6 +64,7 @@ trait ConnectionHandler {
 }
 
 /// Defines the possible request modes of metadata retrieval.
+#[derive(Debug)]
 pub enum MetadataLookupMode<B = BrokerConnection> {
     /// Perform a metadata request using an arbitrary, cached broker connection.
     ArbitraryBroker,

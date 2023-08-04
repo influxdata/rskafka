@@ -19,13 +19,14 @@
 
 mod backoff;
 
-pub use backoff::BackoffConfig;
+pub use backoff::{BackoffConfig, BackoffError};
 
 pub mod build_info;
 
 pub mod client;
 
 mod connection;
+
 #[cfg(feature = "unstable-fuzzing")]
 pub mod messenger;
 #[cfg(not(feature = "unstable-fuzzing"))]
