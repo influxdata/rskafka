@@ -12,6 +12,7 @@ pub struct BackoffConfig {
     pub init_backoff: Duration,
     pub max_backoff: Duration,
     pub base: f64,
+    pub deadline: Option<Duration>,
 }
 
 impl Default for BackoffConfig {
@@ -20,14 +21,25 @@ impl Default for BackoffConfig {
             init_backoff: Duration::from_millis(100),
             max_backoff: Duration::from_secs(500),
             base: 3.,
+            deadline: None,
         }
     }
 }
 
+type Er = Box<dyn std::error::Error + Send + Sync>;
+
 // TODO: Currently, retrying can't fail, but there should be a global maximum timeout that
 // causes an error if the total time retrying exceeds that amount.
 // See https://github.com/influxdata/rskafka/issues/65
-pub type BackoffError = std::convert::Infallible;
+#[derive(Debug, thiserror::Error)]
+#[allow(missing_copy_implementations)]
+pub enum BackoffError {
+    #[error("Retry exceeded deadline")]
+    DeadlineExceded {
+        deadline: Duration,
+        source: Er
+    },
+}
 pub type BackoffResult<T> = Result<T, BackoffError>;
 
 /// Error (which should increase backoff) or throttle for a specific duration (as asked for by the broker).
@@ -49,6 +61,8 @@ pub struct Backoff {
     next_backoff_secs: f64,
     max_backoff_secs: f64,
     base: f64,
+    total: f64,
+    deadline: Option<f64>,
     rng: Option<Box<dyn RngCore + Sync + Send>>,
 }
 
@@ -83,20 +97,9 @@ impl Backoff {
             max_backoff_secs: config.max_backoff.as_secs_f64(),
             base: config.base,
             rng,
+            total: 0.,
+            deadline: config.deadline.map(|d| d.as_secs_f64()),
         }
-    }
-
-    /// Returns the next backoff duration to wait for
-    fn next(&mut self) -> Duration {
-        let range = self.init_backoff..(self.next_backoff_secs * self.base);
-
-        let rand_backoff = match self.rng.as_mut() {
-            Some(rng) => rng.gen_range(range),
-            None => thread_rng().gen_range(range),
-        };
-
-        let next_backoff = self.max_backoff_secs.min(rand_backoff);
-        Duration::from_secs_f64(std::mem::replace(&mut self.next_backoff_secs, next_backoff))
     }
 
     /// Perform an async operation that retries with a backoff
@@ -111,25 +114,34 @@ impl Backoff {
     where
         F: (Fn() -> F1) + Send + Sync,
         F1: std::future::Future<Output = ControlFlow<B, ErrorOrThrottle<E>>> + Send,
-        E: std::error::Error + Send,
+        E: std::error::Error + Send + Sync + 'static,
     {
         loop {
             // split match statement from `tokio::time::sleep`, because otherwise rustc requires `B: Send`
-            let sleep_time = match do_stuff().await {
-                ControlFlow::Break(r) => {
-                    break Ok(r);
-                }
-                ControlFlow::Continue(ErrorOrThrottle::Error(e)) => {
-                    let backoff = self.next();
-                    info!(
-                        e=%e,
-                        request_name,
-                        backoff_secs = backoff.as_secs(),
-                        "request encountered non-fatal error - backing off",
-                    );
-                    backoff
-                }
-                ControlFlow::Continue(ErrorOrThrottle::Throttle(throttle)) => {
+            let fail = match do_stuff().await {
+                ControlFlow::Break(r) => break Ok(r),
+                ControlFlow::Continue(e) => e,
+            };
+
+            let sleep_time = match fail {
+                ErrorOrThrottle::Error(e) => match self.next() {
+                    Some(backoff) => {
+                        info!(
+                            e=%e,
+                            request_name,
+                            backoff_secs = backoff.as_secs(),
+                            "request encountered non-fatal error - backing off",
+                        );
+                        backoff
+                    }
+                    None => {
+                        break Err(BackoffError::DeadlineExceded {
+                            deadline: Duration::from_secs_f64(self.deadline.unwrap()),
+                            source: Box::new(e),
+                        })
+                    }
+                },
+                ErrorOrThrottle::Throttle(throttle) => {
                     info!(?throttle, request_name, "broker asked us to throttle",);
                     throttle
                 }
@@ -137,6 +149,32 @@ impl Backoff {
 
             tokio::time::sleep(sleep_time).await;
         }
+    }
+}
+
+impl Iterator for Backoff {
+    type Item = Duration;
+
+    /// Returns the next backoff duration to wait for
+    fn next(&mut self) -> Option<Duration> {
+        let range = self.init_backoff..(self.next_backoff_secs * self.base);
+
+        let rand_backoff = match self.rng.as_mut() {
+            Some(rng) => rng.gen_range(range),
+            None => thread_rng().gen_range(range),
+        };
+
+        let next_backoff = self.max_backoff_secs.min(rand_backoff);
+        self.total += next_backoff;
+        let backoff =
+            Duration::from_secs_f64(std::mem::replace(&mut self.next_backoff_secs, next_backoff));
+
+        if let Some(deadline) = self.deadline {
+            if self.total >= deadline {
+                return None;
+            }
+        }
+        Some(backoff)
     }
 }
 
@@ -155,6 +193,7 @@ mod tests {
             init_backoff: Duration::from_secs_f64(init_backoff_secs),
             max_backoff: Duration::from_secs_f64(max_backoff_secs),
             base,
+            deadline: None,
         };
 
         let assert_fuzzy_eq = |a: f64, b: f64| assert!((b - a).abs() < 0.0001, "{} != {}", a, b);
@@ -164,7 +203,7 @@ mod tests {
         let mut backoff = Backoff::new_with_rng(&config, Some(rng));
 
         for _ in 0..20 {
-            assert_eq!(backoff.next().as_secs_f64(), init_backoff_secs);
+            assert_eq!(backoff.next().unwrap().as_secs_f64(), init_backoff_secs);
         }
 
         // Create a static rng that takes the maximum of the range
@@ -173,7 +212,7 @@ mod tests {
 
         for i in 0..20 {
             let value = (base.powi(i) * init_backoff_secs).min(max_backoff_secs);
-            assert_fuzzy_eq(backoff.next().as_secs_f64(), value);
+            assert_fuzzy_eq(backoff.next().unwrap().as_secs_f64(), value);
         }
 
         // Create a static rng that takes the mid point of the range
@@ -182,7 +221,7 @@ mod tests {
 
         let mut value = init_backoff_secs;
         for _ in 0..20 {
-            assert_fuzzy_eq(backoff.next().as_secs_f64(), value);
+            assert_fuzzy_eq(backoff.next().unwrap().as_secs_f64(), value);
             value =
                 (init_backoff_secs + (value * base - init_backoff_secs) / 2.).min(max_backoff_secs);
         }
