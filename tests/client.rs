@@ -697,7 +697,7 @@ async fn test_client_backoff_terminates() {
 
     match client_builder.build().await {
         Err(rskafka::client::error::Error::Connection(e)) => {
-            assert_eq!(e.to_string(), r#"all retries failed: Retry exceeded deadline"#);
+            assert_eq!(e.to_string(), "all retries failed: Retry exceeded deadline");
         }
         _ => {
             unreachable!();

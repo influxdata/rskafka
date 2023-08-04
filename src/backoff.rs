@@ -37,7 +37,7 @@ pub enum BackoffError {
     #[error("Retry exceeded deadline")]
     DeadlineExceded {
         deadline: Duration,
-        source: SourceError
+        source: SourceError,
     },
 }
 pub type BackoffResult<T> = Result<T, BackoffError>;
