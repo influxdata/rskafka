@@ -700,7 +700,7 @@ async fn test_client_backoff_terminates() {
             assert_eq!(e.to_string(), r#"all retries failed: Retry exceeded deadline"#);
         }
         _ => {
-            assert!(false);
+            unreachable!();
         }
     };
     println!("Some");
