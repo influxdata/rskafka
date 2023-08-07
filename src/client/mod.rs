@@ -47,7 +47,6 @@ pub struct ClientBuilder {
     socks5_proxy: Option<String>,
     tls_config: TlsConfig,
     backoff_config: Arc<BackoffConfig>,
-    sasl_config: Option<SaslConfig>,
 }
 
 impl ClientBuilder {
