@@ -6,7 +6,7 @@ use crate::{
     backoff::BackoffConfig,
     build_info::DEFAULT_CLIENT_ID,
     client::partition::PartitionClient,
-    connection::{BrokerConnector, TlsConfig},
+    connection::{BrokerConnector, MetadataLookupMode, TlsConfig},
     protocol::primitives::Boolean,
     topic::Topic,
 };
@@ -46,6 +46,7 @@ pub struct ClientBuilder {
     max_message_size: usize,
     socks5_proxy: Option<String>,
     tls_config: TlsConfig,
+    sasl_config: Option<SaslConfig>,
     backoff_config: Arc<BackoffConfig>,
 }
 
@@ -58,8 +59,8 @@ impl ClientBuilder {
             max_message_size: 100 * 1024 * 1024, // 100MB
             socks5_proxy: None,
             tls_config: TlsConfig::default(),
-            backoff_config: Default::default(),
             sasl_config: None,
+            backoff_config: Default::default(),
         }
     }
 

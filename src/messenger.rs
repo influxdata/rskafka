@@ -23,17 +23,6 @@ use tokio::{
 };
 use tracing::{debug, info, warn};
 
-use crate::protocol::{
-    api_key::ApiKey,
-    api_version::ApiVersion,
-    error::Error as ApiError,
-    frame::{AsyncMessageRead, AsyncMessageWrite},
-    messages::{
-        ReadVersionedError, ReadVersionedType, RequestBody, RequestHeader, ResponseHeader,
-        SaslAuthenticateRequest, SaslHandshakeRequest, WriteVersionedError, WriteVersionedType,
-    },
-    primitives::{Int16, Int32, NullableString, TaggedFields},
-};
 use crate::protocol::{api_version::ApiVersionRange, primitives::CompactString};
 use crate::protocol::{messages::ApiVersionsRequest, traits::ReadType};
 use crate::{
@@ -41,10 +30,11 @@ use crate::{
     protocol::{
         api_key::ApiKey,
         api_version::ApiVersion,
+        error::Error as ApiError,
         frame::{AsyncMessageRead, AsyncMessageWrite},
         messages::{
             ReadVersionedError, ReadVersionedType, RequestBody, RequestHeader, ResponseHeader,
-            WriteVersionedError, WriteVersionedType,
+            SaslAuthenticateRequest, SaslHandshakeRequest, WriteVersionedError, WriteVersionedType,
         },
         primitives::{Int16, Int32, NullableString, TaggedFields},
     },
