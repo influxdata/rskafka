@@ -131,7 +131,7 @@ $ docker-compose -f docker-compose-kafka.yml up
 in one session, and then run:
 
 ```console
-$ TEST_INTEGRATION=1 TEST_BROKER_IMPL=kafka TEST_DELETE_RECORDS=1 KAFKA_CONNECT=localhost:9011 KAFKA_SASL_CONNECT=localhost:9097 cargo test
+$ TEST_INTEGRATION=1 TEST_BROKER_IMPL=kafka KAFKA_CONNECT=localhost:9011 KAFKA_SASL_CONNECT=localhost:9097 cargo test
 ```
 
 in another session. Note that Apache Kafka supports a different set of features then redpanda, so we pass other

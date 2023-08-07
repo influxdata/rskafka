@@ -1,5 +1,9 @@
 #[derive(Debug, Clone)]
 pub enum SaslConfig {
+    /// SASL - PLAIN
+    ///
+    /// # References
+    /// - <https://datatracker.ietf.org/doc/html/rfc4616>
     Plain { username: String, password: String },
 }
 
