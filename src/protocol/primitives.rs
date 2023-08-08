@@ -478,6 +478,84 @@ where
     }
 }
 
+/// Represents a raw sequence of bytes.
+///
+/// First the length N is given as an INT32. Then N bytes follow.
+#[derive(Debug, Eq, PartialEq)]
+#[cfg_attr(test, derive(proptest_derive::Arbitrary))]
+pub struct Bytes(pub Vec<u8>);
+impl<R> ReadType<R> for Bytes
+where
+    R: Read,
+{
+    fn read(reader: &mut R) -> Result<Self, ReadError> {
+        let len = Int32::read(reader)?;
+        let len = usize::try_from(len.0)?;
+        let mut buf = VecBuilder::new(len);
+        buf = buf.read_exact(reader)?;
+        Ok(Self(buf.into()))
+    }
+}
+
+impl<W> WriteType<W> for Bytes
+where
+    W: Write,
+{
+    fn write(&self, writer: &mut W) -> Result<(), WriteError> {
+        let l = i32::try_from(self.0.len()).map_err(|e| WriteError::Malformed(Box::new(e)))?;
+        Int32(l).write(writer)?;
+        writer.write_all(&self.0)?;
+        Ok(())
+    }
+}
+
+/// Represents a raw sequence of bytes.
+///
+/// First the length N+1 is given as an UNSIGNED_VARINT.Then N bytes follow.
+#[derive(Debug, Eq, PartialEq)]
+#[cfg_attr(test, derive(proptest_derive::Arbitrary))]
+pub struct CompactBytes(pub Vec<u8>);
+impl<R> ReadType<R> for CompactBytes
+where
+    R: Read,
+{
+    fn read(reader: &mut R) -> Result<Self, ReadError> {
+        let len = UnsignedVarint::read(reader)?;
+        let len = usize::try_from(len.0)?;
+        let len = len - 1;
+        let mut buf = VecBuilder::new(len);
+        buf = buf.read_exact(reader)?;
+        Ok(Self(buf.into()))
+    }
+}
+
+impl<W> WriteType<W> for CompactBytes
+where
+    W: Write,
+{
+    fn write(&self, writer: &mut W) -> Result<(), WriteError> {
+        CompactBytesRef(&self.0).write(writer)
+    }
+}
+
+/// Same as [`CompactBytes`] but contains referenced data.
+///
+/// This only supports writing.
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct CompactBytesRef<'a>(pub &'a [u8]);
+
+impl<'a, W> WriteType<W> for CompactBytesRef<'a>
+where
+    W: Write,
+{
+    fn write(&self, writer: &mut W) -> Result<(), WriteError> {
+        let len = u64::try_from(self.0.len() + 1).map_err(WriteError::Overflow)?;
+        UnsignedVarint(len).write(writer)?;
+        writer.write_all(self.0)?;
+        Ok(())
+    }
+}
+
 /// Represents a raw sequence of bytes or null.
 ///
 /// For non-null values, first the length N is given as an INT32. Then N bytes follow. A null value is encoded with
@@ -945,6 +1023,10 @@ mod tests {
         let err = CompactNullableString::read(&mut buf).unwrap_err();
         assert_matches!(err, ReadError::IO(_));
     }
+
+    test_roundtrip!(Bytes, test_bytes_roundtrip);
+
+    test_roundtrip!(CompactBytes, test_compact_bytes_roundtrip);
 
     test_roundtrip!(NullableBytes, test_nullable_bytes_roundtrip);
 
