@@ -8,7 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## 0.5.0 -- SASL, Backoff Configs
 
 ### Features
-- backoff config w/ deadline added to `CLientConfig` (#213, #215)
+- backoff config w/ deadline added to `ClientConfig` (#213, #215)
 - `PLAIN` SASL auth (#216)
 
 ### Bug Fixes
