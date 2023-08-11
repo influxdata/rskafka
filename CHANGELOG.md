@@ -5,6 +5,21 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 
+## 0.5.0 -- SASL, Backoff Configs
+
+### Features
+- backoff config w/ deadline added to `CLientConfig` (#213, #215)
+- `PLAIN` SASL auth (#216)
+
+### Bug Fixes
+- license specifier now has correct SPDX 2.1 format
+
+### Dependency Updates
+- `integer-encoding` to 3 (#209)
+- `j4rs` (dev dependency) to 0.17.0 (#207, #210)
+- `rdkafka` (dev dependency) to 0.33 (#206, #208)
+
+
 ## 0.4.0 -- More Stability
 
 ### Breaking
