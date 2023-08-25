@@ -511,7 +511,7 @@ async fn test_produce_consume_size_cutoff() {
 
         async move {
             let (records, _high_watermark) = partition_client
-                .fetch_records(0, 1..(limit as i32), 1_000)
+                .fetch_records(0, 1..limit, 1_000)
                 .await
                 .unwrap();
             if records.len() == 1 {

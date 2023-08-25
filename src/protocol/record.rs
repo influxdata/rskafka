@@ -19,6 +19,7 @@
 //!
 //! [KIP-32]: https://cwiki.apache.org/confluence/display/KAFKA/KIP-32+-+Add+timestamps+to+Kafka+message
 //! [KIP-98]: https://cwiki.apache.org/confluence/display/KAFKA/KIP-98+-+Exactly+Once+Delivery+and+Transactional+Messaging
+#![allow(clippy::arc_with_non_send_sync)] // workaround for https://github.com/proptest-rs/proptest/issues/364
 use std::io::{Cursor, Read, Write};
 
 #[cfg(test)]

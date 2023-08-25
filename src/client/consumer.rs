@@ -307,7 +307,7 @@ impl Stream for StreamConsumer {
                     *this.last_high_watermark = watermark;
                     if let Some(x) = records_and_offsets.last() {
                         *this.next_offset = Some(x.offset + 1);
-                        this.buffer.extend(records_and_offsets.into_iter())
+                        this.buffer.extend(records_and_offsets)
                     }
                     continue;
                 }
@@ -480,7 +480,7 @@ mod tests {
 
                                 buffer.push(RecordAndOffset {
                                     record,
-                                    offset: record_offset as i64,
+                                    offset: record_offset,
                                 });
                                 buffered += size
                             }
