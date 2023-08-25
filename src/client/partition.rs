@@ -665,7 +665,7 @@ fn build_produce_request(
             ProtocolRecord {
                 key: record.key,
                 value: record.value,
-                timestamp_delta: (record.timestamp - first_timestamp).num_milliseconds() as i64,
+                timestamp_delta: (record.timestamp - first_timestamp).num_milliseconds(),
                 offset_delta: offset_delta as i32,
                 headers: record
                     .headers

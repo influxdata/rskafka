@@ -2,6 +2,7 @@
 name = "rskafka"
 version = "0.5.0"
 edition = "2021"
+rust-version = "1.72"
 license = "MIT OR Apache-2.0"
 readme = "README.md"
 keywords = [

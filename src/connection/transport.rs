@@ -17,7 +17,9 @@ pub use sasl::SaslConfig;
 pub type TlsConfig = Option<Arc<rustls::ClientConfig>>;
 
 #[cfg(not(feature = "transport-tls"))]
-pub type TlsConfig = ();
+#[allow(missing_copy_implementations)]
+#[derive(Debug, Clone, Default)]
+pub struct TlsConfig();
 
 #[derive(Debug, Error)]
 #[non_exhaustive]
