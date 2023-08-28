@@ -50,7 +50,7 @@ procspawn = "0.10"
 proptest = "1"
 proptest-derive = "0.3"
 rustls-pemfile = "1.0"
-rdkafka = { version = "0.33", default-features = false, features = ["libz", "tokio", "zstd"] }
+rdkafka = { version = "0.34", default-features = false, features = ["libz", "tokio", "zstd"] }
 tokio = { version = "1.14", features = ["macros", "rt-multi-thread"] }
 tracing-log = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
