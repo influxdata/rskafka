@@ -48,7 +48,7 @@ j4rs = "0.17.0"
 once_cell = "1.9"
 procspawn = "0.10"
 proptest = "1"
-proptest-derive = "0.3"
+proptest-derive = "0.4"
 rustls-pemfile = "1.0"
 rdkafka = { version = "0.34", default-features = false, features = ["libz", "tokio", "zstd"] }
 tokio = { version = "1.14", features = ["macros", "rt-multi-thread"] }
