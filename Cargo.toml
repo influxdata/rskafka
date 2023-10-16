@@ -37,7 +37,7 @@ thiserror = "1.0"
 tokio = { version = "1.19", default-features = false, features = ["io-util", "net", "rt", "sync", "time", "macros"] }
 tokio-rustls = { version = "0.24", optional = true }
 tracing = "0.1"
-zstd = { version = "0.12", optional = true }
+zstd = { version = "0.13", optional = true }
 
 [dev-dependencies]
 assert_matches = "1.5"
