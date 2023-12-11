@@ -35,7 +35,7 @@ pub enum Error {
 
     #[cfg(feature = "transport-tls")]
     #[error("Invalid Hostname: {0}")]
-    BadHostname(#[from] rustls::client::InvalidDnsNameError),
+    BadHostname(#[from] rustls::pki_types::InvalidDnsNameError),
 
     #[cfg(feature = "transport-socks5")]
     #[error("Cannot establish SOCKS5 connection: {0}")]
@@ -169,8 +169,9 @@ impl Transport {
                 let host = broker
                     .split(':')
                     .next()
-                    .ok_or_else(|| Error::InvalidHostPort(broker.to_owned()))?;
-                let server_name = rustls::ServerName::try_from(host)?;
+                    .ok_or_else(|| Error::InvalidHostPort(broker.to_owned()))?
+                    .to_owned();
+                let server_name = rustls::pki_types::ServerName::try_from(host)?;
 
                 let connector = TlsConnector::from(config);
                 let tls_stream = connector.connect(server_name, tcp_stream).await?;
