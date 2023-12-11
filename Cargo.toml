@@ -49,7 +49,7 @@ once_cell = "1.9"
 procspawn = "1.0"
 proptest = "1"
 proptest-derive = "0.4"
-rustls-pemfile = "1.0"
+rustls-pemfile = "2.0"
 rdkafka = { version = "0.34", default-features = false, features = ["libz", "tokio", "zstd"] }
 tokio = { version = "1.14", features = ["macros", "rt-multi-thread"] }
 tracing-log = "0.2"
