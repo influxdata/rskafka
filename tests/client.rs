@@ -213,7 +213,9 @@ async fn test_tls() {
     let mut reader = std::io::BufReader::new(file);
     match rustls_pemfile::read_one(&mut reader).unwrap().unwrap() {
         rustls_pemfile::Item::X509Certificate(key) => {
-            root_store.add(&rustls::Certificate(key)).unwrap();
+            root_store
+                .add(rustls::pki_types::CertificateDer::from(key))
+                .unwrap();
         }
         _ => unreachable!(),
     }
@@ -221,19 +223,20 @@ async fn test_tls() {
     let file = std::fs::File::open("/tmp/ca.crt").unwrap();
     let mut reader = std::io::BufReader::new(file);
     let producer_root = match rustls_pemfile::read_one(&mut reader).unwrap().unwrap() {
-        rustls_pemfile::Item::X509Certificate(key) => rustls::Certificate(key),
+        rustls_pemfile::Item::X509Certificate(key) => rustls::pki_types::CertificateDer::from(key),
         _ => unreachable!(),
     };
 
     let file = std::fs::File::open("/tmp/ca.key").unwrap();
     let mut reader = std::io::BufReader::new(file);
     let private_key = match rustls_pemfile::read_one(&mut reader).unwrap().unwrap() {
-        rustls_pemfile::Item::PKCS8Key(key) => rustls::PrivateKey(key),
+        rustls_pemfile::Item::PKCS8Key(key) => rustls::pki_types::PrivateKeyDer::Pkcs1(
+            rustls::pki_types::PrivatePkcs1KeyDer::from(key),
+        ),
         _ => unreachable!(),
     };
 
     let config = rustls::ClientConfig::builder()
-        .with_safe_defaults()
         .with_root_certificates(root_store)
         .with_client_auth_cert(vec![producer_root], private_key)
         .unwrap();
