@@ -721,7 +721,15 @@ async fn test_client_backoff_terminates() {
 
     match client_builder.build().await {
         Err(rskafka::client::error::Error::Connection(e)) => {
-            assert_eq!(e.to_string(), "all retries failed: Retry exceeded deadline");
+            // Error can be slightly different depending on the exact underlying error.
+            assert!(
+                e.to_string().starts_with(concat!(
+                    "all retries failed: Retry exceeded deadline. ",
+                    "Source: error connecting to broker \"localhost:9000\""
+                )),
+                "expected error to start with \"all retries failed...\", actual: {}",
+                e
+            );
         }
         _ => {
             unreachable!();
