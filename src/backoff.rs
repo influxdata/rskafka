@@ -28,13 +28,10 @@ impl Default for BackoffConfig {
 
 type SourceError = Box<dyn std::error::Error + Send + Sync>;
 
-// TODO: Currently, retrying can't fail, but there should be a global maximum timeout that
-// causes an error if the total time retrying exceeds that amount.
-// See https://github.com/influxdata/rskafka/issues/65
 #[derive(Debug, thiserror::Error)]
 #[allow(missing_copy_implementations)]
 pub enum BackoffError {
-    #[error("Retry exceeded deadline")]
+    #[error("Retry exceeded deadline. Source: {source}")]
     DeadlineExceded {
         deadline: Duration,
         source: SourceError,
@@ -103,9 +100,6 @@ impl Backoff {
     }
 
     /// Perform an async operation that retries with a backoff
-    // TODO: Currently, this can't fail, but there should be a global maximum timeout that
-    // causes an error if the total time retrying exceeds that amount.
-    // See https://github.com/influxdata/rskafka/issues/65
     pub async fn retry_with_backoff<F, F1, B, E>(
         &mut self,
         request_name: &str,

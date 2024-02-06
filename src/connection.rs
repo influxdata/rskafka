@@ -1,5 +1,6 @@
 use async_trait::async_trait;
 use rand::prelude::*;
+use std::fmt::Display;
 use std::ops::ControlFlow;
 use std::sync::Arc;
 use thiserror::Error;
@@ -52,6 +53,26 @@ pub enum Error {
 }
 
 pub type Result<T, E = Error> = std::result::Result<T, E>;
+
+#[derive(Debug, Error)]
+pub struct MultiError(Vec<Box<dyn std::error::Error + Send + Sync>>);
+
+impl Display for MultiError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let mut needs_comma = false;
+        if self.0.len() > 1 {
+            write!(f, "Multiple errors occured: ")?;
+        }
+        for err in &self.0 {
+            if needs_comma {
+                write!(f, ", ")?;
+            }
+            needs_comma = true;
+            write!(f, "{err}")?;
+        }
+        Ok(())
+    }
+}
 
 /// How to connect to a `Transport`
 #[async_trait]
@@ -470,6 +491,7 @@ where
     let mut backoff = Backoff::new(backoff_config);
     backoff
         .retry_with_backoff("broker_connect", || async {
+            let mut errors = Vec::<Box<dyn std::error::Error + Send + Sync>>::new();
             for broker in &brokers {
                 let conn = broker
                     .connect(
@@ -485,16 +507,14 @@ where
                     Ok(transport) => transport,
                     Err(e) => {
                         warn!(%e, "Failed to connect to broker");
+                        errors.push(Box::new(e));
                         continue;
                     }
                 };
 
                 return ControlFlow::Break(connection);
             }
-
-            let err = Box::<dyn std::error::Error + Send + Sync>::from(
-                "Failed to connect to any broker, backing off".to_string(),
-            );
+            let err = Box::<dyn std::error::Error + Send + Sync>::from(MultiError(errors));
             let err: Arc<dyn std::error::Error + Send + Sync> = err.into();
             ControlFlow::Continue(ErrorOrThrottle::Error(err))
         })

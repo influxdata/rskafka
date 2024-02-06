@@ -27,6 +27,8 @@ pub mod client;
 
 mod connection;
 
+pub use connection::Error as ConnectionError;
+
 #[cfg(feature = "unstable-fuzzing")]
 pub mod messenger;
 #[cfg(not(feature = "unstable-fuzzing"))]
