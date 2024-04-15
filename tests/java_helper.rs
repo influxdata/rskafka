@@ -78,7 +78,7 @@ pub async fn produce(
         let headers = jvm
             .create_instance(
                 "org.apache.kafka.common.header.internals.RecordHeaders",
-                &[],
+                InvocationArg::empty(),
             )
             .expect("creating KafkaProducer");
         for (k, v) in record.headers {
@@ -116,12 +116,15 @@ pub async fn produce(
     }
 
     // https://kafka.apache.org/31/javadoc/org/apache/kafka/clients/producer/KafkaProducer.html#flush()
-    jvm.invoke(&producer, "flush", &[]).expect("flush");
+    jvm.invoke(&producer, "flush", InvocationArg::empty())
+        .expect("flush");
 
     let mut offsets = vec![];
     for fut in futures {
         // https://docs.oracle.com/en/java/javase/17/docs/api/java.base/java/util/concurrent/Future.html#get()
-        let record_metadata = jvm.invoke(&fut, "get", &[]).expect("polling future");
+        let record_metadata = jvm
+            .invoke(&fut, "get", InvocationArg::empty())
+            .expect("polling future");
 
         // future returns `java.lang.Object`, cast that to the known result type
         let record_metadata = jvm
@@ -133,7 +136,7 @@ pub async fn produce(
 
         // https://kafka.apache.org/31/javadoc/org/apache/kafka/clients/producer/RecordMetadata.html#offset()
         let offset = jvm
-            .invoke(&record_metadata, "offset", &[])
+            .invoke(&record_metadata, "offset", InvocationArg::empty())
             .expect("getting offset");
 
         let offset: i64 = jvm.to_rust(offset).expect("converting offset to Rust");
@@ -141,7 +144,8 @@ pub async fn produce(
     }
 
     // https://kafka.apache.org/31/javadoc/org/apache/kafka/clients/producer/KafkaProducer.html#close()
-    jvm.invoke(&producer, "close", &[]).expect("close");
+    jvm.invoke(&producer, "close", InvocationArg::empty())
+        .expect("close");
 
     offsets
 }
@@ -221,7 +225,7 @@ pub async fn consume(
 
         // https://kafka.apache.org/31/javadoc/org/apache/kafka/clients/consumer/ConsumerRecords.html#iterator()
         let it = jvm
-            .invoke(&consumer_records, "iterator", &[])
+            .invoke(&consumer_records, "iterator", InvocationArg::empty())
             .expect("iterator");
         for consumer_record in JavaIterator::new(&jvm, it) {
             // iterator returns `java.lang.Object` which we need to cast to the known type
@@ -233,24 +237,32 @@ pub async fn consume(
                 .expect("cast to ConsumerRecord");
 
             // https://kafka.apache.org/31/javadoc/org/apache/kafka/clients/consumer/ConsumerRecord.html
-            let key = jvm.invoke(&consumer_record, "key", &[]).expect("key");
+            let key = jvm
+                .invoke(&consumer_record, "key", InvocationArg::empty())
+                .expect("key");
             let key: String = jvm.to_rust(key).expect("key to Rust");
 
-            let offset = jvm.invoke(&consumer_record, "offset", &[]).expect("offset");
+            let offset = jvm
+                .invoke(&consumer_record, "offset", InvocationArg::empty())
+                .expect("offset");
             let offset: i64 = jvm.to_rust(offset).expect("offset to Rust");
 
             let timestamp = jvm
-                .invoke(&consumer_record, "timestamp", &[])
+                .invoke(&consumer_record, "timestamp", InvocationArg::empty())
                 .expect("timestamp");
             let timestamp: i64 = jvm.to_rust(timestamp).expect("timestamp to Rust");
 
-            let value = jvm.invoke(&consumer_record, "value", &[]).expect("value");
+            let value = jvm
+                .invoke(&consumer_record, "value", InvocationArg::empty())
+                .expect("value");
             let value: String = jvm.to_rust(value).expect("value to Rust");
 
             let headers = jvm
-                .invoke(&consumer_record, "headers", &[])
+                .invoke(&consumer_record, "headers", InvocationArg::empty())
                 .expect("headers");
-            let headers = jvm.invoke(&headers, "toArray", &[]).expect("toArray");
+            let headers = jvm
+                .invoke(&headers, "toArray", InvocationArg::empty())
+                .expect("toArray");
             let headers = jvm
                 .invoke_static(
                     "java.util.Arrays",
@@ -258,17 +270,23 @@ pub async fn consume(
                     &[InvocationArg::from(headers)],
                 )
                 .expect("headers asList");
-            let headers_it = jvm.invoke(&headers, "iterator", &[]).expect("iterator");
+            let headers_it = jvm
+                .invoke(&headers, "iterator", InvocationArg::empty())
+                .expect("iterator");
             let mut headers = BTreeMap::new();
             for header in JavaIterator::new(&jvm, headers_it) {
                 let header = jvm
                     .cast(&header, "org.apache.kafka.common.header.Header")
                     .expect("cast to Header");
 
-                let key = jvm.invoke(&header, "key", &[]).expect("key");
+                let key = jvm
+                    .invoke(&header, "key", InvocationArg::empty())
+                    .expect("key");
                 let key: String = jvm.to_rust(key).expect("key to Rust");
 
-                let value = jvm.invoke(&header, "value", &[]).expect("value");
+                let value = jvm
+                    .invoke(&header, "value", InvocationArg::empty())
+                    .expect("value");
                 let value = from_java_bytes(&jvm, value);
 
                 headers.insert(key, value);
@@ -286,7 +304,8 @@ pub async fn consume(
     }
 
     // https://kafka.apache.org/31/javadoc/org/apache/kafka/clients/consumer/KafkaConsumer.html#close()
-    jvm.invoke(&consumer, "close", &[]).expect("close");
+    jvm.invoke(&consumer, "close", InvocationArg::empty())
+        .expect("close");
 
     results
 }
@@ -337,7 +356,7 @@ fn setup_jvm() -> Jvm {
 
 fn create_properties(jvm: &Jvm, properties: &[(&str, &str)]) -> Instance {
     let props = jvm
-        .create_instance("java.util.Properties", &[])
+        .create_instance("java.util.Properties", InvocationArg::empty())
         .expect("creating Properties");
 
     for (k, v) in properties {
@@ -380,7 +399,9 @@ fn from_java_bytes(jvm: &Jvm, bytes: Instance) -> Vec<u8> {
         .invoke_static("java.util.Arrays", "asList", &[InvocationArg::from(bytes)])
         .expect("bytes asList");
 
-    let it = jvm.invoke(&bytes, "iterator", &[]).expect("iterator");
+    let it = jvm
+        .invoke(&bytes, "iterator", InvocationArg::empty())
+        .expect("iterator");
 
     let mut res = vec![];
     for byte in JavaIterator::new(jvm, it) {
@@ -408,11 +429,18 @@ impl<'a> Iterator for JavaIterator<'a> {
 
     fn next(&mut self) -> Option<Self::Item> {
         // https://docs.oracle.com/en/java/javase/17/docs/api/java.base/java/util/Iterator.html#hasNext()
-        let has_next = self.jvm.invoke(&self.it, "hasNext", &[]).expect("hasNext");
+        let has_next = self
+            .jvm
+            .invoke(&self.it, "hasNext", InvocationArg::empty())
+            .expect("hasNext");
         let has_next: bool = self.jvm.to_rust(has_next).expect("hasNext to Rust");
         if has_next {
             // https://docs.oracle.com/en/java/javase/17/docs/api/java.base/java/util/Iterator.html#next()
-            Some(self.jvm.invoke(&self.it, "next", &[]).expect("next"))
+            Some(
+                self.jvm
+                    .invoke(&self.it, "next", InvocationArg::empty())
+                    .expect("next"),
+            )
         } else {
             None
         }
