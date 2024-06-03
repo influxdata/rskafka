@@ -688,7 +688,7 @@ mod tests {
     };
     use chrono::{TimeZone, Utc};
     use futures::stream::{FuturesOrdered, FuturesUnordered};
-    use futures::{pin_mut, FutureExt, StreamExt};
+    use futures::{pin_mut, FutureExt, StreamExt, TryStreamExt};
 
     #[derive(Debug)]
     struct MockClient {
@@ -1007,12 +1007,16 @@ mod tests {
             .with_linger(linger)
             .build(aggregator);
 
-        let mut futures = FuturesUnordered::new();
+        let futures = FuturesUnordered::new();
         futures.push(producer.produce(record.clone()));
         futures.push(producer.produce(record.clone()));
 
-        futures.next().await.unwrap().unwrap_err();
-        futures.next().await.unwrap().unwrap();
+        let mut results = futures.map_err(|e| e.to_string()).collect::<Vec<_>>().await;
+        results.sort();
+        assert_eq!(
+            results,
+            vec![Ok(1), Err("Aggregator error: test".to_owned())],
+        );
     }
 
     #[tokio::test]
