@@ -14,6 +14,10 @@ pin-project-lite = "0.2"
 rskafka = { path = "..", features = ["unstable-fuzzing"] }
 tokio = { version = "1.14", default-features = false, features = ["io-util", "rt"] }
 
+# Prevent this from interfering with workspaces
+[workspace]
+members = ["."]
+
 [[bin]]
 name = "protocol_reader"
 path = "fuzz_targets/protocol_reader.rs"
