@@ -2,25 +2,21 @@
 #   https://embarkstudios.github.io/cargo-deny/index.html
 
 [advisories]
-vulnerability = "deny"
+version = 2
 yanked = "deny"
-unmaintained = "warn"
-notice = "warn"
 ignore = [
+    { id = "RUSTSEC-2020-0016", reason = "net2 still required for tests (procspawn -> ipc-channel 0.16 -> mio 0.6 -> net2 )"}
 ]
 git-fetch-with-cli = true
 
 [licenses]
-allow-osi-fsf-free = "either"
-copyleft = "deny"
-unlicensed = "deny"
-default = "deny"
-
-exceptions = [
-    # Only for testing, build dep of j4rs
-    { name = "option-ext", allow = ["MPL-2.0"] },
-    # We should probably NOT bundle CA certs but use the OS ones.
-    { name = "webpki-roots", allow = ["MPL-2.0"] },
+unused-allowed-license = "warn"
+allow = [
+    "Apache-2.0",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "MIT",
+    "Unicode-DFS-2016",
 ]
 
 [[licenses.clarify]]
