@@ -5,7 +5,6 @@
 version = 2
 yanked = "deny"
 ignore = [
-    { id = "RUSTSEC-2020-0016", reason = "net2 still required for tests (procspawn -> ipc-channel 0.16 -> mio 0.6 -> net2 )"}
 ]
 git-fetch-with-cli = true
 

@@ -312,39 +312,29 @@ pub async fn consume(
 
 /// Lazy static that tracks if we already installed all JVM dependencies.
 static JVM_SETUP: Lazy<()> = Lazy::new(|| {
-    // The way JVM is hooked up via JNI is kinda weird. We have process-wide VMs that are always cached. On first
-    // startup j4rs sets up the class path based on what's already installed. If we now run the installation VM in the
-    // same process as our tests, we can never consume the freshly installed libraries. So we use a subprocess to run
-    // the actual dependency installation and drop that process (including its VM) once its completed.
-    procspawn::init();
+    let jvm_installation = JvmBuilder::new().build().expect("setup JVM");
 
-    let handle = procspawn::spawn((), |_| {
-        let jvm_installation = JvmBuilder::new().build().expect("setup JVM");
-
-        for artifact_name in [
-            // Kafka client
-            // Note that j4rs does NOT pull dependencies, so we need to add compression libs (except for gzip, which is
-            // built into Java) manually.
-            "org.apache.kafka:kafka-clients:3.5.0",
-            // Helper used in `from_java_bytes`
-            "org.apache.commons:commons-lang3:3.12.0",
-            // LZ4 compression support
-            "org.lz4:lz4-java:1.8.0",
-            // snappy compression support
-            "org.xerial.snappy:snappy-java:1.1.10.2",
-            // zstd compression support
-            "com.github.luben:zstd-jni:1.5.5-5",
-            // logging from within java
-            "org.slf4j:slf4j-api:2.0.7",
-        ] {
-            let artifact = MavenArtifact::from(artifact_name);
-            jvm_installation
-                .deploy_artifact(&artifact)
-                .unwrap_or_else(|_| panic!("Artifact deployment failed ({artifact_name})"));
-        }
-    });
-
-    handle.join().unwrap();
+    for artifact_name in [
+        // Kafka client
+        // Note that j4rs does NOT pull dependencies, so we need to add compression libs (except for gzip, which is
+        // built into Java) manually.
+        "org.apache.kafka:kafka-clients:3.5.0",
+        // Helper used in `from_java_bytes`
+        "org.apache.commons:commons-lang3:3.12.0",
+        // LZ4 compression support
+        "org.lz4:lz4-java:1.8.0",
+        // snappy compression support
+        "org.xerial.snappy:snappy-java:1.1.10.2",
+        // zstd compression support
+        "com.github.luben:zstd-jni:1.5.5-5",
+        // logging from within java
+        "org.slf4j:slf4j-api:2.0.7",
+    ] {
+        let artifact = MavenArtifact::from(artifact_name);
+        jvm_installation
+            .deploy_artifact(&artifact)
+            .unwrap_or_else(|_| panic!("Artifact deployment failed ({artifact_name})"));
+    }
 });
 
 fn setup_jvm() -> Jvm {
