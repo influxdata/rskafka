@@ -23,7 +23,6 @@ use crate::{
     throttle::maybe_throttle,
     validation::ExactlyOne,
 };
-use async_trait::async_trait;
 use chrono::{LocalResult, TimeZone, Utc};
 use std::{
     ops::{ControlFlow, Deref, Range},
@@ -412,7 +411,6 @@ impl PartitionClient {
 }
 
 /// Caches the partition leader broker.
-#[async_trait]
 impl BrokerCache for &PartitionClient {
     type R = MessengerTransport;
     type E = Error;

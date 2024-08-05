@@ -1,4 +1,3 @@
-use async_trait::async_trait;
 use std::ops::ControlFlow;
 use std::sync::Arc;
 use tokio::sync::Mutex;
@@ -172,7 +171,6 @@ impl ControllerClient {
 }
 
 /// Caches the cluster controller broker.
-#[async_trait]
 impl BrokerCache for &ControllerClient {
     type R = MessengerTransport;
     type E = Error;

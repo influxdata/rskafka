@@ -20,7 +20,6 @@ documentation = "https://docs.rs/rskafka/"
 
 [dependencies]
 async-socks5 = { version = "0.6", optional = true }
-async-trait = "0.1"
 bytes = "1.1"
 chrono = { version = "0.4", default-features = false }
 crc32c = "0.6.5"
