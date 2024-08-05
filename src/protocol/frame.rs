@@ -3,9 +3,8 @@
 //! # References
 //! - <https://kafka.apache.org/protocol#protocol_common>
 
-use std::io::Cursor;
+use std::{future::Future, io::Cursor};
 
-use async_trait::async_trait;
 use thiserror::Error;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 
@@ -27,12 +26,13 @@ pub enum ReadError {
     MessageTooLarge { limit: usize, actual: usize },
 }
 
-#[async_trait]
 pub trait AsyncMessageRead {
-    async fn read_message(&mut self, max_message_size: usize) -> Result<Vec<u8>, ReadError>;
+    fn read_message(
+        &mut self,
+        max_message_size: usize,
+    ) -> impl Future<Output = Result<Vec<u8>, ReadError>> + Send;
 }
 
-#[async_trait]
 impl<R> AsyncMessageRead for R
 where
     R: AsyncRead + Send + Unpin,
@@ -85,12 +85,10 @@ pub enum WriteError {
     TooLarge { size: usize },
 }
 
-#[async_trait]
 pub trait AsyncMessageWrite {
-    async fn write_message(&mut self, msg: &[u8]) -> Result<(), WriteError>;
+    fn write_message(&mut self, msg: &[u8]) -> impl Future<Output = Result<(), WriteError>> + Send;
 }
 
-#[async_trait]
 impl<W> AsyncMessageWrite for W
 where
     W: AsyncWrite + Send + Unpin,

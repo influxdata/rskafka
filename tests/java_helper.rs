@@ -1,8 +1,7 @@
-use std::collections::BTreeMap;
+use std::{collections::BTreeMap, sync::LazyLock};
 
 use chrono::{TimeZone, Utc};
 use j4rs::{Instance, InvocationArg, Jvm, JvmBuilder, MavenArtifact};
-use once_cell::sync::Lazy;
 use rskafka::{
     client::partition::Compression,
     record::{Record, RecordAndOffset},
@@ -311,7 +310,7 @@ pub async fn consume(
 }
 
 /// Lazy static that tracks if we already installed all JVM dependencies.
-static JVM_SETUP: Lazy<()> = Lazy::new(|| {
+static JVM_SETUP: LazyLock<()> = LazyLock::new(|| {
     let jvm_installation = JvmBuilder::new().build().expect("setup JVM");
 
     for artifact_name in [
@@ -338,7 +337,7 @@ static JVM_SETUP: Lazy<()> = Lazy::new(|| {
 });
 
 fn setup_jvm() -> Jvm {
-    Lazy::force(&JVM_SETUP);
+    LazyLock::force(&JVM_SETUP);
 
     let jvm = JvmBuilder::new().build().expect("setup JVM");
     jvm

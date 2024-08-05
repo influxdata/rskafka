@@ -1,6 +1,6 @@
-use async_trait::async_trait;
 use rand::prelude::*;
 use std::fmt::Display;
+use std::future::Future;
 use std::ops::ControlFlow;
 use std::sync::Arc;
 use thiserror::Error;
@@ -75,18 +75,17 @@ impl Display for MultiError {
 }
 
 /// How to connect to a `Transport`
-#[async_trait]
 trait ConnectionHandler {
     type R: RequestHandler + Send + Sync;
 
-    async fn connect(
+    fn connect(
         &self,
         client_id: Arc<str>,
         tls_config: TlsConfig,
         socks5_proxy: Option<String>,
         sasl_config: Option<SaslConfig>,
         max_message_size: usize,
-    ) -> Result<Arc<Self::R>>;
+    ) -> impl Future<Output = Result<Arc<Self::R>>> + Send;
 }
 
 /// Defines the possible request modes of metadata retrieval.
@@ -138,7 +137,6 @@ impl BrokerRepresentation {
     }
 }
 
-#[async_trait]
 impl ConnectionHandler for BrokerRepresentation {
     type R = MessengerTransport;
 
@@ -373,15 +371,13 @@ impl std::fmt::Debug for BrokerConnector {
     }
 }
 
-#[async_trait]
 trait RequestHandler {
-    async fn metadata_request(
+    fn metadata_request(
         &self,
         request_params: &MetadataRequest,
-    ) -> Result<MetadataResponse, RequestError>;
+    ) -> impl Future<Output = Result<MetadataResponse, RequestError>> + Send;
 }
 
-#[async_trait]
 impl RequestHandler for MessengerTransport {
     async fn metadata_request(
         &self,
@@ -415,18 +411,22 @@ impl BrokerCacheGeneration {
     }
 }
 
-#[async_trait]
 pub trait BrokerCache: Send + Sync {
     type R: Send + Sync;
     type E: std::error::Error + Send + Sync;
 
-    async fn get(&self) -> Result<(Arc<Self::R>, BrokerCacheGeneration), Self::E>;
+    fn get(
+        &self,
+    ) -> impl Future<Output = Result<(Arc<Self::R>, BrokerCacheGeneration), Self::E>> + Send;
 
-    async fn invalidate(&self, reason: &'static str, gen: BrokerCacheGeneration);
+    fn invalidate(
+        &self,
+        reason: &'static str,
+        gen: BrokerCacheGeneration,
+    ) -> impl Future<Output = ()> + Send;
 }
 
 /// BrokerConnector caches an arbitrary broker that can successfully connect.
-#[async_trait]
 impl BrokerCache for &BrokerConnector {
     type R = MessengerTransport;
     type E = Error;
@@ -602,7 +602,6 @@ mod tests {
         }
     }
 
-    #[async_trait]
     impl RequestHandler for FakeBroker {
         async fn metadata_request(
             &self,
@@ -617,7 +616,6 @@ mod tests {
         invalidate: Box<dyn Fn() + Send + Sync>,
     }
 
-    #[async_trait]
     impl BrokerCache for FakeBrokerCache {
         type R = FakeBroker;
         type E = Error;
@@ -794,7 +792,6 @@ mod tests {
     #[derive(Debug, PartialEq)]
     struct FakeConn;
 
-    #[async_trait]
     impl RequestHandler for FakeConn {
         async fn metadata_request(
             &self,
@@ -804,7 +801,6 @@ mod tests {
         }
     }
 
-    #[async_trait]
     impl ConnectionHandler for FakeBrokerRepresentation {
         type R = FakeConn;
 

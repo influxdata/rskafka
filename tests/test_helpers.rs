@@ -43,7 +43,9 @@ impl BrokerImpl {
 #[derive(Debug)]
 pub struct TestConfig {
     pub bootstrap_brokers: Vec<String>,
+    #[allow(dead_code)]
     pub broker_impl: BrokerImpl,
+    #[allow(dead_code)]
     pub socks5_proxy: Option<String>,
 }
 
