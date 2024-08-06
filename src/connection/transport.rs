@@ -1,4 +1,4 @@
-use pin_project_lite::pin_project;
+use std::ops::DerefMut;
 use std::pin::Pin;
 #[cfg(feature = "transport-tls")]
 use std::sync::Arc;
@@ -45,78 +45,67 @@ pub enum Error {
 pub type Result<T, E = Error> = std::result::Result<T, E>;
 
 #[cfg(feature = "transport-tls")]
-pin_project! {
-    #[project = TransportProj]
-    #[derive(Debug)]
-    pub enum Transport {
-        Plain{
-            #[pin]
-            inner: TcpStream,
-        },
+#[derive(Debug)]
+pub enum Transport {
+    Plain {
+        inner: TcpStream,
+    },
 
-        Tls{
-            #[pin]
-            inner: Box<TlsStream<TcpStream>>,
-        },
-    }
+    Tls {
+        inner: Pin<Box<TlsStream<TcpStream>>>,
+    },
 }
 
 #[cfg(not(feature = "transport-tls"))]
-pin_project! {
-    #[project = TransportProj]
-    #[derive(Debug)]
-    pub enum Transport {
-        Plain{
-            #[pin]
-            inner: TcpStream,
-        },
-    }
+#[derive(Debug)]
+pub enum Transport {
+    Plain { inner: TcpStream },
 }
 
 impl AsyncRead for Transport {
     fn poll_read(
-        self: Pin<&mut Self>,
+        mut self: Pin<&mut Self>,
         cx: &mut Context<'_>,
         buf: &mut ReadBuf<'_>,
     ) -> Poll<std::io::Result<()>> {
-        match self.project() {
-            TransportProj::Plain { inner } => inner.poll_read(cx, buf),
+        match self.deref_mut() {
+            Self::Plain { inner } => Pin::new(inner).poll_read(cx, buf),
 
             #[cfg(feature = "transport-tls")]
-            TransportProj::Tls { inner } => inner.poll_read(cx, buf),
+            Self::Tls { inner } => inner.as_mut().poll_read(cx, buf),
         }
     }
 }
 
 impl AsyncWrite for Transport {
     fn poll_write(
-        self: Pin<&mut Self>,
+        mut self: Pin<&mut Self>,
         cx: &mut Context<'_>,
         buf: &[u8],
     ) -> Poll<std::io::Result<usize>> {
-        match self.project() {
-            TransportProj::Plain { inner } => inner.poll_write(cx, buf),
+        match self.deref_mut() {
+            Self::Plain { inner } => Pin::new(inner).poll_write(cx, buf),
 
             #[cfg(feature = "transport-tls")]
-            TransportProj::Tls { inner } => inner.poll_write(cx, buf),
+            Self::Tls { inner } => inner.as_mut().poll_write(cx, buf),
         }
     }
 
-    fn poll_flush(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<std::io::Result<()>> {
-        match self.project() {
-            TransportProj::Plain { inner } => inner.poll_flush(cx),
+    fn poll_flush(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<std::io::Result<()>> {
+        match self.deref_mut() {
+            Self::Plain { inner } => Pin::new(inner).poll_flush(cx),
 
             #[cfg(feature = "transport-tls")]
-            TransportProj::Tls { inner } => inner.poll_flush(cx),
+            Self::Tls { inner } => inner.as_mut().poll_flush(cx),
         }
     }
 
-    fn poll_shutdown(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<std::io::Result<()>> {
-        match self.project() {
-            TransportProj::Plain { inner } => inner.poll_shutdown(cx),
+    fn poll_shutdown(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<std::io::Result<()>> {
+        match self.deref_mut() {
+            Self::Plain { inner } => Pin::new(inner).poll_shutdown(cx),
 
             #[cfg(feature = "transport-tls")]
-            TransportProj::Tls { inner } => inner.poll_shutdown(cx),
+            Self::Tls { inner } => inner.as_mut().poll_shutdown(cx),
         }
     }
 }
@@ -176,7 +165,7 @@ impl Transport {
                 let connector = TlsConnector::from(config);
                 let tls_stream = connector.connect(server_name, tcp_stream).await?;
                 Ok(Self::Tls {
-                    inner: Box::new(tls_stream),
+                    inner: Box::pin(tls_stream),
                 })
             }
             None => Ok(Self::Plain { inner: tcp_stream }),

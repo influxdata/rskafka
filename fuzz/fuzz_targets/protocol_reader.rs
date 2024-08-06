@@ -1,8 +1,15 @@
 #![no_main]
-use std::{collections::HashMap, io::Cursor, sync::Arc, time::Duration};
+use std::{
+    collections::HashMap,
+    io::Cursor,
+    ops::DerefMut,
+    pin::Pin,
+    sync::Arc,
+    task::{Context, Poll},
+    time::Duration,
+};
 
 use libfuzzer_sys::fuzz_target;
-use pin_project_lite::pin_project;
 use rskafka::{
     build_info::DEFAULT_CLIENT_ID,
     messenger::Messenger,
@@ -151,16 +158,12 @@ where
     })
 }
 
-pin_project! {
-    /// One-way mock transport with limited data.
-    ///
-    /// Can only be read. Writes go to `/dev/null`.
-    struct MockTransport {
-        #[pin]
-        data: Cursor<Vec<u8>>,
-        #[pin]
-        sink: Sink,
-    }
+/// One-way mock transport with limited data.
+///
+/// Can only be read. Writes go to `/dev/null`.
+struct MockTransport {
+    data: Cursor<Vec<u8>>,
+    sink: Sink,
 }
 
 impl MockTransport {
@@ -174,34 +177,34 @@ impl MockTransport {
 
 impl AsyncWrite for MockTransport {
     fn poll_write(
-        self: std::pin::Pin<&mut Self>,
-        cx: &mut std::task::Context<'_>,
+        mut self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
         buf: &[u8],
-    ) -> std::task::Poll<Result<usize, std::io::Error>> {
-        self.project().sink.poll_write(cx, buf)
+    ) -> Poll<Result<usize, std::io::Error>> {
+        Pin::new(&mut self.deref_mut().sink).poll_write(cx, buf)
     }
 
     fn poll_flush(
-        self: std::pin::Pin<&mut Self>,
-        cx: &mut std::task::Context<'_>,
-    ) -> std::task::Poll<Result<(), std::io::Error>> {
-        self.project().sink.poll_flush(cx)
+        mut self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+    ) -> Poll<Result<(), std::io::Error>> {
+        Pin::new(&mut self.deref_mut().sink).poll_flush(cx)
     }
 
     fn poll_shutdown(
-        self: std::pin::Pin<&mut Self>,
-        cx: &mut std::task::Context<'_>,
-    ) -> std::task::Poll<Result<(), std::io::Error>> {
-        self.project().sink.poll_shutdown(cx)
+        mut self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+    ) -> Poll<Result<(), std::io::Error>> {
+        Pin::new(&mut self.deref_mut().sink).poll_shutdown(cx)
     }
 }
 
 impl AsyncRead for MockTransport {
     fn poll_read(
-        self: std::pin::Pin<&mut Self>,
-        cx: &mut std::task::Context<'_>,
+        mut self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
         buf: &mut tokio::io::ReadBuf<'_>,
-    ) -> std::task::Poll<std::io::Result<()>> {
-        self.project().data.poll_read(cx, buf)
+    ) -> Poll<std::io::Result<()>> {
+        Pin::new(&mut self.deref_mut().data).poll_read(cx, buf)
     }
 }
