@@ -50,7 +50,6 @@ use std::time::Duration;
 
 use futures::future::{BoxFuture, Fuse, FusedFuture, FutureExt};
 use futures::Stream;
-use pin_project_lite::pin_project;
 use tracing::{debug, trace, warn};
 
 use crate::{
@@ -196,61 +195,58 @@ impl FetchClient for PartitionClient {
     }
 }
 
-pin_project! {
-    /// Stream consuming data from start offset.
-    ///
-    /// # Error Handling
-    /// If an error is returned by [`fetch_records`](`FetchClient::fetch_records`) then the stream will emit this error
-    /// once and will terminate afterwards.
-    pub struct StreamConsumer {
-        client: Arc<dyn FetchClient>,
+/// Stream consuming data from start offset.
+///
+/// # Error Handling
+/// If an error is returned by [`fetch_records`](`PartitionClient::fetch_records`) then the stream will emit this error
+/// once and will terminate afterwards.
+pub struct StreamConsumer {
+    client: Arc<dyn FetchClient>,
 
-        min_batch_size: i32,
+    min_batch_size: i32,
 
-        max_batch_size: i32,
+    max_batch_size: i32,
 
-        max_wait_ms: i32,
+    max_wait_ms: i32,
 
-        start_offset: StartOffset,
+    start_offset: StartOffset,
 
-        next_offset: Option<i64>,
+    next_offset: Option<i64>,
 
-        next_backoff: Option<Duration>,
+    next_backoff: Option<Duration>,
 
-        terminated: bool,
+    terminated: bool,
 
-        last_high_watermark: i64,
+    last_high_watermark: i64,
 
-        buffer: VecDeque<RecordAndOffset>,
+    buffer: VecDeque<RecordAndOffset>,
 
-        fetch_fut: Fuse<BoxFuture<'static, FetchResult>>,
-    }
+    fetch_fut: Fuse<BoxFuture<'static, FetchResult>>,
 }
 
 impl Stream for StreamConsumer {
     type Item = Result<(RecordAndOffset, i64)>;
 
-    fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-        let this = self.project();
+    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         loop {
-            if *this.terminated {
+            if self.terminated {
                 return Poll::Ready(None);
             }
-            if let Some(x) = this.buffer.pop_front() {
-                return Poll::Ready(Some(Ok((x, *this.last_high_watermark))));
+            if let Some(x) = self.buffer.pop_front() {
+                return Poll::Ready(Some(Ok((x, self.last_high_watermark))));
             }
 
-            if this.fetch_fut.is_terminated() {
-                let next_offset = *this.next_offset;
-                let start_offset = *this.start_offset;
-                let bytes = (*this.min_batch_size)..(*this.max_batch_size);
-                let max_wait_ms = *this.max_wait_ms;
-                let next_backoff = std::mem::take(this.next_backoff);
-                let client = Arc::clone(this.client);
+            if self.fetch_fut.is_terminated() {
+                let next_offset = self.next_offset;
+                let start_offset = self.start_offset;
+                let bytes = (self.min_batch_size)..(self.max_batch_size);
+                let max_wait_ms = self.max_wait_ms;
+                let next_backoff = std::mem::take(&mut self.next_backoff);
+                let client = Arc::clone(&self.client);
 
                 trace!(?start_offset, ?next_offset, "Fetching records at offset");
 
-                *this.fetch_fut = FutureExt::fuse(Box::pin(async move {
+                self.fetch_fut = FutureExt::fuse(Box::pin(async move {
                     if let Some(backoff) = next_backoff {
                         tokio::time::sleep(backoff).await;
                     }
@@ -282,9 +278,9 @@ impl Stream for StreamConsumer {
                 }));
             }
 
-            let data: FetchResult = futures::ready!(this.fetch_fut.poll_unpin(cx));
+            let data: FetchResult = futures::ready!(self.fetch_fut.poll_unpin(cx));
 
-            match (data, *this.start_offset) {
+            match (data, self.start_offset) {
                 (Ok(inner), _) => {
                     let FetchResultOk {
                         mut records_and_offsets,
@@ -300,14 +296,14 @@ impl Stream for StreamConsumer {
                     // Remember used offset (might be overwritten if there was any data) so we don't refetch the
                     // earliest / latest offset for every try. Also fetching the latest offset might be racy otherwise,
                     // since we'll never be in a position where the latest one can actually be fetched.
-                    *this.next_offset = Some(used_offset);
+                    self.next_offset = Some(used_offset);
 
                     // Sort records by offset in case they aren't in order
                     records_and_offsets.sort_by_key(|x| x.offset);
-                    *this.last_high_watermark = watermark;
+                    self.last_high_watermark = watermark;
                     if let Some(x) = records_and_offsets.last() {
-                        *this.next_offset = Some(x.offset + 1);
-                        this.buffer.extend(records_and_offsets)
+                        self.next_offset = Some(x.offset + 1);
+                        self.buffer.extend(records_and_offsets)
                     }
                     continue;
                 }
@@ -320,7 +316,7 @@ impl Stream for StreamConsumer {
                     StartOffset::Earliest | StartOffset::Latest,
                 ) => {
                     // wipe offset and try again
-                    *this.next_offset = None;
+                    self.next_offset = None;
 
                     // This will only happen if retention / deletions happen after we've asked for the earliest/latest
                     // offset and our "fetch" request. This should be a rather rare event, but if something is horrible
@@ -328,17 +324,17 @@ impl Stream for StreamConsumer {
                     // a bit.
                     let backoff_secs = 1;
                     warn!(
-                        start_offset=?this.start_offset,
+                        start_offset=?self.start_offset,
                         backoff_secs,
                         "Records are gone between ListOffsets and Fetch, backoff a bit",
                     );
-                    *this.next_backoff = Some(Duration::from_secs(backoff_secs));
+                    self.next_backoff = Some(Duration::from_secs(backoff_secs));
 
                     continue;
                 }
                 // if we have an offset, terminate the stream
                 (Err(e), _) => {
-                    *this.terminated = true;
+                    self.terminated = true;
 
                     // report error once
                     return Poll::Ready(Some(Err(e)));
