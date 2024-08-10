@@ -41,10 +41,9 @@ async fn test_sasl() {
         return;
     }
     ClientBuilder::new(vec![env::var("KAFKA_SASL_CONNECT").unwrap()])
-        .sasl_config(rskafka::client::SaslConfig::Plain {
-            username: "admin".to_string(),
-            password: "admin-secret".to_string(),
-        })
+        .sasl_config(rskafka::client::SaslConfig::Plain(
+            rskafka::client::Credentials::new("admin".to_string(), "admin-secret".to_string()),
+        ))
         .build()
         .await
         .unwrap();
@@ -425,7 +424,7 @@ async fn test_get_offset() {
     // use out-of order timestamps to ensure our "lastest offset" logic works
     let record_early = record(b"");
     let record_late = Record {
-        timestamp: record_early.timestamp + chrono::Duration::seconds(1),
+        timestamp: record_early.timestamp + chrono::Duration::try_seconds(1).unwrap(),
         ..record_early.clone()
     };
     let offsets = partition_client

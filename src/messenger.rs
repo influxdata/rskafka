@@ -12,6 +12,7 @@ use std::{
 
 use futures::future::BoxFuture;
 use parking_lot::Mutex;
+use rsasl::{config::SASLConfig, mechname::MechanismNameError, prelude::Mechname};
 use thiserror::Error;
 use tokio::{
     io::{AsyncRead, AsyncWrite, AsyncWriteExt, WriteHalf},
@@ -23,8 +24,6 @@ use tokio::{
 };
 use tracing::{debug, info, warn};
 
-use crate::protocol::{api_version::ApiVersionRange, primitives::CompactString};
-use crate::protocol::{messages::ApiVersionsRequest, traits::ReadType};
 use crate::{
     backoff::ErrorOrThrottle,
     protocol::{
@@ -34,11 +33,20 @@ use crate::{
         frame::{AsyncMessageRead, AsyncMessageWrite},
         messages::{
             ReadVersionedError, ReadVersionedType, RequestBody, RequestHeader, ResponseHeader,
-            SaslAuthenticateRequest, SaslHandshakeRequest, WriteVersionedError, WriteVersionedType,
+            SaslAuthenticateRequest, SaslAuthenticateResponse, SaslHandshakeRequest,
+            SaslHandshakeResponse, WriteVersionedError, WriteVersionedType,
         },
         primitives::{Int16, Int32, NullableString, TaggedFields},
     },
     throttle::maybe_throttle,
+};
+use crate::{
+    client::SaslConfig,
+    protocol::{api_version::ApiVersionRange, primitives::CompactString},
+};
+use crate::{
+    connection::Credentials,
+    protocol::{messages::ApiVersionsRequest, traits::ReadType},
 };
 
 #[derive(Debug)]
@@ -186,6 +194,12 @@ pub enum SaslError {
 
     #[error("API error: {0}")]
     ApiError(#[from] ApiError),
+
+    #[error("Invalid sasl mechanism: {0}")]
+    InvalidSaslMechanism(#[from] MechanismNameError),
+
+    #[error("unsupported sasl mechanism")]
+    UnsupportedSaslMechanism,
 }
 
 impl<RW> Messenger<RW>
@@ -531,16 +545,10 @@ where
         Err(SyncVersionsError::NoWorkingVersion)
     }
 
-    pub async fn sasl_handshake(
+    async fn sasl_authentication(
         &self,
-        mechanism: &str,
         auth_bytes: Vec<u8>,
-    ) -> Result<(), SaslError> {
-        let req = SaslHandshakeRequest::new(mechanism);
-        let resp = self.request(req).await?;
-        if let Some(err) = resp.error_code {
-            return Err(SaslError::ApiError(err));
-        }
+    ) -> Result<SaslAuthenticateResponse, SaslError> {
         let req = SaslAuthenticateRequest::new(auth_bytes);
         let resp = self.request(req).await?;
         if let Some(err) = resp.error_code {
@@ -549,6 +557,63 @@ where
             }
             return Err(SaslError::ApiError(err));
         }
+
+        Ok(resp)
+    }
+
+    async fn sasl_handshake(&self, mechanism: &str) -> Result<SaslHandshakeResponse, SaslError> {
+        let req = SaslHandshakeRequest::new(mechanism);
+        let resp = self.request(req).await?;
+        if let Some(err) = resp.error_code {
+            return Err(SaslError::ApiError(err));
+        }
+        Ok(resp)
+    }
+
+    pub async fn do_sasl(&self, config: SaslConfig) -> Result<(), SaslError> {
+        let mechanism = config.mechanism();
+        let resp = self.sasl_handshake(mechanism).await?;
+
+        let Credentials { username, password } = config.credentials();
+        let config = SASLConfig::with_credentials(None, username, password).unwrap();
+        let sasl = rsasl::prelude::SASLClient::new(config);
+        let raw_mechanisms = resp.mechanisms.0.unwrap_or_default();
+        let mechanisms = raw_mechanisms
+            .iter()
+            .map(|mech| Mechname::parse(mech.0.as_bytes()).map_err(SaslError::InvalidSaslMechanism))
+            .collect::<Result<Vec<_>, SaslError>>()?;
+        debug!("Supported mechanisms {:?}", mechanisms);
+        let prefer_mechanism =
+            Mechname::parse(mechanism.as_bytes()).map_err(SaslError::InvalidSaslMechanism)?;
+        if !mechanisms.contains(&prefer_mechanism) {
+            return Err(SaslError::UnsupportedSaslMechanism);
+        }
+        let mut session = sasl
+            .start_suggested(&[prefer_mechanism])
+            .map_err(|_| SaslError::UnsupportedSaslMechanism)?;
+        // let selected_mechanism = session.get_mechname();
+        debug!("Using {:?} for the SASL Mechanism", mechanism);
+        let mut data: Option<Vec<u8>> = None;
+
+        // Stepping the authentication exchange to completion.
+        while {
+            let mut out = Cursor::new(Vec::new());
+            // The each call to step writes the generated auth data into the provided writer.
+            // Normally this data would then have to be sent to the other party, but this goes
+            // beyond the scope of this example.
+            let state = session
+                .step(data.as_deref(), &mut out)
+                .expect("step errored!");
+
+            data = Some(out.into_inner());
+
+            // Returns `true` if step needs to be called again with another batch of data.
+            state.is_running()
+        } {
+            let authentication_response = self.sasl_authentication(data.take().unwrap()).await?;
+            data = Some(authentication_response.auth_bytes.0);
+        }
+
         Ok(())
     }
 }

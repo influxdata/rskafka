@@ -20,6 +20,7 @@ use crate::{
     client::metadata_cache::MetadataCache,
 };
 
+pub use self::transport::Credentials;
 pub use self::transport::SaslConfig;
 pub use self::transport::TlsConfig;
 
@@ -164,9 +165,7 @@ impl ConnectionHandler for BrokerRepresentation {
         let mut messenger = Messenger::new(BufStream::new(transport), max_message_size, client_id);
         messenger.sync_versions().await?;
         if let Some(sasl_config) = sasl_config {
-            messenger
-                .sasl_handshake(sasl_config.mechanism(), sasl_config.auth_bytes())
-                .await?;
+            messenger.do_sasl(sasl_config).await?;
         }
         Ok(Arc::new(messenger))
     }

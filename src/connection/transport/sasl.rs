@@ -4,25 +4,45 @@ pub enum SaslConfig {
     ///
     /// # References
     /// - <https://datatracker.ietf.org/doc/html/rfc4616>
-    Plain { username: String, password: String },
+    Plain(Credentials),
+    /// SASL - SCRAM-SHA-256
+    ///
+    /// # References
+    /// - <https://datatracker.ietf.org/doc/html/rfc7677>
+    ScramSha256(Credentials),
+    /// SASL - SCRAM-SHA-512
+    ///
+    /// # References
+    /// - <https://datatracker.ietf.org/doc/html/draft-melnikov-scram-sha-512-04>
+    ScramSha512(Credentials),
+}
+
+#[derive(Debug, Clone)]
+pub struct Credentials {
+    pub username: String,
+    pub password: String,
+}
+
+impl Credentials {
+    pub fn new(username: String, password: String) -> Self {
+        Self { username, password }
+    }
 }
 
 impl SaslConfig {
-    pub(crate) fn auth_bytes(&self) -> Vec<u8> {
+    pub(crate) fn credentials(&self) -> Credentials {
         match self {
-            Self::Plain { username, password } => {
-                let mut auth: Vec<u8> = vec![0];
-                auth.extend(username.bytes());
-                auth.push(0);
-                auth.extend(password.bytes());
-                auth
-            }
+            Self::Plain(credentials) => credentials.clone(),
+            Self::ScramSha256(credentials) => credentials.clone(),
+            Self::ScramSha512(credentials) => credentials.clone(),
         }
     }
 
     pub(crate) fn mechanism(&self) -> &str {
         match self {
             Self::Plain { .. } => "PLAIN",
+            Self::ScramSha256 { .. } => "SCRAM-SHA-256",
+            Self::ScramSha512 { .. } => "SCRAM-SHA-512",
         }
     }
 }
