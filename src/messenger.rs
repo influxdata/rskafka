@@ -12,7 +12,11 @@ use std::{
 
 use futures::future::BoxFuture;
 use parking_lot::Mutex;
-use rsasl::{config::SASLConfig, mechname::MechanismNameError, prelude::Mechname};
+use rsasl::{
+    config::SASLConfig,
+    mechname::MechanismNameError,
+    prelude::{Mechname, SessionError},
+};
 use thiserror::Error;
 use tokio::{
     io::{AsyncRead, AsyncWrite, AsyncWriteExt, WriteHalf},
@@ -197,6 +201,9 @@ pub enum SaslError {
 
     #[error("Invalid sasl mechanism: {0}")]
     InvalidSaslMechanism(#[from] MechanismNameError),
+
+    #[error("Sasl session error: {0}")]
+    SaslSessionError(#[from] SessionError),
 
     #[error("unsupported sasl mechanism")]
     UnsupportedSaslMechanism,
@@ -582,7 +589,7 @@ where
             .iter()
             .map(|mech| Mechname::parse(mech.0.as_bytes()).map_err(SaslError::InvalidSaslMechanism))
             .collect::<Result<Vec<_>, SaslError>>()?;
-        debug!("Supported mechanisms {:?}", mechanisms);
+        debug!(?mechanisms, "Supported SASL mechanisms");
         let prefer_mechanism =
             Mechname::parse(mechanism.as_bytes()).map_err(SaslError::InvalidSaslMechanism)?;
         if !mechanisms.contains(&prefer_mechanism) {
@@ -591,27 +598,18 @@ where
         let mut session = sasl
             .start_suggested(&[prefer_mechanism])
             .map_err(|_| SaslError::UnsupportedSaslMechanism)?;
-        // let selected_mechanism = session.get_mechname();
-        debug!("Using {:?} for the SASL Mechanism", mechanism);
-        let mut data: Option<Vec<u8>> = None;
+        debug!(?mechanism, "Using SASL Mechanism");
+        // we step through the auth process, starting on our side with NO data received so far
+        let mut data_received: Option<Vec<u8>> = None;
+        loop {
+            let mut to_sent = Cursor::new(Vec::new());
+            let state = session.step(data_received.as_deref(), &mut to_sent)?;
+            if !state.is_running() {
+                break;
+            }
 
-        // Stepping the authentication exchange to completion.
-        while {
-            let mut out = Cursor::new(Vec::new());
-            // The each call to step writes the generated auth data into the provided writer.
-            // Normally this data would then have to be sent to the other party, but this goes
-            // beyond the scope of this example.
-            let state = session
-                .step(data.as_deref(), &mut out)
-                .expect("step errored!");
-
-            data = Some(out.into_inner());
-
-            // Returns `true` if step needs to be called again with another batch of data.
-            state.is_running()
-        } {
-            let authentication_response = self.sasl_authentication(data.take().unwrap()).await?;
-            data = Some(authentication_response.auth_bytes.0);
+            let authentication_response = self.sasl_authentication(to_sent.into_inner()).await?;
+            data_received = Some(authentication_response.auth_bytes.0);
         }
 
         Ok(())
