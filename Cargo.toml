@@ -36,6 +36,7 @@ tokio = { version = "1.19", default-features = false, features = ["io-util", "ne
 tokio-rustls = { version = "0.26", optional = true, default-features = false, features = ["logging", "ring", "tls12"] }
 tracing = "0.1"
 zstd = { version = "0.13", optional = true }
+rsasl = { version = "2.1", default-features = false, features = ["config_builder", "provider", "plain", "scram-sha-2"]}
 
 [dev-dependencies]
 assert_matches = "1.5"

@@ -22,7 +22,7 @@ use error::{Error, Result};
 
 use self::{controller::ControllerClient, partition::UnknownTopicHandling};
 
-pub use crate::connection::SaslConfig;
+pub use crate::connection::{Credentials, SaslConfig};
 
 #[derive(Debug, Error)]
 pub enum ProduceError {

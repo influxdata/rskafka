@@ -11,7 +11,7 @@ use tokio::net::TcpStream;
 use tokio_rustls::{client::TlsStream, TlsConnector};
 
 mod sasl;
-pub use sasl::SaslConfig;
+pub use sasl::{Credentials, SaslConfig};
 
 #[cfg(feature = "transport-tls")]
 pub type TlsConfig = Option<Arc<rustls::ClientConfig>>;
