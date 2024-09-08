@@ -92,7 +92,6 @@ harness = false
 [workspace]
 members = [
     ".",
-    "fuzz",
 ]
 
 [profile.bench]
