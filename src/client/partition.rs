@@ -97,6 +97,10 @@ pub enum OffsetAt {
 
     /// The latest existing record.
     Latest,
+
+    #[cfg(feature = "timestamp-query")]
+    /// Timestamp
+    Timestamp(i64),
 }
 
 #[derive(Debug)]
@@ -902,6 +906,8 @@ fn build_list_offsets_request(partition: i32, topic: &str, at: OffsetAt) -> List
     let timestamp = match at {
         OffsetAt::Earliest => -2,
         OffsetAt::Latest => -1,
+        #[cfg(feature = "timestamp-query")]
+        OffsetAt::Timestamp(ts) => ts,
     };
 
     ListOffsetsRequest {
