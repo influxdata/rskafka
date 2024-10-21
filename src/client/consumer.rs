@@ -502,6 +502,9 @@ mod tests {
                 match at {
                     OffsetAt::Earliest => Ok(inner.lock().await.range.0),
                     OffsetAt::Latest => Ok(inner.lock().await.range.1),
+                    OffsetAt::Timestamp(_) => {
+                        unreachable!("timestamp based offset is tested in e2e test")
+                    }
                 }
             })
         }
