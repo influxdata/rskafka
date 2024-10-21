@@ -23,7 +23,7 @@ use crate::{
     throttle::maybe_throttle,
     validation::ExactlyOne,
 };
-use chrono::{LocalResult, TimeZone, Utc};
+use chrono::{DateTime, LocalResult, TimeZone, Utc};
 use std::{
     ops::{ControlFlow, Deref, Range},
     sync::Arc,
@@ -97,6 +97,9 @@ pub enum OffsetAt {
 
     /// The latest existing record.
     Latest,
+
+    /// Timestamp
+    Timestamp(DateTime<Utc>),
 }
 
 #[derive(Debug)]
@@ -902,6 +905,7 @@ fn build_list_offsets_request(partition: i32, topic: &str, at: OffsetAt) -> List
     let timestamp = match at {
         OffsetAt::Earliest => -2,
         OffsetAt::Latest => -1,
+        OffsetAt::Timestamp(ts) => ts.timestamp_millis(),
     };
 
     ListOffsetsRequest {
