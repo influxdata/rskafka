@@ -10,7 +10,7 @@ write-ahead log.
 
 It is **not** a general-purpose Kafka implementation, instead it is heavily optimised for simplicity, both in terms of
 implementation and its emergent operational characteristics. In particular, it aims to meet the needs
-of [IOx].
+of [IOx](https://github.com/metrico/influxdb_iox).
 
 This crate has:
 
