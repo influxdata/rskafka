@@ -9,8 +9,7 @@ This crate aims to be a minimal Kafka implementation for simple workloads that w
 write-ahead log.
 
 It is **not** a general-purpose Kafka implementation, instead it is heavily optimised for simplicity, both in terms of
-implementation and its emergent operational characteristics. In particular, it aims to meet the needs
-of [IOx].
+implementation and its emergent operational characteristics. It was originally used by [InfluxDB 3.0] but no longer is.
 
 This crate has:
 
@@ -273,7 +272,7 @@ e.g. by batching writes to multiple partitions in a single ProduceRequest
 [cargo-fuzz]: https://github.com/rust-fuzz/cargo-fuzz
 [cargo-with]: https://github.com/cbourjau/cargo-with
 [gzip]: https://en.wikipedia.org/wiki/Gzip
-[IOx]: https://github.com/influxdata/influxdb_iox/
+[InfluxDB 3.0]: https://github.com/influxdata/influxdb
 [LLDB]: https://lldb.llvm.org/
 [LZ4]: https://lz4.github.io/lz4/
 [perf]: https://perf.wiki.kernel.org/index.php/Main_Page
