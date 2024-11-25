@@ -2,9 +2,12 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use assert_matches::assert_matches;
+use chrono::{DateTime, TimeZone, Utc};
 use futures::{Stream, StreamExt};
 use tokio::time::timeout;
 
+use rskafka::client::partition::OffsetAt;
+use rskafka::record::Record;
 use rskafka::{
     client::{
         consumer::{StartOffset, StreamConsumer, StreamConsumerBuilder},
@@ -415,6 +418,60 @@ async fn test_stream_consumer_start_at_latest_empty() {
     assert_stream_pending(&mut stream).await;
 }
 
+#[tokio::test]
+async fn test_stream_consumer_start_timestamp_based_offset() {
+    maybe_start_logging();
+
+    let test_cfg = maybe_skip_kafka_integration!();
+    let client = ClientBuilder::new(test_cfg.bootstrap_brokers)
+        .build()
+        .await
+        .unwrap();
+    let controller_client = client.controller_client().unwrap();
+
+    let topic = random_topic_name();
+    controller_client
+        .create_topic(&topic, 1, 1, 5_000)
+        .await
+        .unwrap();
+
+    let partition_client = Arc::new(
+        client
+            .partition_client(&topic, 0, UnknownTopicHandling::Retry)
+            .await
+            .unwrap(),
+    );
+    let ts = Utc.timestamp_millis_opt(1337).unwrap();
+    let record_1 = record_with_timestamp_milliseconds(b"x", ts);
+    let record_2 = record_with_timestamp_milliseconds(b"y", ts + Duration::from_millis(100));
+    partition_client
+        .produce(vec![record_1.clone()], Compression::NoCompression)
+        .await
+        .unwrap();
+
+    partition_client
+        .produce(vec![record_2.clone()], Compression::NoCompression)
+        .await
+        .unwrap();
+
+    let offset = partition_client
+        .get_offset(OffsetAt::Timestamp(ts + Duration::from_millis(100)))
+        .await
+        .unwrap();
+    assert_eq!(offset, 1);
+    let mut stream =
+        StreamConsumerBuilder::new(Arc::clone(&partition_client), StartOffset::At(offset))
+            .with_max_wait_ms(50)
+            .build();
+
+    // Get record
+    let (record_and_offset, _) = assert_ok(timeout(TEST_TIMEOUT, stream.next()).await);
+    assert_eq!(record_and_offset.record, record_2);
+
+    // No further records
+    assert_stream_pending(&mut stream).await;
+}
+
 fn assert_ok(
     r: Result<Option<<StreamConsumer as Stream>::Item>, tokio::time::error::Elapsed>,
 ) -> (RecordAndOffset, i64) {
@@ -435,4 +492,13 @@ where
         e = stream.next() => panic!("stream is not pending, yielded: {e:?}"),
         _ = tokio::time::sleep(Duration::from_secs(1)) => {},
     };
+}
+
+fn record_with_timestamp_milliseconds(key: &[u8], timestamp: DateTime<Utc>) -> Record {
+    Record {
+        key: Some(key.to_vec()),
+        value: Some(b"hello kafka".to_vec()),
+        headers: std::collections::BTreeMap::from([("foo".to_owned(), b"bar".to_vec())]),
+        timestamp,
+    }
 }

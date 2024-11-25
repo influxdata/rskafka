@@ -23,7 +23,7 @@ use crate::{
     throttle::maybe_throttle,
     validation::ExactlyOne,
 };
-use chrono::{LocalResult, TimeZone, Utc};
+use chrono::{DateTime, LocalResult, TimeZone, Utc};
 use std::{
     ops::{ControlFlow, Deref, Range},
     sync::Arc,
@@ -82,11 +82,6 @@ pub enum Compression {
 }
 
 /// Which type of offset should be requested by [`PartitionClient::get_offset`].
-///
-/// # Timestamp-based Queries
-/// In theory the Kafka API would also support querying an offset based on a timestamp, but the behavior seems to be
-/// semi-defined, unintuitive (even within Apache Kafka) and inconsistent between Apache Kafka and Redpanda. So we
-/// decided to NOT expose this option.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum OffsetAt {
     /// Earliest existing record.
@@ -97,6 +92,13 @@ pub enum OffsetAt {
 
     /// The latest existing record.
     Latest,
+
+    /// Timestamp
+    ///
+    /// The Kafka API supports querying an offset based on a timestamp, but the behavior seems to be
+    /// semi-defined, unintuitive (even within Apache Kafka) and inconsistent between Apache Kafka and Redpanda. Mostly it
+    /// offers timestamp based querying with millisecond precision.
+    Timestamp(DateTime<Utc>),
 }
 
 #[derive(Debug)]
@@ -902,6 +904,7 @@ fn build_list_offsets_request(partition: i32, topic: &str, at: OffsetAt) -> List
     let timestamp = match at {
         OffsetAt::Earliest => -2,
         OffsetAt::Latest => -1,
+        OffsetAt::Timestamp(ts) => ts.timestamp_millis(),
     };
 
     ListOffsetsRequest {
