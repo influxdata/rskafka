@@ -13,9 +13,8 @@ use std::{
 use futures::future::BoxFuture;
 use parking_lot::Mutex;
 use rsasl::{
-    config::SASLConfig,
     mechname::MechanismNameError,
-    prelude::{Mechname, SessionError},
+    prelude::{Mechname, SASLError, SessionError},
 };
 use thiserror::Error;
 use tokio::{
@@ -28,6 +27,7 @@ use tokio::{
 };
 use tracing::{debug, info, warn};
 
+use crate::protocol::{messages::ApiVersionsRequest, traits::ReadType};
 use crate::{
     backoff::ErrorOrThrottle,
     protocol::{
@@ -47,10 +47,6 @@ use crate::{
 use crate::{
     client::SaslConfig,
     protocol::{api_version::ApiVersionRange, primitives::CompactString},
-};
-use crate::{
-    connection::Credentials,
-    protocol::{messages::ApiVersionsRequest, traits::ReadType},
 };
 
 #[derive(Debug)]
@@ -204,6 +200,12 @@ pub enum SaslError {
 
     #[error("Sasl session error: {0}")]
     SaslSessionError(#[from] SessionError),
+
+    #[error("Invalid SASL config: {0}")]
+    InvalidConfig(#[from] SASLError),
+
+    #[error("Error in user defined callback: {0}")]
+    Callback(Box<dyn std::error::Error + Send + Sync>),
 
     #[error("unsupported sasl mechanism")]
     UnsupportedSaslMechanism,
@@ -581,8 +583,7 @@ where
         let mechanism = config.mechanism();
         let resp = self.sasl_handshake(mechanism).await?;
 
-        let Credentials { username, password } = config.credentials();
-        let config = SASLConfig::with_credentials(None, username, password).unwrap();
+        let config = config.get_sasl_config().await?;
         let sasl = rsasl::prelude::SASLClient::new(config);
         let raw_mechanisms = resp.mechanisms.0.unwrap_or_default();
         let mechanisms = raw_mechanisms
@@ -604,12 +605,14 @@ where
         loop {
             let mut to_sent = Cursor::new(Vec::new());
             let state = session.step(data_received.as_deref(), &mut to_sent)?;
-            if !state.is_running() {
+
+            if state.has_sent_message() {
+                let authentication_response =
+                    self.sasl_authentication(to_sent.into_inner()).await?;
+                data_received = Some(authentication_response.auth_bytes.0);
+            } else {
                 break;
             }
-
-            let authentication_response = self.sasl_authentication(to_sent.into_inner()).await?;
-            data_received = Some(authentication_response.auth_bytes.0);
         }
 
         Ok(())
