@@ -105,14 +105,9 @@ jobs:
     steps:
       - checkout
       - rust_components
-      - cache_restore
-      - run:
-          name: Install cargo-deny
-          command: cargo install cargo-deny
       - run:
           name: cargo-deny Checks
           command: cargo deny check -s
-      - cache_save
   doc:
     docker:
       - image: quay.io/influxdb/rust:ci
