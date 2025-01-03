@@ -605,12 +605,14 @@ where
         loop {
             let mut to_sent = Cursor::new(Vec::new());
             let state = session.step(data_received.as_deref(), &mut to_sent)?;
-            if !state.is_running() {
+
+            if state.has_sent_message() {
+                let authentication_response =
+                    self.sasl_authentication(to_sent.into_inner()).await?;
+                data_received = Some(authentication_response.auth_bytes.0);
+            } else {
                 break;
             }
-
-            let authentication_response = self.sasl_authentication(to_sent.into_inner()).await?;
-            data_received = Some(authentication_response.auth_bytes.0);
         }
 
         Ok(())
