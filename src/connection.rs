@@ -20,9 +20,8 @@ use crate::{
     client::metadata_cache::MetadataCache,
 };
 
-pub use self::transport::Credentials;
-pub use self::transport::SaslConfig;
 pub use self::transport::TlsConfig;
+pub use self::transport::{Credentials, OauthBearerCredentials, OauthCallback, SaslConfig};
 
 mod topology;
 mod transport;
