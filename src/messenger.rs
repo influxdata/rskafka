@@ -610,7 +610,9 @@ where
                 let authentication_response =
                     self.sasl_authentication(to_sent.into_inner()).await?;
                 data_received = Some(authentication_response.auth_bytes.0);
-            } else {
+            }
+
+            if state.is_finished() {
                 break;
             }
         }

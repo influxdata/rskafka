@@ -226,39 +226,49 @@ jobs:
         name: zookeeper
         environment:
           - ALLOW_ANONYMOUS_LOGIN=yes
-      - image: docker.io/bitnami/kafka:3
+      - image: docker.io/bitnami/kafka:3.9.0
         name: kafka-0
         environment:
           - KAFKA_CFG_ZOOKEEPER_CONNECT=zookeeper:2181
           - KAFKA_CFG_BROKER_ID=0
           - ALLOW_PLAINTEXT_LISTENER=yes
-          - KAFKA_CFG_LISTENER_SECURITY_PROTOCOL_MAP=CLIENT:PLAINTEXT,EXTERNAL:PLAINTEXT
-          - KAFKA_CFG_LISTENERS=CLIENT://:9092,EXTERNAL://:9093
-          - KAFKA_CFG_ADVERTISED_LISTENERS=CLIENT://kafka-0:9092,EXTERNAL://kafka-0:9093
+          - KAFKA_CFG_LISTENER_SECURITY_PROTOCOL_MAP=CLIENT:PLAINTEXT,EXTERNAL:PLAINTEXT,SECURE:SASL_PLAINTEXT
+          - KAFKA_CFG_LISTENERS=CLIENT://:9092,EXTERNAL://:9093,SECURE://:9094
+          - KAFKA_CFG_ADVERTISED_LISTENERS=CLIENT://kafka-0:9092,EXTERNAL://kafka-0:9093,SECURE://kafka-0:9094
           - KAFKA_INTER_BROKER_LISTENER_NAME=CLIENT
           - KAFKA_CFG_AUTO_CREATE_TOPICS_ENABLE=false
-      - image: docker.io/bitnami/kafka:3
+          - KAFKA_CLIENT_USERS=admin
+          - KAFKA_CLIENT_PASSWORDS=admin-secret
+          - KAFKA_CLIENT_LISTENER_NAME=SECURE
+      - image: docker.io/bitnami/kafka:3.9.0
         name: kafka-1
         environment:
           - KAFKA_CFG_ZOOKEEPER_CONNECT=zookeeper:2181
           - KAFKA_CFG_BROKER_ID=1
           - ALLOW_PLAINTEXT_LISTENER=yes
-          - KAFKA_CFG_LISTENER_SECURITY_PROTOCOL_MAP=CLIENT:PLAINTEXT,EXTERNAL:PLAINTEXT
-          - KAFKA_CFG_LISTENERS=CLIENT://:9092,EXTERNAL://:9093
-          - KAFKA_CFG_ADVERTISED_LISTENERS=CLIENT://kafka-1:9092,EXTERNAL://kafka-1:9093
+          - KAFKA_CFG_LISTENER_SECURITY_PROTOCOL_MAP=CLIENT:PLAINTEXT,EXTERNAL:PLAINTEXT,SECURE:SASL_PLAINTEXT
+          - KAFKA_CFG_LISTENERS=CLIENT://:9092,EXTERNAL://:9093,SECURE://:9094
+          - KAFKA_CFG_ADVERTISED_LISTENERS=CLIENT://kafka-1:9092,EXTERNAL://kafka-1:9093,SECURE://kafka-1:9094
+          - KAFKA_CFG_SASL_ENABLED_MECHANISMS=PLAIN
           - KAFKA_INTER_BROKER_LISTENER_NAME=CLIENT
           - KAFKA_CFG_AUTO_CREATE_TOPICS_ENABLE=false
-      - image: docker.io/bitnami/kafka:3
+          - KAFKA_CLIENT_USERS=admin
+          - KAFKA_CLIENT_PASSWORDS=admin-secret
+          - KAFKA_CLIENT_LISTENER_NAME=SECURE
+      - image: docker.io/bitnami/kafka:3.9.0
         name: kafka-2
         environment:
           - KAFKA_CFG_ZOOKEEPER_CONNECT=zookeeper:2181
           - KAFKA_CFG_BROKER_ID=2
           - ALLOW_PLAINTEXT_LISTENER=yes
-          - KAFKA_CFG_LISTENER_SECURITY_PROTOCOL_MAP=CLIENT:PLAINTEXT,EXTERNAL:PLAINTEXT
-          - KAFKA_CFG_LISTENERS=CLIENT://:9092,EXTERNAL://:9093
-          - KAFKA_CFG_ADVERTISED_LISTENERS=CLIENT://kafka-2:9092,EXTERNAL://kafka-2:9093
+          - KAFKA_CFG_LISTENER_SECURITY_PROTOCOL_MAP=CLIENT:PLAINTEXT,EXTERNAL:PLAINTEXT,SECURE:SASL_PLAINTEXT
+          - KAFKA_CFG_LISTENERS=CLIENT://:9092,EXTERNAL://:9093,SECURE://:9094
+          - KAFKA_CFG_ADVERTISED_LISTENERS=CLIENT://kafka-2:9092,EXTERNAL://kafka-2:9093,SECURE://kafka-2:9094
           - KAFKA_INTER_BROKER_LISTENER_NAME=CLIENT
           - KAFKA_CFG_AUTO_CREATE_TOPICS_ENABLE=false
+          - KAFKA_CLIENT_USERS=admin
+          - KAFKA_CLIENT_PASSWORDS=admin-secret
+          - KAFKA_CLIENT_LISTENER_NAME=SECURE
       - image: serjs/go-socks5-proxy
         name: proxy
     resource_class: xlarge  # use of a smaller executor tends crashes on link
@@ -279,6 +289,7 @@ jobs:
       # Don't use the first node here since this is likely the controller and we want to ensure that we automatically
       # pick the controller for certain actions (e.g. topic creation) and don't just get lucky.
       KAFKA_CONNECT: "invalid:9093,kafka-1:9093"
+      KAFKA_SASL_CONNECT: kafka-1:9094
       SOCKS_PROXY: "proxy:1080"
     steps:
       - checkout
