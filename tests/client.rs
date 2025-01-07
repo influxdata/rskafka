@@ -44,6 +44,10 @@ async fn test_sasl() {
         .sasl_config(rskafka::client::SaslConfig::Plain(
             rskafka::client::Credentials::new("admin".to_string(), "admin-secret".to_string()),
         ))
+        .backoff_config(BackoffConfig {
+            deadline: Some(Duration::from_secs(1)),
+            ..Default::default()
+        })
         .build()
         .await
         .unwrap();
