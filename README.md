@@ -276,7 +276,7 @@ e.g. by batching writes to multiple partitions in a single ProduceRequest
 [LLDB]: https://lldb.llvm.org/
 [LZ4]: https://lz4.github.io/lz4/
 [perf]: https://perf.wiki.kernel.org/index.php/Main_Page
-[Redpanda]: https://vectorized.io/redpanda
+[Redpanda]: https://www.redpanda.com/
 [rustls]: https://github.com/rustls/rustls
 [Snappy]: https://github.com/google/snappy
 [zstd]: https://github.com/facebook/zstd

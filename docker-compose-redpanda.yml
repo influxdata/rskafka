@@ -2,7 +2,7 @@
 version: '3.7'
 services:
   redpanda-0:
-    image: vectorized/redpanda:v22.2.1
+    image: redpandadata/redpanda:v22.2.1
     container_name: redpanda-0
     ports:
       - '9010:9010'
@@ -21,7 +21,7 @@ services:
       - --advertise-rpc-addr redpanda-0:33145
       - --set redpanda.auto_create_topics_enabled=false
   redpanda-1:
-    image: vectorized/redpanda:v22.2.1
+    image: redpandadata/redpanda:v22.2.1
     container_name: redpanda-1
     ports:
       - '9011:9011'
@@ -41,7 +41,7 @@ services:
       - --advertise-rpc-addr redpanda-1:33146
       - --set redpanda.auto_create_topics_enabled=false
   redpanda-2:
-    image: vectorized/redpanda:v22.2.1
+    image: redpandadata/redpanda:v22.2.1
     container_name: redpanda-2
     ports:
       - '9012:9012'
