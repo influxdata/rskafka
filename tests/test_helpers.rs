@@ -179,7 +179,7 @@ pub fn maybe_start_logging() {
 /// Start logging.
 pub fn start_logging() {
     use tracing_log::LogTracer;
-    use tracing_subscriber::{filter::EnvFilter, FmtSubscriber};
+    use tracing_subscriber::{FmtSubscriber, filter::EnvFilter};
 
     LOG_SETUP.call_once(|| {
         LogTracer::init().unwrap();

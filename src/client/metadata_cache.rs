@@ -36,8 +36,8 @@ impl MetadataCache {
         &self,
         topics: &Option<Vec<String>>,
     ) -> Option<(MetadataResponse, MetadataCacheGeneration)> {
-        let (mut m, gen) = match self.cache.lock().deref() {
-            (Some(m), gen) => (m.clone(), *gen),
+        let (mut m, r#gen) = match self.cache.lock().deref() {
+            (Some(m), r#gen) => (m.clone(), *r#gen),
             (None, _) => {
                 return None;
             }
@@ -59,24 +59,24 @@ impl MetadataCache {
                 // if a caller keeps requesting metadata for a non-existent
                 // topic.
                 debug!("cached metadata query for unknown topic");
-                self.invalidate("get from metadata cache: unknown topic", gen);
+                self.invalidate("get from metadata cache: unknown topic", r#gen);
                 return None;
             }
         }
 
         debug!(?m, "using cached metadata response");
 
-        Some((m, gen))
+        Some((m, r#gen))
     }
 
-    pub(crate) fn invalidate(&self, reason: &'static str, gen: MetadataCacheGeneration) {
+    pub(crate) fn invalidate(&self, reason: &'static str, r#gen: MetadataCacheGeneration) {
         let mut guard = self.cache.lock();
-        if guard.1 != gen {
+        if guard.1 != r#gen {
             // stale request
             debug!(
                 reason,
-                current_gen = guard.1 .0,
-                request_gen = gen.0,
+                current_gen = guard.1.0,
+                request_gen = r#gen.0,
                 "stale invalidation request for metadata cache",
             );
             return;
@@ -89,7 +89,7 @@ impl MetadataCache {
     pub(crate) fn update(&self, m: MetadataResponse) {
         let mut guard = self.cache.lock();
         guard.0 = Some(m);
-        guard.1 .0 += 1;
+        guard.1.0 += 1;
         debug!("updated metadata cache");
     }
 }

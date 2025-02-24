@@ -1,7 +1,7 @@
 use crate::protocol::messages::MetadataResponseBroker;
 use parking_lot::RwLock;
-use std::collections::hash_map::Entry;
 use std::collections::HashMap;
+use std::collections::hash_map::Entry;
 use std::fmt::{Display, Formatter};
 use tracing::info;
 

@@ -1,8 +1,8 @@
-use futures::{future::FusedFuture, pin_mut, FutureExt};
+use futures::{FutureExt, future::FusedFuture, pin_mut};
 use rskafka::client::{
-    partition::UnknownTopicHandling,
-    producer::{aggregator::RecordAggregator, BatchProducerBuilder},
     ClientBuilder,
+    partition::UnknownTopicHandling,
+    producer::{BatchProducerBuilder, aggregator::RecordAggregator},
 };
 use std::time::Duration;
 

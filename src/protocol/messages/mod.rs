@@ -76,7 +76,7 @@ where
     ) -> Result<(), WriteVersionedError>;
 }
 
-impl<'a, W: Write, T: WriteVersionedType<W>> WriteVersionedType<W> for &'a T {
+impl<W: Write, T: WriteVersionedType<W>> WriteVersionedType<W> for &T {
     fn write_versioned(
         &self,
         writer: &mut W,
@@ -285,9 +285,11 @@ mod tests {
         let mut buffer = vec![];
         write_versioned_array::<_, VersionTest>(&mut buffer, version, None).unwrap();
         let mut cursor = std::io::Cursor::new(buffer);
-        assert!(read_versioned_array::<_, VersionTest>(&mut cursor, version)
-            .unwrap()
-            .is_none())
+        assert!(
+            read_versioned_array::<_, VersionTest>(&mut cursor, version)
+                .unwrap()
+                .is_none()
+        )
     }
 
     #[test]

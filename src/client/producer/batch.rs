@@ -4,9 +4,9 @@ use tokio::task::JoinHandle;
 use tracing::*;
 
 use super::{
+    Error, ProducerClient,
     aggregator::{self, Aggregator, StatusDeaggregator, TryPush},
     broadcast::{BroadcastOnce, BroadcastOnceReceiver},
-    Error, ProducerClient,
 };
 use crate::client::partition::Compression;
 
@@ -134,7 +134,7 @@ where
         let (batch, status_deagg) = match self.aggregator.flush() {
             Ok(v) => v,
             Err(e) => {
-                return FlushResult::Error(Self::new(self.aggregator), Error::Aggregator(e.into()))
+                return FlushResult::Error(Self::new(self.aggregator), Error::Aggregator(e.into()));
             }
         };
 

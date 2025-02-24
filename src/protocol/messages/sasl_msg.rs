@@ -33,7 +33,7 @@ where
     R: Read,
 {
     fn read_versioned(reader: &mut R, version: ApiVersion) -> Result<Self, ReadVersionedError> {
-        let v = version.0 .0;
+        let v = version.0.0;
         assert!(v == 1);
         Ok(Self {
             mechanism: String_::read(reader)?,
@@ -50,7 +50,7 @@ where
         writer: &mut W,
         version: ApiVersion,
     ) -> Result<(), WriteVersionedError> {
-        let v = version.0 .0;
+        let v = version.0.0;
         assert!(v == 1);
         self.mechanism.write(writer)?;
         Ok(())
@@ -79,7 +79,7 @@ where
     R: Read,
 {
     fn read_versioned(reader: &mut R, version: ApiVersion) -> Result<Self, ReadVersionedError> {
-        let v = version.0 .0;
+        let v = version.0.0;
         assert!(v == 1);
         Ok(Self {
             error_code: ApiError::new(Int16::read(reader)?.0),
@@ -128,7 +128,7 @@ where
     R: Read,
 {
     fn read_versioned(reader: &mut R, version: ApiVersion) -> Result<Self, ReadVersionedError> {
-        let v = version.0 .0;
+        let v = version.0.0;
         assert!(v <= 2);
         if v == 0 || v == 1 {
             Ok(Self::new(Bytes::read(reader)?.0))
@@ -150,7 +150,7 @@ where
         writer: &mut W,
         version: ApiVersion,
     ) -> Result<(), WriteVersionedError> {
-        let v = version.0 .0;
+        let v = version.0.0;
         assert!(v <= 2);
         if v == 0 || v == 1 {
             self.auth_bytes.write(writer)?;
@@ -208,7 +208,7 @@ where
     R: Read,
 {
     fn read_versioned(reader: &mut R, version: ApiVersion) -> Result<Self, ReadVersionedError> {
-        let v = version.0 .0;
+        let v = version.0.0;
         assert!(v <= 2);
         if v == 0 {
             Ok(Self {

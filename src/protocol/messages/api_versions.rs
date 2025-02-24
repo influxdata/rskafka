@@ -12,8 +12,8 @@ use crate::protocol::{
 };
 
 use super::{
-    read_versioned_array, ReadVersionedError, ReadVersionedType, RequestBody, WriteVersionedError,
-    WriteVersionedType,
+    ReadVersionedError, ReadVersionedType, RequestBody, WriteVersionedError, WriteVersionedType,
+    read_versioned_array,
 };
 
 #[cfg(test)]
@@ -43,7 +43,7 @@ where
     R: Read,
 {
     fn read_versioned(reader: &mut R, version: ApiVersion) -> Result<Self, ReadVersionedError> {
-        let v = version.0 .0;
+        let v = version.0.0;
         assert!(v <= 3);
 
         Ok(Self {
@@ -63,7 +63,7 @@ where
         writer: &mut W,
         version: ApiVersion,
     ) -> Result<(), WriteVersionedError> {
-        let v = version.0 .0;
+        let v = version.0.0;
         assert!(v <= 3);
 
         if v >= 3 {
@@ -136,7 +136,7 @@ where
     R: Read,
 {
     fn read_versioned(reader: &mut R, version: ApiVersion) -> Result<Self, ReadVersionedError> {
-        let v = version.0 .0;
+        let v = version.0.0;
         assert!(v <= 3);
 
         Ok(Self {
@@ -158,7 +158,7 @@ where
         writer: &mut W,
         version: ApiVersion,
     ) -> Result<(), WriteVersionedError> {
-        let v = version.0 .0;
+        let v = version.0.0;
         assert!(v <= 3);
 
         let api_key: Int16 = self.api_key.into();
@@ -213,7 +213,7 @@ where
     R: Read,
 {
     fn read_versioned(reader: &mut R, version: ApiVersion) -> Result<Self, ReadVersionedError> {
-        let v = version.0 .0;
+        let v = version.0.0;
         assert!(v <= 3);
 
         let error_code = ApiError::new(Int16::read(reader)?.0);
@@ -244,7 +244,7 @@ where
         writer: &mut W,
         version: ApiVersion,
     ) -> Result<(), WriteVersionedError> {
-        let v = version.0 .0;
+        let v = version.0.0;
         assert!(v <= 3);
 
         let error_code: Int16 = self.error_code.into();

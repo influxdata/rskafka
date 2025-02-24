@@ -1,18 +1,18 @@
 use assert_matches::assert_matches;
 use chrono::{TimeZone, Utc};
 use rskafka::{
+    BackoffConfig,
     client::{
+        ClientBuilder,
         error::{Error as ClientError, ProtocolError, ServerErrorResponse},
         partition::{Compression, OffsetAt, UnknownTopicHandling},
-        ClientBuilder,
     },
     record::{Record, RecordAndOffset},
-    BackoffConfig,
 };
 use std::{collections::BTreeMap, env, str::FromStr, sync::Arc, time::Duration};
 
 mod test_helpers;
-use test_helpers::{maybe_start_logging, random_topic_name, record, BrokerImpl, TEST_TIMEOUT};
+use test_helpers::{BrokerImpl, TEST_TIMEOUT, maybe_start_logging, random_topic_name, record};
 
 #[tokio::test]
 async fn test_plain() {

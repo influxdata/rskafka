@@ -25,7 +25,7 @@ use std::io::{Cursor, Read, Write};
 use proptest::prelude::*;
 
 use super::{
-    primitives::{Int16, Int32, Int64, Int8, Varint, Varlong},
+    primitives::{Int8, Int16, Int32, Int64, Varint, Varlong},
     traits::{ReadError, ReadType, WriteError, WriteType},
     vec_builder::VecBuilder,
 };
@@ -753,7 +753,7 @@ struct RecordBatchBodyRef<'a> {
     pub timestamp_type: RecordBatchTimestampType,
 }
 
-impl<'a> RecordBatchBodyRef<'a> {
+impl RecordBatchBodyRef<'_> {
     fn write_records<W>(writer: &mut W, records: &ControlBatchOrRecords) -> Result<(), WriteError>
     where
         W: Write,
@@ -770,7 +770,7 @@ impl<'a> RecordBatchBodyRef<'a> {
     }
 }
 
-impl<'a, W> WriteType<W> for RecordBatchBodyRef<'a>
+impl<W> WriteType<W> for RecordBatchBodyRef<'_>
 where
     W: Write,
 {
@@ -827,7 +827,7 @@ where
             }
             #[cfg(feature = "compression-gzip")]
             RecordBatchCompression::Gzip => {
-                use flate2::{write::GzEncoder, Compression};
+                use flate2::{Compression, write::GzEncoder};
 
                 let mut encoder = GzEncoder::new(writer, Compression::default());
                 Self::write_records(&mut encoder, self.records)?;
@@ -835,7 +835,7 @@ where
             }
             #[cfg(feature = "compression-lz4")]
             RecordBatchCompression::Lz4 => {
-                use lz4::{liblz4::BlockMode, EncoderBuilder};
+                use lz4::{EncoderBuilder, liblz4::BlockMode};
 
                 let mut encoder = EncoderBuilder::new()
                     .block_mode(
@@ -849,7 +849,7 @@ where
             }
             #[cfg(feature = "compression-snappy")]
             RecordBatchCompression::Snappy => {
-                use snap::raw::{max_compress_len, Encoder};
+                use snap::raw::{Encoder, max_compress_len};
 
                 let mut input = vec![];
                 Self::write_records(&mut input, self.records)?;
@@ -905,7 +905,7 @@ fn carefully_decompress_snappy(
     start_block_size: usize,
 ) -> Result<Vec<u8>, ReadError> {
     use crate::protocol::primitives::UnsignedVarint;
-    use snap::raw::{decompress_len, Decoder};
+    use snap::raw::{Decoder, decompress_len};
 
     // early exit, otherwise `uncompressed_size_encoded_length` will be 1 even though there was no input
     if input.is_empty() {
@@ -1335,7 +1335,10 @@ mod tests {
 
             let err = RecordBatchBody::read(&mut Cursor::new(data)).unwrap_err();
             assert_matches!(err, ReadError::Malformed(_));
-            assert_eq!(err.to_string(), "Malformed data: Java-specific Snappy-compressed data has illegal chunk length, got 4227860745 bytes but only 38 bytes are left.");
+            assert_eq!(
+                err.to_string(),
+                "Malformed data: Java-specific Snappy-compressed data has illegal chunk length, got 4227860745 bytes but only 38 bytes are left."
+            );
         }
 
         #[test]
@@ -1362,7 +1365,7 @@ mod tests {
         }
 
         fn compress(data: &[u8]) -> Vec<u8> {
-            use snap::raw::{max_compress_len, Encoder};
+            use snap::raw::{Encoder, max_compress_len};
 
             let mut encoder = Encoder::new();
             let mut output = vec![0; max_compress_len(data.len())];

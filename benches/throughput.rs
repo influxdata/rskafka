@@ -9,22 +9,22 @@ use std::{
 
 use chrono::{TimeZone, Utc};
 use criterion::{
-    criterion_group, criterion_main, measurement::WallTime, BenchmarkGroup, Criterion, SamplingMode,
+    BenchmarkGroup, Criterion, SamplingMode, criterion_group, criterion_main, measurement::WallTime,
 };
-use futures::{stream::FuturesUnordered, FutureExt, StreamExt, TryStreamExt};
+use futures::{FutureExt, StreamExt, TryStreamExt, stream::FuturesUnordered};
 use parking_lot::Once;
 use rdkafka::{
+    ClientConfig, TopicPartitionList,
     consumer::{Consumer, StreamConsumer as RdStreamConsumer},
     producer::{FutureProducer, FutureRecord},
     util::Timeout,
-    ClientConfig, TopicPartitionList,
 };
 use rskafka::{
     client::{
+        ClientBuilder,
         consumer::{StartOffset, StreamConsumerBuilder as RsStreamConsumerBuilder},
         partition::{Compression, PartitionClient, UnknownTopicHandling},
-        producer::{aggregator::RecordAggregator, BatchProducerBuilder},
-        ClientBuilder,
+        producer::{BatchProducerBuilder, aggregator::RecordAggregator},
     },
     record::Record,
 };
@@ -219,20 +219,18 @@ pub fn criterion_benchmark(c: &mut Criterion) {
     }
 }
 
-async fn exec_sequential<F, Fut>(f: F, iters: u64)
+async fn exec_sequential<F>(f: F, iters: u64)
 where
-    F: Fn() -> Fut,
-    Fut: Future<Output = ()>,
+    F: AsyncFn(),
 {
     for _ in 0..iters {
         f().await;
     }
 }
 
-async fn exec_parallel<F, Fut>(f: F, iters: u64)
+async fn exec_parallel<F>(f: F, iters: u64)
 where
-    F: Fn() -> Fut,
-    Fut: Future<Output = ()>,
+    F: AsyncFn(),
 {
     let mut tasks: FuturesUnordered<_> = (0..iters).map(|_| f()).collect();
     while tasks.next().await.is_some() {}
@@ -462,7 +460,7 @@ pub fn maybe_start_logging() {
 /// Start logging.
 pub fn start_logging() {
     use tracing_log::LogTracer;
-    use tracing_subscriber::{filter::EnvFilter, FmtSubscriber};
+    use tracing_subscriber::{FmtSubscriber, filter::EnvFilter};
 
     LOG_SETUP.call_once(|| {
         LogTracer::init().unwrap();

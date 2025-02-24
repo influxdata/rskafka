@@ -4,8 +4,8 @@ use std::{
     io::Cursor,
     ops::DerefMut,
     sync::{
-        atomic::{AtomicI32, Ordering},
         Arc,
+        atomic::{AtomicI32, Ordering},
     },
     task::Poll,
 };
@@ -20,8 +20,8 @@ use thiserror::Error;
 use tokio::{
     io::{AsyncRead, AsyncWrite, AsyncWriteExt, WriteHalf},
     sync::{
-        oneshot::{channel, Sender},
         Mutex as AsyncMutex,
+        oneshot::{Sender, channel},
     },
     task::JoinHandle,
 };
@@ -243,14 +243,15 @@ where
 
                         let active_request = match state_captured.lock().deref_mut() {
                             MessengerState::RequestMap(map) => {
-                                if let Some(active_request) = map.remove(&header.correlation_id.0) {
-                                    active_request
-                                } else {
-                                    warn!(
-                                        correlation_id = header.correlation_id.0,
-                                        "Got response for unknown request",
-                                    );
-                                    continue;
+                                match map.remove(&header.correlation_id.0) {
+                                    Some(active_request) => active_request,
+                                    _ => {
+                                        warn!(
+                                            correlation_id = header.correlation_id.0,
+                                            "Got response for unknown request",
+                                        );
+                                        continue;
+                                    }
                                 }
                             }
                             MessengerState::Poison(_) => {
@@ -442,8 +443,8 @@ where
     ///
     /// Takes `&self mut` to ensure exclusive access.
     pub async fn sync_versions(&mut self) -> Result<(), SyncVersionsError> {
-        'iter_upper_bound: for upper_bound in (ApiVersionsRequest::API_VERSION_RANGE.min().0 .0
-            ..=ApiVersionsRequest::API_VERSION_RANGE.max().0 .0)
+        'iter_upper_bound: for upper_bound in (ApiVersionsRequest::API_VERSION_RANGE.min().0.0
+            ..=ApiVersionsRequest::API_VERSION_RANGE.max().0.0)
             .rev()
         {
             let version_ranges = HashMap::from([(
@@ -750,10 +751,10 @@ mod tests {
     use std::time::Duration;
 
     use assert_matches::assert_matches;
-    use futures::{pin_mut, FutureExt};
+    use futures::{FutureExt, pin_mut};
     use tokio::{
         io::{AsyncReadExt, DuplexStream},
-        sync::{mpsc::UnboundedSender, Barrier},
+        sync::{Barrier, mpsc::UnboundedSender},
     };
 
     use super::*;
@@ -890,7 +891,7 @@ mod tests {
         }
         .write_versioned(
             &mut msg,
-            ApiVersion(Int16(ApiVersionsRequest::API_VERSION_RANGE.max().0 .0 - 1)),
+            ApiVersion(Int16(ApiVersionsRequest::API_VERSION_RANGE.max().0.0 - 1)),
         )
         .unwrap();
         sim.push(msg);
@@ -941,7 +942,7 @@ mod tests {
         }
         .write_versioned(
             &mut msg,
-            ApiVersion(Int16(ApiVersionsRequest::API_VERSION_RANGE.max().0 .0 - 1)),
+            ApiVersion(Int16(ApiVersionsRequest::API_VERSION_RANGE.max().0.0 - 1)),
         )
         .unwrap();
         sim.push(msg);
@@ -1038,7 +1039,7 @@ mod tests {
         }
         .write_versioned(
             &mut msg,
-            ApiVersion(Int16(ApiVersionsRequest::API_VERSION_RANGE.max().0 .0 - 1)),
+            ApiVersion(Int16(ApiVersionsRequest::API_VERSION_RANGE.max().0.0 - 1)),
         )
         .unwrap();
         sim.push(msg);
@@ -1058,8 +1059,8 @@ mod tests {
         let mut messenger = Messenger::new(rx, 1_000, Arc::from(DEFAULT_CLIENT_ID));
 
         // construct error response
-        for (i, v) in ((ApiVersionsRequest::API_VERSION_RANGE.min().0 .0)
-            ..=(ApiVersionsRequest::API_VERSION_RANGE.max().0 .0))
+        for (i, v) in ((ApiVersionsRequest::API_VERSION_RANGE.min().0.0)
+            ..=(ApiVersionsRequest::API_VERSION_RANGE.max().0.0))
             .rev()
             .enumerate()
         {

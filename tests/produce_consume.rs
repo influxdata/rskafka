@@ -3,8 +3,8 @@ use std::sync::Arc;
 use chrono::{Duration, TimeZone, Utc};
 use rskafka::{
     client::{
-        partition::{Compression, PartitionClient, UnknownTopicHandling},
         ClientBuilder,
+        partition::{Compression, PartitionClient, UnknownTopicHandling},
     },
     record::{Record, RecordAndOffset},
 };

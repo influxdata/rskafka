@@ -1,5 +1,5 @@
 macro_rules! test_roundtrip_versioned {
-    ($t:ty, $min:expr, $max:expr, $name:ident) => {
+    ($t:ty, $min:expr_2021, $max:expr_2021, $name:ident) => {
         #[allow(unused_imports)]
         use proptest::prelude::*;
 

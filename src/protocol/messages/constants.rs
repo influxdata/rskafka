@@ -1,4 +1,4 @@
-use crate::protocol::primitives::{Int32, Int8};
+use crate::protocol::primitives::{Int8, Int32};
 
 /// The `replica_id` to use to signify the request is being made by a normal consumer.
 pub const NORMAL_CONSUMER: Int32 = Int32(-1);

@@ -9,8 +9,8 @@ use crate::protocol::{
     api_key::ApiKey,
     api_version::{ApiVersion, ApiVersionRange},
     error::Error as ApiError,
-    messages::{read_versioned_array, write_versioned_array, IsolationLevel},
-    primitives::{Array, Int16, Int32, Int64, Int8, String_},
+    messages::{IsolationLevel, read_versioned_array, write_versioned_array},
+    primitives::{Array, Int8, Int16, Int32, Int64, String_},
     traits::{ReadType, WriteType},
 };
 
@@ -56,7 +56,7 @@ where
         writer: &mut W,
         version: ApiVersion,
     ) -> Result<(), WriteVersionedError> {
-        let v = version.0 .0;
+        let v = version.0.0;
         assert!(v <= 3);
 
         self.partition_index.write(writer)?;
@@ -91,7 +91,7 @@ where
         writer: &mut W,
         version: ApiVersion,
     ) -> Result<(), WriteVersionedError> {
-        let v = version.0 .0;
+        let v = version.0.0;
         assert!(v <= 3);
 
         self.name.write(writer)?;
@@ -136,7 +136,7 @@ where
         writer: &mut W,
         version: ApiVersion,
     ) -> Result<(), WriteVersionedError> {
-        let v = version.0 .0;
+        let v = version.0.0;
         assert!(v <= 3);
 
         self.replica_id.write(writer)?;
@@ -194,7 +194,7 @@ where
     R: Read,
 {
     fn read_versioned(reader: &mut R, version: ApiVersion) -> Result<Self, ReadVersionedError> {
-        let v = version.0 .0;
+        let v = version.0.0;
         assert!(v <= 3);
 
         Ok(Self {
@@ -221,7 +221,7 @@ where
     R: Read,
 {
     fn read_versioned(reader: &mut R, version: ApiVersion) -> Result<Self, ReadVersionedError> {
-        let v = version.0 .0;
+        let v = version.0.0;
         assert!(v <= 3);
 
         Ok(Self {
@@ -247,7 +247,7 @@ where
     R: Read,
 {
     fn read_versioned(reader: &mut R, version: ApiVersion) -> Result<Self, ReadVersionedError> {
-        let v = version.0 .0;
+        let v = version.0.0;
         assert!(v <= 3);
 
         Ok(Self {

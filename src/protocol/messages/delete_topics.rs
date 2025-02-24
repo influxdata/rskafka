@@ -5,8 +5,8 @@ use crate::protocol::{
     api_version::{ApiVersion, ApiVersionRange},
     error::Error,
     messages::{
-        read_compact_versioned_array, read_versioned_array, ReadVersionedError, ReadVersionedType,
-        RequestBody, WriteVersionedError, WriteVersionedType,
+        ReadVersionedError, ReadVersionedType, RequestBody, WriteVersionedError,
+        WriteVersionedType, read_compact_versioned_array, read_versioned_array,
     },
     primitives::{
         Array, CompactArrayRef, CompactNullableString, CompactString, CompactStringRef, Int16,
@@ -50,7 +50,7 @@ where
         writer: &mut W,
         version: ApiVersion,
     ) -> Result<(), WriteVersionedError> {
-        let v = version.0 .0;
+        let v = version.0.0;
         assert!(v <= 5);
 
         if v >= 4 {
@@ -106,7 +106,7 @@ where
     R: Read,
 {
     fn read_versioned(reader: &mut R, version: ApiVersion) -> Result<Self, ReadVersionedError> {
-        let v = version.0 .0;
+        let v = version.0.0;
         assert!(v <= 5);
 
         let throttle_time_ms = (v >= 1).then(|| Int32::read(reader)).transpose()?;
@@ -149,7 +149,7 @@ where
     R: Read,
 {
     fn read_versioned(reader: &mut R, version: ApiVersion) -> Result<Self, ReadVersionedError> {
-        let v = version.0 .0;
+        let v = version.0.0;
         assert!(v <= 5);
 
         let name = if v >= 4 {
