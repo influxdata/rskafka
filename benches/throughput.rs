@@ -219,20 +219,18 @@ pub fn criterion_benchmark(c: &mut Criterion) {
     }
 }
 
-async fn exec_sequential<F, Fut>(f: F, iters: u64)
+async fn exec_sequential<F>(f: F, iters: u64)
 where
-    F: Fn() -> Fut,
-    Fut: Future<Output = ()>,
+    F: AsyncFn(),
 {
     for _ in 0..iters {
         f().await;
     }
 }
 
-async fn exec_parallel<F, Fut>(f: F, iters: u64)
+async fn exec_parallel<F>(f: F, iters: u64)
 where
-    F: Fn() -> Fut,
-    Fut: Future<Output = ()>,
+    F: AsyncFn(),
 {
     let mut tasks: FuturesUnordered<_> = (0..iters).map(|_| f()).collect();
     while tasks.next().await.is_some() {}
