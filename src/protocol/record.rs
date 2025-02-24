@@ -753,7 +753,7 @@ struct RecordBatchBodyRef<'a> {
     pub timestamp_type: RecordBatchTimestampType,
 }
 
-impl<'a> RecordBatchBodyRef<'a> {
+impl RecordBatchBodyRef<'_> {
     fn write_records<W>(writer: &mut W, records: &ControlBatchOrRecords) -> Result<(), WriteError>
     where
         W: Write,
@@ -770,7 +770,7 @@ impl<'a> RecordBatchBodyRef<'a> {
     }
 }
 
-impl<'a, W> WriteType<W> for RecordBatchBodyRef<'a>
+impl<W> WriteType<W> for RecordBatchBodyRef<'_>
 where
     W: Write,
 {

@@ -404,7 +404,7 @@ where
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct CompactStringRef<'a>(pub &'a str);
 
-impl<'a, W> WriteType<W> for CompactStringRef<'a>
+impl<W> WriteType<W> for CompactStringRef<'_>
 where
     W: Write,
 {
@@ -459,7 +459,7 @@ where
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct CompactNullableStringRef<'a>(pub Option<&'a str>);
 
-impl<'a, W> WriteType<W> for CompactNullableStringRef<'a>
+impl<W> WriteType<W> for CompactNullableStringRef<'_>
 where
     W: Write,
 {
@@ -544,7 +544,7 @@ where
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct CompactBytesRef<'a>(pub &'a [u8]);
 
-impl<'a, W> WriteType<W> for CompactBytesRef<'a>
+impl<W> WriteType<W> for CompactBytesRef<'_>
 where
     W: Write,
 {
@@ -693,7 +693,7 @@ where
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct ArrayRef<'a, T>(pub Option<&'a [T]>);
 
-impl<'a, W, T> WriteType<W> for ArrayRef<'a, T>
+impl<W, T> WriteType<W> for ArrayRef<'_, T>
 where
     W: Write,
     T: WriteType<W>,
@@ -761,7 +761,7 @@ where
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct CompactArrayRef<'a, T>(pub Option<&'a [T]>);
 
-impl<'a, W, T> WriteType<W> for CompactArrayRef<'a, T>
+impl<W, T> WriteType<W> for CompactArrayRef<'_, T>
 where
     W: Write,
     T: WriteType<W>,

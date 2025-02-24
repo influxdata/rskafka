@@ -413,7 +413,7 @@ impl<'a> JavaIterator<'a> {
     }
 }
 
-impl<'a> Iterator for JavaIterator<'a> {
+impl Iterator for JavaIterator<'_> {
     type Item = Instance;
 
     fn next(&mut self) -> Option<Self::Item> {

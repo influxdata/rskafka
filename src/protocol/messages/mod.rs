@@ -76,7 +76,7 @@ where
     ) -> Result<(), WriteVersionedError>;
 }
 
-impl<'a, W: Write, T: WriteVersionedType<W>> WriteVersionedType<W> for &'a T {
+impl<W: Write, T: WriteVersionedType<W>> WriteVersionedType<W> for &T {
     fn write_versioned(
         &self,
         writer: &mut W,
