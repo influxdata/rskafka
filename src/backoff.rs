@@ -132,7 +132,7 @@ impl Backoff {
                         break Err(BackoffError::DeadlineExceded {
                             deadline: Duration::from_secs_f64(self.deadline.unwrap()),
                             source: Box::new(e),
-                        })
+                        });
                     }
                 },
                 ErrorOrThrottle::Throttle(throttle) => {

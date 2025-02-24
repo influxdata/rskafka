@@ -10,14 +10,14 @@ use rskafka::client::partition::OffsetAt;
 use rskafka::record::Record;
 use rskafka::{
     client::{
+        ClientBuilder,
         consumer::{StartOffset, StreamConsumer, StreamConsumerBuilder},
         error::{Error, ProtocolError},
         partition::{Compression, UnknownTopicHandling},
-        ClientBuilder,
     },
     record::RecordAndOffset,
 };
-use test_helpers::{maybe_start_logging, random_topic_name, record, TEST_TIMEOUT};
+use test_helpers::{TEST_TIMEOUT, maybe_start_logging, random_topic_name, record};
 
 mod test_helpers;
 

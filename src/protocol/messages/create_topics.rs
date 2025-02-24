@@ -56,7 +56,7 @@ where
         writer: &mut W,
         version: ApiVersion,
     ) -> Result<(), WriteVersionedError> {
-        let v = version.0 .0;
+        let v = version.0.0;
         assert!(v <= 5);
 
         if self.validate_only.is_some() && v < 1 {
@@ -133,7 +133,7 @@ where
         writer: &mut W,
         version: ApiVersion,
     ) -> Result<(), WriteVersionedError> {
-        let v = version.0 .0;
+        let v = version.0.0;
         assert!(v <= 5);
 
         if v >= 5 {
@@ -195,7 +195,7 @@ where
         writer: &mut W,
         version: ApiVersion,
     ) -> Result<(), WriteVersionedError> {
-        let v = version.0 .0;
+        let v = version.0.0;
         assert!(v <= 5);
 
         self.partition_index.write(writer)?;
@@ -244,7 +244,7 @@ where
         writer: &mut W,
         version: ApiVersion,
     ) -> Result<(), WriteVersionedError> {
-        let v = version.0 .0;
+        let v = version.0.0;
         assert!(v <= 5);
 
         if v >= 5 {
@@ -296,7 +296,7 @@ where
     R: Read,
 {
     fn read_versioned(reader: &mut R, version: ApiVersion) -> Result<Self, ReadVersionedError> {
-        let v = version.0 .0;
+        let v = version.0.0;
         assert!(v <= 5);
 
         let throttle_time_ms = (v >= 2).then(|| Int32::read(reader)).transpose()?;
@@ -341,7 +341,7 @@ where
     R: Read,
 {
     fn read_versioned(reader: &mut R, version: ApiVersion) -> Result<Self, ReadVersionedError> {
-        let v = version.0 .0;
+        let v = version.0.0;
         assert!(v == 5);
 
         Ok(Self {
@@ -394,7 +394,7 @@ where
     R: Read,
 {
     fn read_versioned(reader: &mut R, version: ApiVersion) -> Result<Self, ReadVersionedError> {
-        let v = version.0 .0;
+        let v = version.0.0;
         assert!(v <= 5);
 
         let name = if v >= 5 {

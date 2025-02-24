@@ -13,8 +13,8 @@ use crate::{
             DeleteRequestTopic, DeleteResponsePartition, FetchRequest, FetchRequestPartition,
             FetchRequestTopic, FetchResponse, FetchResponsePartition, IsolationLevel,
             ListOffsetsRequest, ListOffsetsRequestPartition, ListOffsetsRequestTopic,
-            ListOffsetsResponse, ListOffsetsResponsePartition, ProduceRequest,
-            ProduceRequestPartitionData, ProduceRequestTopicData, ProduceResponse, NORMAL_CONSUMER,
+            ListOffsetsResponse, ListOffsetsResponsePartition, NORMAL_CONSUMER, ProduceRequest,
+            ProduceRequestPartitionData, ProduceRequestTopicData, ProduceResponse,
         },
         primitives::*,
         record::{Record as ProtocolRecord, *},
@@ -210,17 +210,17 @@ impl PartitionClient {
             self,
             "produce",
             || async move {
-                let (broker, gen) = self
+                let (broker, r#gen) = self
                     .get()
                     .await
                     .map_err(|e| ErrorOrThrottle::Error((e, None)))?;
                 let response = broker
                     .request(&request)
                     .await
-                    .map_err(|e| ErrorOrThrottle::Error((e.into(), Some(gen))))?;
+                    .map_err(|e| ErrorOrThrottle::Error((e.into(), Some(r#gen))))?;
                 maybe_throttle(response.throttle_time_ms)?;
                 process_produce_response(self.partition, &self.topic, n, response)
-                    .map_err(|e| ErrorOrThrottle::Error((e, Some(gen))))
+                    .map_err(|e| ErrorOrThrottle::Error((e, Some(r#gen))))
             },
         )
         .await
@@ -249,17 +249,17 @@ impl PartitionClient {
             self,
             "fetch_records",
             || async move {
-                let (broker, gen) = self
+                let (broker, r#gen) = self
                     .get()
                     .await
                     .map_err(|e| ErrorOrThrottle::Error((e, None)))?;
                 let response = broker
                     .request(&request)
                     .await
-                    .map_err(|e| ErrorOrThrottle::Error((e.into(), Some(gen))))?;
+                    .map_err(|e| ErrorOrThrottle::Error((e.into(), Some(r#gen))))?;
                 maybe_throttle(response.throttle_time_ms)?;
                 process_fetch_response(self.partition, &self.topic, response, offset)
-                    .map_err(|e| ErrorOrThrottle::Error((e, Some(gen))))
+                    .map_err(|e| ErrorOrThrottle::Error((e, Some(r#gen))))
             },
         )
         .await?;
@@ -285,17 +285,17 @@ impl PartitionClient {
             self,
             "get_offset",
             || async move {
-                let (broker, gen) = self
+                let (broker, r#gen) = self
                     .get()
                     .await
                     .map_err(|e| ErrorOrThrottle::Error((e, None)))?;
                 let response = broker
                     .request(&request)
                     .await
-                    .map_err(|e| ErrorOrThrottle::Error((e.into(), Some(gen))))?;
+                    .map_err(|e| ErrorOrThrottle::Error((e.into(), Some(r#gen))))?;
                 maybe_throttle(response.throttle_time_ms)?;
                 process_list_offsets_response(self.partition, &self.topic, response)
-                    .map_err(|e| ErrorOrThrottle::Error((e, Some(gen))))
+                    .map_err(|e| ErrorOrThrottle::Error((e, Some(r#gen))))
             },
         )
         .await?;
@@ -318,17 +318,17 @@ impl PartitionClient {
             self,
             "delete_records",
             || async move {
-                let (broker, gen) = self
+                let (broker, r#gen) = self
                     .get()
                     .await
                     .map_err(|e| ErrorOrThrottle::Error((e, None)))?;
                 let response = broker
                     .request(&request)
                     .await
-                    .map_err(|e| ErrorOrThrottle::Error((e.into(), Some(gen))))?;
+                    .map_err(|e| ErrorOrThrottle::Error((e.into(), Some(r#gen))))?;
                 maybe_throttle(Some(response.throttle_time_ms))?;
                 process_delete_records_response(&self.topic, self.partition, response)
-                    .map_err(|e| ErrorOrThrottle::Error((e, Some(gen))))
+                    .map_err(|e| ErrorOrThrottle::Error((e, Some(r#gen))))
             },
         )
         .await?;
@@ -341,7 +341,7 @@ impl PartitionClient {
         &self,
         metadata_mode: MetadataLookupMode,
     ) -> Result<(i32, Option<MetadataCacheGeneration>)> {
-        let (metadata, gen) = self
+        let (metadata, r#gen) = self
             .brokers
             .request_metadata(&metadata_mode, Some(vec![self.topic.clone()]))
             .await?;
@@ -408,7 +408,7 @@ impl PartitionClient {
             %metadata_mode,
             "Detected leader",
         );
-        Ok((partition.leader_id.0, gen))
+        Ok((partition.leader_id.0, r#gen))
     }
 }
 
@@ -443,10 +443,10 @@ impl BrokerCache for &PartitionClient {
         let broker = match self.brokers.connect(leader).await {
             Ok(Some(c)) => Ok(c),
             Ok(None) => {
-                if let Some(gen) = gen_leader_from_arbitrary {
+                if let Some(r#gen) = gen_leader_from_arbitrary {
                     self.brokers.invalidate_metadata_cache(
                         "partition client: broker that is leader is unknown",
-                        gen,
+                        r#gen,
                     );
                 }
                 Err(Error::InvalidResponse(format!(
@@ -455,10 +455,10 @@ impl BrokerCache for &PartitionClient {
                 )))
             }
             Err(e) => {
-                if let Some(gen) = gen_leader_from_arbitrary {
+                if let Some(r#gen) = gen_leader_from_arbitrary {
                     self.brokers.invalidate_metadata_cache(
                         "partition client: error connecting to partition leader",
-                        gen,
+                        r#gen,
                     );
                 }
                 Err(e.into())
@@ -480,11 +480,11 @@ impl BrokerCache for &PartitionClient {
             .get_leader(MetadataLookupMode::SpecificBroker(Arc::clone(&broker)))
             .await?;
         if leader != leader_self {
-            if let Some(gen) = gen_leader_from_self {
+            if let Some(r#gen) = gen_leader_from_self {
                 // The cached metadata identified an incorrect leader - it is stale and should be refreshed.
                 self.brokers.invalidate_metadata_cache(
                     "partition client: broker that should be leader does treat itself as a leader",
-                    gen,
+                    r#gen,
                 );
             }
 
@@ -518,15 +518,15 @@ impl BrokerCache for &PartitionClient {
         Ok((broker, current_broker.gen_broker))
     }
 
-    async fn invalidate(&self, reason: &'static str, gen: BrokerCacheGeneration) {
+    async fn invalidate(&self, reason: &'static str, r#gen: BrokerCacheGeneration) {
         let mut current_broker = self.current_broker.lock().await;
 
-        if current_broker.gen_broker != gen {
+        if current_broker.gen_broker != r#gen {
             // stale request
             debug!(
                 reason,
                 current_gen = current_broker.gen_broker.get(),
-                request_gen = gen.get(),
+                request_gen = r#gen.get(),
                 "stale invalidation request for arbitrary broker cache",
             );
             return;
@@ -539,11 +539,11 @@ impl BrokerCache for &PartitionClient {
             "Invaliding cached leader",
         );
 
-        if let Some(gen) = current_broker.gen_leader_from_arbitrary {
-            self.brokers.invalidate_metadata_cache(reason, gen);
+        if let Some(r#gen) = current_broker.gen_leader_from_arbitrary {
+            self.brokers.invalidate_metadata_cache(reason, r#gen);
         }
-        if let Some(gen) = current_broker.gen_leader_from_self {
-            self.brokers.invalidate_metadata_cache(reason, gen);
+        if let Some(r#gen) = current_broker.gen_leader_from_self {
+            self.brokers.invalidate_metadata_cache(reason, r#gen);
         }
 
         current_broker.broker = None

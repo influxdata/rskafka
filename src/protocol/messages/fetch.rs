@@ -4,8 +4,8 @@ use crate::protocol::{
     api_key::ApiKey,
     api_version::{ApiVersion, ApiVersionRange},
     error::Error as ApiError,
-    messages::{read_versioned_array, write_versioned_array, IsolationLevel},
-    primitives::{Int16, Int32, Int64, Int8, Records, String_},
+    messages::{IsolationLevel, read_versioned_array, write_versioned_array},
+    primitives::{Int8, Int16, Int32, Int64, Records, String_},
     traits::{ReadType, WriteType},
 };
 
@@ -37,7 +37,7 @@ where
         writer: &mut W,
         version: ApiVersion,
     ) -> Result<(), WriteVersionedError> {
-        let v = version.0 .0;
+        let v = version.0.0;
         assert!(v <= 4);
 
         self.partition.write(writer)?;
@@ -66,7 +66,7 @@ where
         writer: &mut W,
         version: ApiVersion,
     ) -> Result<(), WriteVersionedError> {
-        let v = version.0 .0;
+        let v = version.0.0;
         assert!(v <= 4);
 
         self.topic.write(writer)?;
@@ -122,7 +122,7 @@ where
         writer: &mut W,
         version: ApiVersion,
     ) -> Result<(), WriteVersionedError> {
-        let v = version.0 .0;
+        let v = version.0.0;
         assert!(v <= 4);
 
         self.replica_id.write(writer)?;
@@ -178,7 +178,7 @@ where
     R: Read,
 {
     fn read_versioned(reader: &mut R, version: ApiVersion) -> Result<Self, ReadVersionedError> {
-        let v = version.0 .0;
+        let v = version.0.0;
         assert!(4 <= v && v <= 4);
 
         Ok(Self {
@@ -221,7 +221,7 @@ where
     R: Read,
 {
     fn read_versioned(reader: &mut R, version: ApiVersion) -> Result<Self, ReadVersionedError> {
-        let v = version.0 .0;
+        let v = version.0.0;
         assert!(v <= 4);
 
         Ok(Self {
@@ -253,7 +253,7 @@ where
     R: Read,
 {
     fn read_versioned(reader: &mut R, version: ApiVersion) -> Result<Self, ReadVersionedError> {
-        let v = version.0 .0;
+        let v = version.0.0;
         assert!(v <= 4);
 
         Ok(Self {
@@ -279,7 +279,7 @@ where
     R: Read,
 {
     fn read_versioned(reader: &mut R, version: ApiVersion) -> Result<Self, ReadVersionedError> {
-        let v = version.0 .0;
+        let v = version.0.0;
         assert!(v <= 4);
 
         Ok(Self {

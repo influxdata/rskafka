@@ -48,8 +48,8 @@ use std::sync::Arc;
 use std::task::{Context, Poll};
 use std::time::Duration;
 
-use futures::future::{BoxFuture, Fuse, FusedFuture, FutureExt};
 use futures::Stream;
+use futures::future::{BoxFuture, Fuse, FusedFuture, FutureExt};
 use tracing::{debug, trace, warn};
 
 use crate::{
@@ -365,8 +365,8 @@ mod tests {
 
     use assert_matches::assert_matches;
     use chrono::{TimeZone, Utc};
-    use futures::{pin_mut, StreamExt};
-    use tokio::sync::{mpsc, Mutex};
+    use futures::{StreamExt, pin_mut};
+    use tokio::sync::{Mutex, mpsc};
 
     use crate::{
         client::error::{Error, ProtocolError, RequestContext},

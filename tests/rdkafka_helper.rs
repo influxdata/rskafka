@@ -3,11 +3,11 @@ use std::time::Duration;
 use chrono::{TimeZone, Utc};
 use futures::{StreamExt, TryStreamExt};
 use rdkafka::{
+    ClientConfig, Message, TopicPartitionList,
     consumer::{Consumer, StreamConsumer},
     message::{Header, Headers, OwnedHeaders},
     producer::{FutureProducer, FutureRecord},
     util::Timeout,
-    ClientConfig, Message, TopicPartitionList,
 };
 use rskafka::{
     client::partition::Compression,

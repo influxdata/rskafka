@@ -64,21 +64,21 @@ impl ControllerClient {
         };
 
         maybe_retry(&self.backoff_config, self, "create_topic", || async move {
-            let (broker, gen) = self
+            let (broker, r#gen) = self
                 .get()
                 .await
                 .map_err(|e| ErrorOrThrottle::Error((e, None)))?;
             let response = broker
                 .request(request)
                 .await
-                .map_err(|e| ErrorOrThrottle::Error((e.into(), Some(gen))))?;
+                .map_err(|e| ErrorOrThrottle::Error((e.into(), Some(r#gen))))?;
 
             maybe_throttle(response.throttle_time_ms)?;
 
             let topic = response
                 .topics
                 .exactly_one()
-                .map_err(|e| ErrorOrThrottle::Error((Error::exactly_one_topic(e), Some(gen))))?;
+                .map_err(|e| ErrorOrThrottle::Error((Error::exactly_one_topic(e), Some(r#gen))))?;
 
             match topic.error {
                 None => Ok(()),
@@ -90,7 +90,7 @@ impl ControllerClient {
                         response: None,
                         is_virtual: false,
                     },
-                    Some(gen),
+                    Some(r#gen),
                 ))),
             }
         })
@@ -115,21 +115,21 @@ impl ControllerClient {
         };
 
         maybe_retry(&self.backoff_config, self, "delete_topic", || async move {
-            let (broker, gen) = self
+            let (broker, r#gen) = self
                 .get()
                 .await
                 .map_err(|e| ErrorOrThrottle::Error((e, None)))?;
             let response = broker
                 .request(request)
                 .await
-                .map_err(|e| ErrorOrThrottle::Error((e.into(), Some(gen))))?;
+                .map_err(|e| ErrorOrThrottle::Error((e.into(), Some(r#gen))))?;
 
             maybe_throttle(response.throttle_time_ms)?;
 
             let topic = response
                 .responses
                 .exactly_one()
-                .map_err(|e| ErrorOrThrottle::Error((Error::exactly_one_topic(e), Some(gen))))?;
+                .map_err(|e| ErrorOrThrottle::Error((Error::exactly_one_topic(e), Some(r#gen))))?;
 
             match topic.error {
                 None => Ok(()),
@@ -141,7 +141,7 @@ impl ControllerClient {
                         response: None,
                         is_virtual: false,
                     },
-                    Some(gen),
+                    Some(r#gen),
                 ))),
             }
         })
@@ -197,15 +197,15 @@ impl BrokerCache for &ControllerClient {
         Ok((broker, current_broker.1))
     }
 
-    async fn invalidate(&self, reason: &'static str, gen: BrokerCacheGeneration) {
+    async fn invalidate(&self, reason: &'static str, r#gen: BrokerCacheGeneration) {
         let mut guard = self.current_broker.lock().await;
 
-        if guard.1 != gen {
+        if guard.1 != r#gen {
             // stale request
             debug!(
                 reason,
                 current_gen = guard.1.get(),
-                request_gen = gen.get(),
+                request_gen = r#gen.get(),
                 "stale invalidation request for arbitrary broker cache",
             );
             return;

@@ -37,7 +37,7 @@ where
     R: Read,
 {
     fn read_versioned(reader: &mut R, version: ApiVersion) -> Result<Self, ReadVersionedError> {
-        let v = version.0 .0;
+        let v = version.0.0;
         assert!(v <= 2);
 
         Ok(Self {
@@ -59,7 +59,7 @@ where
         writer: &mut W,
         version: ApiVersion,
     ) -> Result<(), WriteVersionedError> {
-        let v = version.0 .0;
+        let v = version.0.0;
         assert!(v <= 2);
 
         Int16::from(self.request_api_key).write(writer)?;
@@ -109,7 +109,7 @@ where
     R: Read,
 {
     fn read_versioned(reader: &mut R, version: ApiVersion) -> Result<Self, ReadVersionedError> {
-        let v = version.0 .0;
+        let v = version.0.0;
         assert!(v <= 1);
 
         Ok(Self {
@@ -129,7 +129,7 @@ where
         writer: &mut W,
         version: ApiVersion,
     ) -> Result<(), WriteVersionedError> {
-        let v = version.0 .0;
+        let v = version.0.0;
         assert!(v <= 1);
 
         self.correlation_id.write(writer)?;

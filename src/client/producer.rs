@@ -688,7 +688,7 @@ mod tests {
     };
     use chrono::{TimeZone, Utc};
     use futures::stream::{FuturesOrdered, FuturesUnordered};
-    use futures::{pin_mut, FutureExt, StreamExt, TryStreamExt};
+    use futures::{FutureExt, StreamExt, TryStreamExt, pin_mut};
 
     #[derive(Debug)]
     struct MockClient {
