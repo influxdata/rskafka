@@ -9,6 +9,9 @@ commands:
     description: Verify installed components
     steps:
       - run:
+          name: Ensure toolchain is present
+          command: rustup toolchain install
+      - run:
           name: Verify installed components
           command: |
             rustup --version
