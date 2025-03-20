@@ -5,6 +5,40 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 
+## 0.6.0 -- SASL Additions, Better Errors, Timestamp Offset, Code Modernization
+
+### Breaking
+- MSRV is now 1.85, rskafka now uses Rust version 2024 (#218, #231, #238, #245, #257)
+
+### Features
+- improve error handling (#230)
+- support SASL SCRAM (#247) and OAUTHTOKEN (#253), fix PLAIN (#255)
+- support `OffsetAt::Timestamp` (#248)
+
+### Documentation
+- remove reference to IOx from README (#250)
+
+### Dependency Updates
+- drop async-trait (#245)
+- async-socks5 to 0.6 (#232)
+- crc32c to 0.6.5 (#231)
+- drop pin-project-lite (#246)
+- ring is hardcoded as a crypto provider (#233)
+- rustls to 0.23 (#227, #233)
+- tokio-rustls to 0.26 (#227, #233)
+- zstd to 0.13 (#223)
+
+### Dev Updates
+- cargo deny config fixed/updated (#243, #251)
+- CI fixes (#254)
+- j4rs to 0.20.0 (#236, #237, #238)
+- drop procspawn (#222, #244)
+- proptest-derive to 0.5 (#220, #240)
+- rdkafka to 0.35 (#221, #229, #242, #260)
+- rustls-pemfile to 2.0 (#226)
+- tracing-log to 0.2 (#224)
+
+
 ## 0.5.0 -- SASL, Backoff Configs
 
 ### Features
