@@ -28,7 +28,7 @@ futures = "0.3"
 integer-encoding = "4"
 lz4 = { version = "1.23", optional = true }
 parking_lot = "0.12"
-rand = "0.9"
+rand = { version = "0.9", default-features = false, features = ["thread_rng"] }
 rustls = { version = "0.23", optional = true, default-features = false, features = ["logging", "ring", "std", "tls12"] }
 snap = { version = "1", optional = true }
 thiserror = "2.0"
