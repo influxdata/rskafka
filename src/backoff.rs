@@ -82,7 +82,7 @@ impl Backoff {
 
     /// Creates a new `Backoff` with the optional `rng`
     ///
-    /// Used [`rand::thread_rng()`] if no rng provided
+    /// Used [`rand::rng()`] if no rng provided
     pub fn new_with_rng(
         config: &BackoffConfig,
         rng: Option<Box<dyn RngCore + Sync + Send>>,
@@ -154,8 +154,8 @@ impl Iterator for Backoff {
         let range = self.init_backoff..(self.next_backoff_secs * self.base);
 
         let rand_backoff = match self.rng.as_mut() {
-            Some(rng) => rng.gen_range(range),
-            None => thread_rng().gen_range(range),
+            Some(rng) => rng.random_range(range),
+            None => rand::rng().random_range(range),
         };
 
         let next_backoff = self.max_backoff_secs.min(rand_backoff);

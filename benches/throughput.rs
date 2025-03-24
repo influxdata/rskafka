@@ -375,7 +375,7 @@ impl RdKafka {
 
         // configure clients
         let mut cfg = ClientConfig::new();
-        cfg.set("bootstrap.servers", connection.join(","));
+        cfg.set("bootstrap.servers", Self::bootstrap_servers(&connection));
         cfg.set("message.timeout.ms", "5000");
         cfg.set("group.id", "foo");
         cfg.set("auto.offset.reset", "smallest");
@@ -427,6 +427,20 @@ impl RdKafka {
         consumer_client.assign(&assignment).unwrap();
 
         consumer_client
+    }
+
+    fn bootstrap_servers(connection: &[String]) -> String {
+        // remove "invalid" server because rdkafka isn't really fault tolerant and will sometimes (but not
+        // deterministically) fail to connect
+        //
+        // Also see https://github.com/influxdata/rskafka/pull/260
+        let connection = connection
+            .iter()
+            .map(|s| s.as_str())
+            .filter(|s| !s.contains("invalid"))
+            .collect::<Vec<_>>();
+
+        connection.join(",")
     }
 }
 

@@ -484,7 +484,7 @@ where
     B: ConnectionHandler + Send + Sync,
 {
     // Randomise search order to encourage different clients to choose different brokers
-    brokers.shuffle(&mut thread_rng());
+    brokers.shuffle(&mut rand::rng());
 
     let mut backoff = Backoff::new(backoff_config);
     backoff
