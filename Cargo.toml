@@ -43,7 +43,7 @@ assert_matches = "1.5"
 criterion = { version = "0.5", features = ["async_tokio"] }
 dotenvy = "0.15.1"
 futures = "0.3"
-j4rs = "0.20.0"
+j4rs = "0.22.0"
 proptest = "1"
 proptest-derive = "0.5"
 rustls-pemfile = "2.0"
