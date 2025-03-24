@@ -328,6 +328,7 @@ static JVM_SETUP: LazyLock<()> = LazyLock::new(|| {
         "com.github.luben:zstd-jni:1.5.5-5",
         // logging from within java
         "org.slf4j:slf4j-api:2.0.7",
+        "org.slf4j:slf4j-simple:2.0.7",
     ] {
         let artifact = MavenArtifact::from(artifact_name);
         jvm_installation
@@ -340,7 +341,24 @@ fn setup_jvm() -> Jvm {
     LazyLock::force(&JVM_SETUP);
 
     let jvm = JvmBuilder::new().build().expect("setup JVM");
+
+    set_system_properties(&jvm, &[("org.slf4j.simpleLogger.defaultLogLevel", "debug")]);
+
     jvm
+}
+
+fn set_system_properties(jvm: &Jvm, properties: &[(&str, &str)]) {
+    for (k, v) in properties {
+        jvm.invoke_static(
+            "java.lang.System",
+            "setProperty",
+            &[
+                InvocationArg::try_from(*k).expect("convert str to java"),
+                InvocationArg::try_from(*v).expect("convert str to java"),
+            ],
+        )
+        .expect("set property");
+    }
 }
 
 fn create_properties(jvm: &Jvm, properties: &[(&str, &str)]) -> Instance {
