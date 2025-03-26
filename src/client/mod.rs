@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::{sync::Arc, time::Duration};
 
 use thiserror::Error;
 
@@ -48,6 +48,7 @@ pub struct ClientBuilder {
     tls_config: TlsConfig,
     sasl_config: Option<SaslConfig>,
     backoff_config: Arc<BackoffConfig>,
+    connect_timeout: Option<Duration>,
 }
 
 impl ClientBuilder {
@@ -61,6 +62,7 @@ impl ClientBuilder {
             tls_config: TlsConfig::default(),
             sasl_config: None,
             backoff_config: Default::default(),
+            connect_timeout: Some(Duration::from_secs(30)),
         }
     }
 
@@ -106,6 +108,15 @@ impl ClientBuilder {
         self
     }
 
+    /// Set the timeout on establishing TCP connections to the broker.
+    /// By setting this to `None`, connection attempts will never time out unless
+    /// interrupted by an external event.
+    /// The default timeout is 30 seconds.
+    pub fn connect_timeout(mut self, connect_timeout: Option<Duration>) -> Self {
+        self.connect_timeout = connect_timeout;
+        self
+    }
+
     /// Build [`Client`].
     pub async fn build(self) -> Result<Client> {
         let brokers = Arc::new(BrokerConnector::new(
@@ -117,6 +128,7 @@ impl ClientBuilder {
             self.sasl_config,
             self.max_message_size,
             Arc::clone(&self.backoff_config),
+            self.connect_timeout,
         ));
         brokers.refresh_metadata().await?;
 

@@ -3,6 +3,7 @@ use std::pin::Pin;
 #[cfg(feature = "transport-tls")]
 use std::sync::Arc;
 use std::task::{Context, Poll};
+use std::time::Duration;
 use thiserror::Error;
 use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
 use tokio::net::TcpStream;
@@ -32,6 +33,9 @@ pub enum Error {
 
     #[error("Invalid port: {0}")]
     InvalidPort(#[from] std::num::ParseIntError),
+
+    #[error("Connecting to broker timed out")]
+    ConnectTimeout,
 
     #[cfg(feature = "transport-tls")]
     #[error("Invalid Hostname: {0}")]
@@ -115,18 +119,23 @@ impl Transport {
         broker: &str,
         tls_config: TlsConfig,
         socks5_proxy: Option<String>,
+        timeout: Option<Duration>,
     ) -> Result<Self> {
-        let tcp_stream = Self::connect_tcp(broker, socks5_proxy).await?;
+        let tcp_stream = Self::connect_tcp(broker, socks5_proxy, timeout).await?;
         Self::wrap_tls(tcp_stream, broker, tls_config).await
     }
 
     #[cfg(feature = "transport-socks5")]
-    async fn connect_tcp(broker: &str, socks5_proxy: Option<String>) -> Result<TcpStream> {
+    async fn connect_tcp(
+        broker: &str,
+        socks5_proxy: Option<String>,
+        timeout: Option<Duration>,
+    ) -> Result<TcpStream> {
         use async_socks5::connect;
 
         match socks5_proxy {
             Some(proxy) => {
-                let mut stream = TcpStream::connect(proxy).await?;
+                let mut stream = Self::connect_timeout(&proxy, timeout).await?;
 
                 let mut broker_iter = broker.split(':');
                 let broker_host = broker_iter
@@ -141,13 +150,26 @@ impl Transport {
 
                 Ok(stream)
             }
-            None => Ok(TcpStream::connect(broker).await?),
+            None => Ok(Self::connect_timeout(broker, timeout).await?),
+        }
+    }
+
+    async fn connect_timeout(host: &str, timeout: Option<Duration>) -> Result<TcpStream> {
+        match timeout {
+            Some(timeout) => Ok(tokio::time::timeout(timeout, TcpStream::connect(host))
+                .await
+                .map_err(|_| Error::ConnectTimeout)??),
+            None => Ok(TcpStream::connect(host).await?),
         }
     }
 
     #[cfg(not(feature = "transport-socks5"))]
-    async fn connect_tcp(broker: &str, _socks5_proxy: Option<String>) -> Result<TcpStream> {
-        Ok(TcpStream::connect(broker).await?)
+    async fn connect_tcp(
+        broker: &str,
+        _socks5_proxy: Option<String>,
+        timeout: Option<Duration>,
+    ) -> Result<TcpStream> {
+        Self::connect_timeout(broker, timeout).await
     }
 
     #[cfg(feature = "transport-tls")]
