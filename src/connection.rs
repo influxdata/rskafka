@@ -3,6 +3,7 @@ use std::fmt::Display;
 use std::future::Future;
 use std::ops::ControlFlow;
 use std::sync::Arc;
+use std::time::Duration;
 use thiserror::Error;
 use tokio::{io::BufStream, sync::Mutex};
 use tracing::{debug, error, info, warn};
@@ -20,6 +21,7 @@ use crate::{
     client::metadata_cache::MetadataCache,
 };
 
+pub use self::transport::Error as TransportError;
 pub use self::transport::TlsConfig;
 pub use self::transport::{Credentials, OauthBearerCredentials, OauthCallback, SaslConfig};
 
@@ -85,6 +87,7 @@ trait ConnectionHandler {
         socks5_proxy: Option<String>,
         sasl_config: Option<SaslConfig>,
         max_message_size: usize,
+        timeout: Option<Duration>,
     ) -> impl Future<Output = Result<Arc<Self::R>>> + Send;
 }
 
@@ -147,6 +150,7 @@ impl ConnectionHandler for BrokerRepresentation {
         socks5_proxy: Option<String>,
         sasl_config: Option<SaslConfig>,
         max_message_size: usize,
+        timeout: Option<Duration>,
     ) -> Result<Arc<Self::R>> {
         let url = self.url();
         info!(
@@ -154,7 +158,7 @@ impl ConnectionHandler for BrokerRepresentation {
             url = url.as_str(),
             "Establishing new connection",
         );
-        let transport = Transport::connect(&url, tls_config, socks5_proxy)
+        let transport = Transport::connect(&url, tls_config, socks5_proxy, timeout)
             .await
             .map_err(|error| Error::Transport {
                 broker: url.to_string(),
@@ -210,9 +214,13 @@ pub struct BrokerConnector {
 
     /// Maximum message size for framing protocol.
     max_message_size: usize,
+
+    /// Timeout for connection attempts to the broker.
+    connect_timeout: Option<Duration>,
 }
 
 impl BrokerConnector {
+    #[allow(clippy::too_many_arguments, reason = "Method is internal")]
     pub fn new(
         bootstrap_brokers: Vec<String>,
         client_id: Arc<str>,
@@ -221,6 +229,7 @@ impl BrokerConnector {
         sasl_config: Option<SaslConfig>,
         max_message_size: usize,
         backoff_config: Arc<BackoffConfig>,
+        connect_timeout: Option<Duration>,
     ) -> Self {
         Self {
             bootstrap_brokers,
@@ -233,6 +242,7 @@ impl BrokerConnector {
             socks5_proxy,
             sasl_config,
             max_message_size,
+            connect_timeout,
         }
     }
 
@@ -329,6 +339,7 @@ impl BrokerConnector {
                         self.socks5_proxy.clone(),
                         self.sasl_config.clone(),
                         self.max_message_size,
+                        self.connect_timeout,
                     )
                     .await?;
                 Ok(Some(connection))
@@ -443,6 +454,7 @@ impl BrokerCache for &BrokerConnector {
             self.socks5_proxy.clone(),
             self.sasl_config.clone(),
             self.max_message_size,
+            self.connect_timeout,
         )
         .await?;
 
@@ -471,6 +483,7 @@ impl BrokerCache for &BrokerConnector {
     }
 }
 
+#[allow(clippy::too_many_arguments, reason = "Method is internal")]
 async fn connect_to_a_broker_with_retry<B>(
     mut brokers: Vec<B>,
     client_id: Arc<str>,
@@ -479,6 +492,7 @@ async fn connect_to_a_broker_with_retry<B>(
     socks5_proxy: Option<String>,
     sasl_config: Option<SaslConfig>,
     max_message_size: usize,
+    connect_timeout: Option<Duration>,
 ) -> Result<Arc<B::R>>
 where
     B: ConnectionHandler + Send + Sync,
@@ -498,6 +512,7 @@ where
                         socks5_proxy.clone(),
                         sasl_config.clone(),
                         max_message_size,
+                        connect_timeout,
                     )
                     .await;
 
@@ -809,6 +824,7 @@ mod tests {
             _socks5_proxy: Option<String>,
             _sasl_config: Option<SaslConfig>,
             _max_message_size: usize,
+            _connect_timeout: Option<Duration>,
         ) -> Result<Arc<Self::R>> {
             (self.conn)()
         }
@@ -837,6 +853,7 @@ mod tests {
             Default::default(),
             Default::default(),
             Default::default(),
+            None,
         )
         .await
         .unwrap();

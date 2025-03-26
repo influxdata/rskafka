@@ -28,6 +28,7 @@ pub mod client;
 mod connection;
 
 pub use connection::Error as ConnectionError;
+pub use connection::TransportError;
 pub use messenger::SaslError;
 
 #[cfg(feature = "unstable-fuzzing")]
