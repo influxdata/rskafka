@@ -45,7 +45,7 @@ dotenvy = "0.15.1"
 futures = "0.3"
 j4rs = "0.22.0"
 proptest = "1"
-proptest-derive = "0.5"
+proptest-derive = "0.6"
 rustls-pemfile = "2.0"
 rdkafka = { version = "0.37", default-features = false, features = ["libz", "tokio", "zstd"] }
 tokio = { version = "1.14", features = ["macros", "rt-multi-thread"] }
