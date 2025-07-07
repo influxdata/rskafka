@@ -67,8 +67,8 @@ pub async fn produce(
         if let Some(value) = value_ref {
             f_record = f_record.payload(value);
         }
-        let (_partition, offset) = client.send(f_record, Timeout::Never).await.unwrap();
-        offsets.push(offset);
+        let delivery = client.send(f_record, Timeout::Never).await.unwrap();
+        offsets.push(delivery.offset);
     }
 
     offsets
