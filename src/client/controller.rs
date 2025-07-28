@@ -186,8 +186,7 @@ impl BrokerCache for &ControllerClient {
         let controller_id = self.get_controller_id().await?;
         let broker = self.brokers.connect(controller_id).await?.ok_or_else(|| {
             Error::InvalidResponse(format!(
-                "Controller {} not found in metadata response",
-                controller_id
+                "Controller {controller_id} not found in metadata response"
             ))
         })?;
 

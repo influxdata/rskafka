@@ -129,10 +129,7 @@ pub async fn consume(
                 Err(e) => {
                     // this might happen on a fresh rdkafka node
                     // (e.g. "KafkaError (Message consumption error: NotCoordinator (Broker: Not coordinator))")
-                    println!(
-                        "Encountered rdkafka error while consuming, try again: {:?}",
-                        e
-                    );
+                    println!("Encountered rdkafka error while consuming, try again: {e:?}");
                     tokio::time::sleep(Duration::from_millis(100)).await;
                     continue;
                 }

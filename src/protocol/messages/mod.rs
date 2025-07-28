@@ -140,7 +140,7 @@ fn read_versioned_array<R: Read, T: ReadVersionedType<R>>(
     match len {
         -1 => Ok(None),
         l if l < -1 => Err(ReadVersionedError::ReadError(ReadError::Malformed(
-            format!("Invalid negative length for array: {}", l).into(),
+            format!("Invalid negative length for array: {l}").into(),
         ))),
         _ => {
             let len = usize::try_from(len).map_err(ReadError::Overflow)?;

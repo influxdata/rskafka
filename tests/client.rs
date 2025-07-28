@@ -114,7 +114,7 @@ async fn test_topic_crud() {
             protocol_error: ProtocolError::TopicAlreadyExists,
             ..
         } => {}
-        _ => panic!("Unexpected error: {}", err),
+        _ => panic!("Unexpected error: {err}"),
     }
 
     // delete one topic
@@ -730,8 +730,7 @@ async fn test_client_backoff_terminates() {
                     "all retries failed: Retry exceeded deadline. ",
                     "Source: error connecting to broker \"localhost:9000\""
                 )),
-                "expected error to start with \"all retries failed...\", actual: {}",
-                e
+                "expected error to start with \"all retries failed...\", actual: {e}"
             );
         }
         _ => {

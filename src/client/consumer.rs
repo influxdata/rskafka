@@ -448,7 +448,7 @@ mod tests {
                     buffered += size;
                 }
 
-                println!("Waiting up to {} ms for more data", max_wait_ms);
+                println!("Waiting up to {max_wait_ms} ms for more data");
 
                 // Need to wait for more data
                 let timeout = tokio::time::sleep(Duration::from_millis(max_wait_ms as u64)).fuse();
