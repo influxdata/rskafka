@@ -104,7 +104,7 @@ fn driver(data: &[u8]) -> Result<(), Error> {
             api_key,
             api_version,
         ),
-        _ => Err(format!("Fuzzing not implemented for: {:?}", api_key).into()),
+        _ => Err(format!("Fuzzing not implemented for: {api_key:?}").into()),
     }
 }
 

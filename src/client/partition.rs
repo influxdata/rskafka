@@ -450,8 +450,7 @@ impl BrokerCache for &PartitionClient {
                     );
                 }
                 Err(Error::InvalidResponse(format!(
-                    "Partition leader {} not found in metadata response",
-                    leader
+                    "Partition leader {leader} not found in metadata response"
                 )))
             }
             Err(e) => {
@@ -972,8 +971,7 @@ fn extract_offset(partition: ListOffsetsResponsePartition) -> Result<i64> {
             Some(offsets) => match offsets.len() {
                 1 => Ok(offsets[0].0),
                 n => Err(Error::InvalidResponse(format!(
-                    "Expected 1 offset to be returned but got {}",
-                    n
+                    "Expected 1 offset to be returned but got {n}"
                 ))),
             },
             None => Err(Error::InvalidResponse(

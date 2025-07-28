@@ -293,7 +293,7 @@ where
         let len = Int16::read(reader)?;
         match len.0 {
             l if l < -1 => Err(ReadError::Malformed(
-                format!("Invalid negative length for nullable string: {}", l).into(),
+                format!("Invalid negative length for nullable string: {l}").into(),
             )),
             -1 => Ok(Self(None)),
             l => {
@@ -572,7 +572,7 @@ where
         let len = Int32::read(reader)?;
         match len.0 {
             l if l < -1 => Err(ReadError::Malformed(
-                format!("Invalid negative length for nullable bytes: {}", l).into(),
+                format!("Invalid negative length for nullable bytes: {l}").into(),
             )),
             -1 => Ok(Self(None)),
             l => {

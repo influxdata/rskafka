@@ -347,8 +347,7 @@ async fn assert_produce_consume<F1, G1, F2, G2>(
         .collect();
     assert_eq!(
         actual, expected,
-        "Records are different.\n\nActual:\n{:#?}\n\nExpected:\n{:#?}",
-        actual, expected,
+        "Records are different.\n\nActual:\n{actual:#?}\n\nExpected:\n{expected:#?}",
     );
 }
 

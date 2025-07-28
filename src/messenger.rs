@@ -633,7 +633,7 @@ fn sorted_ranges_repr(ranges: &HashMap<ApiKey, ApiVersionRange>) -> String {
     ranges.sort_by_key(|(key, _range)| *key);
     let ranges: Vec<_> = ranges
         .into_iter()
-        .map(|(key, range)| format!("{:?}: {}", key, range))
+        .map(|(key, range)| format!("{key:?}: {range}"))
         .collect();
     ranges.join(", ")
 }

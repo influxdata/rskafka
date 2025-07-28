@@ -250,7 +250,7 @@ where
         let version = Int16::read(reader)?.0;
         if version != 0 {
             return Err(ReadError::Malformed(
-                format!("Unknown control batch record version: {}", version).into(),
+                format!("Unknown control batch record version: {version}").into(),
             ));
         }
 
@@ -260,7 +260,7 @@ where
             0 => Ok(Self::Abort),
             1 => Ok(Self::Commit),
             _ => Err(ReadError::Malformed(
-                format!("Unknown control batch record type: {}", t).into(),
+                format!("Unknown control batch record type: {t}").into(),
             )),
         }
     }
@@ -363,7 +363,7 @@ where
             + 4, // crc
             )
             .ok_or_else(|| {
-                ReadError::Malformed(format!("Record batch len too small: {}", len).into())
+                ReadError::Malformed(format!("Record batch len too small: {len}").into())
             })?;
 
         // partitionLeaderEpoch
@@ -373,7 +373,7 @@ where
         let magic = Int8::read(reader)?.0;
         if magic != 2 {
             return Err(ReadError::Malformed(
-                format!("Invalid magic number in record batch: {}", magic).into(),
+                format!("Invalid magic number in record batch: {magic}").into(),
             ));
         }
 
@@ -388,7 +388,7 @@ where
         let actual_crc = crc32c::crc32c(&data);
         if crc != actual_crc {
             return Err(ReadError::Malformed(
-                format!("CRC error, got 0x{:x}, expected 0x{:x}", actual_crc, crc).into(),
+                format!("CRC error, got 0x{actual_crc:x}, expected 0x{crc:x}").into(),
             ));
         }
 
@@ -403,7 +403,7 @@ where
         let bytes_left = bytes_total - bytes_read;
         if bytes_left != 0 {
             return Err(ReadError::Malformed(
-                format!("Found {} trailing bytes after RecordBatch", bytes_left).into(),
+                format!("Found {bytes_left} trailing bytes after RecordBatch").into(),
             ));
         }
 
@@ -521,7 +521,7 @@ impl RecordBatchBody {
         if is_control {
             if n_records != 1 {
                 return Err(ReadError::Malformed(
-                    format!("Expected 1 control record but got {}", n_records).into(),
+                    format!("Expected 1 control record but got {n_records}").into(),
                 ));
             }
 
@@ -552,7 +552,7 @@ where
             4 => RecordBatchCompression::Zstd,
             other => {
                 return Err(ReadError::Malformed(
-                    format!("Invalid compression type: {}", other).into(),
+                    format!("Invalid compression type: {other}").into(),
                 ));
             }
         };
@@ -695,7 +695,7 @@ where
             #[allow(unreachable_patterns)]
             _ => {
                 return Err(ReadError::Malformed(
-                    format!("Unimplemented compression: {:?}", compression).into(),
+                    format!("Unimplemented compression: {compression:?}").into(),
                 ));
             }
         };
