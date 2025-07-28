@@ -40,7 +40,7 @@ rsasl = { version = "2.1", default-features = false, features = ["config_builder
 
 [dev-dependencies]
 assert_matches = "1.5"
-criterion = { version = "0.6", features = ["async_tokio"] }
+criterion = { version = "0.7", features = ["async_tokio"] }
 dotenvy = "0.15.1"
 futures = "0.3"
 j4rs = "0.22.0"
