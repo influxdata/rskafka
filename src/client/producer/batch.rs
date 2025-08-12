@@ -158,7 +158,7 @@ where
             async move {
                 let res = match client.produce(batch, compression).await {
                     Ok(status) => Ok(Arc::new(AggregatedStatus {
-                        aggregated_status: status,
+                        aggregated_status: status.offsets,
                         status_deagg,
                     })),
                     Err(e) => {

@@ -27,7 +27,10 @@ use tokio::{
 };
 use tracing::{debug, info, warn};
 
-use crate::protocol::{messages::ApiVersionsRequest, traits::ReadType};
+use crate::protocol::{
+    messages::{ApiVersionsRequest, ResponseBodyWithMetadata},
+    traits::ReadType,
+};
 use crate::{
     backoff::ErrorOrThrottle,
     protocol::{
@@ -321,13 +324,26 @@ where
     {
         self.request_with_version_ranges(msg, &self.version_ranges)
             .await
+            .map(|body| body.response)
+    }
+
+    pub async fn request_with_metadata<R>(
+        &self,
+        msg: R,
+    ) -> Result<ResponseBodyWithMetadata<R::ResponseBody>, RequestError>
+    where
+        R: RequestBody + Send + WriteVersionedType<Vec<u8>>,
+        R::ResponseBody: ReadVersionedType<Cursor<Vec<u8>>>,
+    {
+        self.request_with_version_ranges(msg, &self.version_ranges)
+            .await
     }
 
     async fn request_with_version_ranges<R>(
         &self,
         msg: R,
         version_ranges: &HashMap<ApiKey, ApiVersionRange>,
-    ) -> Result<R::ResponseBody, RequestError>
+    ) -> Result<ResponseBodyWithMetadata<R::ResponseBody>, RequestError>
     where
         R: RequestBody + Send + WriteVersionedType<Vec<u8>>,
         R::ResponseBody: ReadVersionedType<Cursor<Vec<u8>>>,
@@ -371,6 +387,7 @@ where
             .write_versioned(&mut buf, header_version)
             .expect("Writing header to buffer should always work");
         msg.write_versioned(&mut buf, body_api_version)?;
+        let encoded_size = buf.len();
 
         let (tx, rx) = channel();
 
@@ -412,7 +429,10 @@ where
             });
         }
 
-        Ok(body)
+        Ok(ResponseBodyWithMetadata {
+            response: body,
+            encoded_request_size: encoded_size,
+        })
     }
 
     async fn send_message(&self, msg: Vec<u8>) -> Result<(), RequestError> {
@@ -468,7 +488,7 @@ where
                     .request_with_version_ranges(&body, &version_ranges)
                     .await
                 {
-                    Ok(response) => {
+                    Ok(ResponseBodyWithMetadata { response, .. }) => {
                         if let Err(ErrorOrThrottle::Throttle(throttle)) =
                             maybe_throttle::<SyncVersionsError>(response.throttle_time_ms)
                         {

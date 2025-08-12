@@ -372,7 +372,8 @@ async fn test_consume_offset_out_of_range() {
     let offsets = partition_client
         .produce(vec![record], Compression::NoCompression)
         .await
-        .unwrap();
+        .unwrap()
+        .offsets;
     let offset = offsets[0];
 
     let err = partition_client
@@ -434,13 +435,15 @@ async fn test_get_offset() {
     let offsets = partition_client
         .produce(vec![record_late.clone()], Compression::NoCompression)
         .await
-        .unwrap();
+        .unwrap()
+        .offsets;
     assert_eq!(offsets[0], 0);
 
     let offsets = partition_client
         .produce(vec![record_early.clone()], Compression::NoCompression)
         .await
-        .unwrap();
+        .unwrap()
+        .offsets;
     assert_eq!(offsets.len(), 1);
     assert_eq!(offsets[0], 1);
 
@@ -570,7 +573,8 @@ async fn test_consume_midbatch() {
             Compression::NoCompression,
         )
         .await
-        .unwrap();
+        .unwrap()
+        .offsets;
     let _offset_1 = offsets[0];
     let offset_2 = offsets[1];
 
@@ -623,7 +627,8 @@ async fn test_delete_records() {
     let offsets = partition_client
         .produce(vec![record_1.clone()], Compression::NoCompression)
         .await
-        .unwrap();
+        .unwrap()
+        .offsets;
     let offset_1 = offsets[0];
 
     let offsets = partition_client
@@ -632,14 +637,16 @@ async fn test_delete_records() {
             Compression::NoCompression,
         )
         .await
-        .unwrap();
+        .unwrap()
+        .offsets;
     let offset_2 = offsets[0];
     let offset_3 = offsets[1];
 
     let offsets = partition_client
         .produce(vec![record_4.clone()], Compression::NoCompression)
         .await
-        .unwrap();
+        .unwrap()
+        .offsets;
     let offset_4 = offsets[0];
 
     // delete from the middle of the 2nd batch

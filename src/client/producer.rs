@@ -300,6 +300,16 @@ impl BatchProducerBuilder {
     }
 }
 
+/// The result of the produce call.
+#[derive(Debug, Default)]
+pub struct ProduceResult {
+    /// The offsets of the produced records.
+    pub offsets: Vec<i64>,
+
+    /// The size of the request encoded in bytes.
+    pub encoded_request_size: usize,
+}
+
 /// The [`ProducerClient`] provides an abstraction over a Kafka client than can
 /// produce a record.
 ///
@@ -316,7 +326,7 @@ pub trait ProducerClient: std::fmt::Debug + Send + Sync {
         &self,
         records: Vec<Record>,
         compression: Compression,
-    ) -> BoxFuture<'_, Result<Vec<i64>, ClientError>>;
+    ) -> BoxFuture<'_, Result<ProduceResult, ClientError>>;
 }
 
 impl ProducerClient for PartitionClient {
@@ -324,7 +334,7 @@ impl ProducerClient for PartitionClient {
         &self,
         records: Vec<Record>,
         compression: Compression,
-    ) -> BoxFuture<'_, Result<Vec<i64>, ClientError>> {
+    ) -> BoxFuture<'_, Result<ProduceResult, ClientError>> {
         Box::pin(self.produce(records, compression))
     }
 }
@@ -703,7 +713,7 @@ mod tests {
             &self,
             records: Vec<Record>,
             _compression: Compression,
-        ) -> BoxFuture<'_, Result<Vec<i64>, ClientError>> {
+        ) -> BoxFuture<'_, Result<ProduceResult, ClientError>> {
             Box::pin(async move {
                 tokio::time::sleep(self.delay).await;
 
@@ -727,7 +737,12 @@ mod tests {
                     .map(|x| (x + offset_base) as i64)
                     .collect();
                 batch_sizes.push(records.len());
-                Ok(offsets)
+                let record_size = records.iter().map(|r| r.approximate_size()).sum::<usize>();
+                Ok(ProduceResult {
+                    offsets,
+                    // Uses the approximate size of the records to estimate the size of the request.
+                    encoded_request_size: record_size,
+                })
             })
         }
     }
