@@ -6,6 +6,7 @@ use rskafka::{
         ClientBuilder,
         error::{Error as ClientError, ProtocolError, ServerErrorResponse},
         partition::{Compression, OffsetAt, UnknownTopicHandling},
+        producer::ProduceResult,
     },
     record::{Record, RecordAndOffset},
 };
@@ -388,6 +389,55 @@ async fn test_consume_offset_out_of_range() {
             ..
         }
     );
+}
+
+#[tokio::test]
+async fn test_produce_metadata() {
+    maybe_start_logging();
+
+    let test_cfg = maybe_skip_kafka_integration!();
+    let topic_name = random_topic_name();
+    let n_partitions = 1;
+
+    let client = ClientBuilder::new(test_cfg.bootstrap_brokers.clone())
+        .build()
+        .await
+        .unwrap();
+    let controller_client = client.controller_client().unwrap();
+    controller_client
+        .create_topic(&topic_name, n_partitions, 1, 5_000)
+        .await
+        .unwrap();
+
+    let partition_client = client
+        .partition_client(topic_name.clone(), 0, UnknownTopicHandling::Retry)
+        .await
+        .unwrap();
+
+    let record1 = record(b"");
+    let ProduceResult {
+        offsets,
+        encoded_request_size,
+        ..
+    } = partition_client
+        .produce(vec![record1.clone()], Compression::NoCompression)
+        .await
+        .unwrap();
+    assert_eq!(offsets[0], 0);
+    assert_eq!(encoded_request_size, 177);
+
+    // Produce a record with repeated string
+    let record2 = record(b"value value value value value value value");
+    let ProduceResult {
+        offsets,
+        encoded_request_size,
+        ..
+    } = partition_client
+        .produce(vec![record2.clone()], Compression::NoCompression)
+        .await
+        .unwrap();
+    assert_eq!(offsets[0], 1);
+    assert_eq!(encoded_request_size, 219);
 }
 
 #[tokio::test]

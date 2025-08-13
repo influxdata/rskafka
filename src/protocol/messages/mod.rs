@@ -86,7 +86,7 @@ impl<W: Write, T: WriteVersionedType<W>> WriteVersionedType<W> for &T {
     }
 }
 
-/// A response body with metadata about the request.
+/// A response body with metadata about the request & response.
 #[derive(Debug)]
 pub struct ResponseBodyWithMetadata<R> {
     /// The response body.

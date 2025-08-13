@@ -300,8 +300,9 @@ impl BatchProducerBuilder {
     }
 }
 
-/// The result of the produce call.
+/// The result of the [produce](ProducerClient::produce) call.
 #[derive(Debug, Default)]
+#[non_exhaustive]
 pub struct ProduceResult {
     /// The offsets of the produced records.
     pub offsets: Vec<i64>,

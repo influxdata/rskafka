@@ -222,7 +222,7 @@ impl PartitionClient {
                     response,
                     encoded_request_size,
                 } = broker
-                    .request_with_metadata(&request)
+                    .request(&request)
                     .await
                     .map_err(|e| ErrorOrThrottle::Error((e.into(), Some(r#gen))))?;
                 maybe_throttle(response.throttle_time_ms)?;
@@ -267,7 +267,8 @@ impl PartitionClient {
                 let response = broker
                     .request(&request)
                     .await
-                    .map_err(|e| ErrorOrThrottle::Error((e.into(), Some(r#gen))))?;
+                    .map_err(|e| ErrorOrThrottle::Error((e.into(), Some(r#gen))))?
+                    .response;
                 maybe_throttle(response.throttle_time_ms)?;
                 process_fetch_response(self.partition, &self.topic, response, offset)
                     .map_err(|e| ErrorOrThrottle::Error((e, Some(r#gen))))
@@ -303,7 +304,8 @@ impl PartitionClient {
                 let response = broker
                     .request(&request)
                     .await
-                    .map_err(|e| ErrorOrThrottle::Error((e.into(), Some(r#gen))))?;
+                    .map_err(|e| ErrorOrThrottle::Error((e.into(), Some(r#gen))))?
+                    .response;
                 maybe_throttle(response.throttle_time_ms)?;
                 process_list_offsets_response(self.partition, &self.topic, response)
                     .map_err(|e| ErrorOrThrottle::Error((e, Some(r#gen))))
@@ -336,7 +338,8 @@ impl PartitionClient {
                 let response = broker
                     .request(&request)
                     .await
-                    .map_err(|e| ErrorOrThrottle::Error((e.into(), Some(r#gen))))?;
+                    .map_err(|e| ErrorOrThrottle::Error((e.into(), Some(r#gen))))?
+                    .response;
                 maybe_throttle(Some(response.throttle_time_ms))?;
                 process_delete_records_response(&self.topic, self.partition, response)
                     .map_err(|e| ErrorOrThrottle::Error((e, Some(r#gen))))

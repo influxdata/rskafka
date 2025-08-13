@@ -317,17 +317,7 @@ where
         self.version_ranges = ranges;
     }
 
-    pub async fn request<R>(&self, msg: R) -> Result<R::ResponseBody, RequestError>
-    where
-        R: RequestBody + Send + WriteVersionedType<Vec<u8>>,
-        R::ResponseBody: ReadVersionedType<Cursor<Vec<u8>>>,
-    {
-        self.request_with_version_ranges(msg, &self.version_ranges)
-            .await
-            .map(|body| body.response)
-    }
-
-    pub async fn request_with_metadata<R>(
+    pub async fn request<R>(
         &self,
         msg: R,
     ) -> Result<ResponseBodyWithMetadata<R::ResponseBody>, RequestError>
@@ -580,7 +570,7 @@ where
         auth_bytes: Vec<u8>,
     ) -> Result<SaslAuthenticateResponse, SaslError> {
         let req = SaslAuthenticateRequest::new(auth_bytes);
-        let resp = self.request(req).await?;
+        let resp = self.request(req).await?.response;
         if let Some(err) = resp.error_code {
             if let Some(s) = resp.error_message.0 {
                 debug!("Sasl auth error message: {s}");
@@ -593,7 +583,7 @@ where
 
     async fn sasl_handshake(&self, mechanism: &str) -> Result<SaslHandshakeResponse, SaslError> {
         let req = SaslHandshakeRequest::new(mechanism);
-        let resp = self.request(req).await?;
+        let resp = self.request(req).await?.response;
         if let Some(err) = resp.error_code {
             return Err(SaslError::ApiError(err));
         }
@@ -1204,7 +1194,8 @@ mod tests {
                 tagged_fields: Some(TaggedFields::default()),
             })
             .await
-            .unwrap();
+            .unwrap()
+            .response;
         assert_eq!(actual, resp);
     }
 
