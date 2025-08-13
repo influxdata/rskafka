@@ -401,6 +401,7 @@ async fn produce_rskafka(
         .produce(records, compression)
         .await
         .unwrap()
+        .offsets
 }
 
 async fn consume_java(

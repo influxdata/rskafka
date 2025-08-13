@@ -86,6 +86,16 @@ impl<W: Write, T: WriteVersionedType<W>> WriteVersionedType<W> for &T {
     }
 }
 
+/// A response body with metadata about the request & response.
+#[derive(Debug)]
+pub struct ResponseBodyWithMetadata<R> {
+    /// The response body.
+    pub response: R,
+
+    /// The size of the request encoded in bytes.
+    pub encoded_request_size: usize,
+}
+
 /// Specifies a request body.
 pub trait RequestBody {
     /// The response type that will follow when issuing this request.

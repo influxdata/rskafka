@@ -1,6 +1,9 @@
 use crate::{
     backoff::{Backoff, BackoffConfig, ErrorOrThrottle},
-    client::error::{Error, RequestContext, Result},
+    client::{
+        error::{Error, RequestContext, Result},
+        producer::ProduceResult,
+    },
     connection::{
         BrokerCache, BrokerCacheGeneration, BrokerConnection, BrokerConnector, MessengerTransport,
         MetadataLookupMode,
@@ -15,6 +18,7 @@ use crate::{
             ListOffsetsRequest, ListOffsetsRequestPartition, ListOffsetsRequestTopic,
             ListOffsetsResponse, ListOffsetsResponsePartition, NORMAL_CONSUMER, ProduceRequest,
             ProduceRequestPartitionData, ProduceRequestTopicData, ProduceResponse,
+            ResponseBodyWithMetadata,
         },
         primitives::*,
         record::{Record as ProtocolRecord, *},
@@ -195,10 +199,10 @@ impl PartitionClient {
         &self,
         records: Vec<Record>,
         compression: Compression,
-    ) -> Result<Vec<i64>> {
+    ) -> Result<ProduceResult> {
         // skip request entirely if `records` is empty
         if records.is_empty() {
-            return Ok(vec![]);
+            return Ok(ProduceResult::default());
         }
 
         let n = records.len() as i64;
@@ -214,13 +218,20 @@ impl PartitionClient {
                     .get()
                     .await
                     .map_err(|e| ErrorOrThrottle::Error((e, None)))?;
-                let response = broker
+                let ResponseBodyWithMetadata {
+                    response,
+                    encoded_request_size,
+                } = broker
                     .request(&request)
                     .await
                     .map_err(|e| ErrorOrThrottle::Error((e.into(), Some(r#gen))))?;
                 maybe_throttle(response.throttle_time_ms)?;
                 process_produce_response(self.partition, &self.topic, n, response)
                     .map_err(|e| ErrorOrThrottle::Error((e, Some(r#gen))))
+                    .map(|offsets| ProduceResult {
+                        offsets,
+                        encoded_request_size,
+                    })
             },
         )
         .await
@@ -256,7 +267,8 @@ impl PartitionClient {
                 let response = broker
                     .request(&request)
                     .await
-                    .map_err(|e| ErrorOrThrottle::Error((e.into(), Some(r#gen))))?;
+                    .map_err(|e| ErrorOrThrottle::Error((e.into(), Some(r#gen))))?
+                    .response;
                 maybe_throttle(response.throttle_time_ms)?;
                 process_fetch_response(self.partition, &self.topic, response, offset)
                     .map_err(|e| ErrorOrThrottle::Error((e, Some(r#gen))))
@@ -292,7 +304,8 @@ impl PartitionClient {
                 let response = broker
                     .request(&request)
                     .await
-                    .map_err(|e| ErrorOrThrottle::Error((e.into(), Some(r#gen))))?;
+                    .map_err(|e| ErrorOrThrottle::Error((e.into(), Some(r#gen))))?
+                    .response;
                 maybe_throttle(response.throttle_time_ms)?;
                 process_list_offsets_response(self.partition, &self.topic, response)
                     .map_err(|e| ErrorOrThrottle::Error((e, Some(r#gen))))
@@ -325,7 +338,8 @@ impl PartitionClient {
                 let response = broker
                     .request(&request)
                     .await
-                    .map_err(|e| ErrorOrThrottle::Error((e.into(), Some(r#gen))))?;
+                    .map_err(|e| ErrorOrThrottle::Error((e.into(), Some(r#gen))))?
+                    .response;
                 maybe_throttle(Some(response.throttle_time_ms))?;
                 process_delete_records_response(&self.topic, self.partition, response)
                     .map_err(|e| ErrorOrThrottle::Error((e, Some(r#gen))))

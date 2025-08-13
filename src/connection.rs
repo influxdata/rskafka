@@ -392,7 +392,7 @@ impl RequestHandler for MessengerTransport {
         &self,
         request_params: &MetadataRequest,
     ) -> Result<MetadataResponse, RequestError> {
-        self.request(request_params).await
+        self.request(request_params).await.map(|r| r.response)
     }
 }
 

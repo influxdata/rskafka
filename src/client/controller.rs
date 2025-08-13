@@ -71,7 +71,8 @@ impl ControllerClient {
             let response = broker
                 .request(request)
                 .await
-                .map_err(|e| ErrorOrThrottle::Error((e.into(), Some(r#gen))))?;
+                .map_err(|e| ErrorOrThrottle::Error((e.into(), Some(r#gen))))?
+                .response;
 
             maybe_throttle(response.throttle_time_ms)?;
 
@@ -122,7 +123,8 @@ impl ControllerClient {
             let response = broker
                 .request(request)
                 .await
-                .map_err(|e| ErrorOrThrottle::Error((e.into(), Some(r#gen))))?;
+                .map_err(|e| ErrorOrThrottle::Error((e.into(), Some(r#gen))))?
+                .response;
 
             maybe_throttle(response.throttle_time_ms)?;
 
