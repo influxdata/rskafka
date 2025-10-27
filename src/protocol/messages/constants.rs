@@ -14,9 +14,10 @@ pub const NORMAL_CONSUMER: Int32 = Int32(-1);
 /// Added in version 2.
 ///
 /// [KIP-98]: https://cwiki.apache.org/confluence/display/KAFKA/KIP-98+-+Exactly+Once+Delivery+and+Transactional+Messaging
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Default)]
 pub enum IsolationLevel {
     ReadCommitted,
+    #[default]
     ReadUncommitted,
 }
 
@@ -26,11 +27,5 @@ impl From<IsolationLevel> for Int8 {
             IsolationLevel::ReadCommitted => Self(1),
             IsolationLevel::ReadUncommitted => Self(0),
         }
-    }
-}
-
-impl Default for IsolationLevel {
-    fn default() -> Self {
-        Self::ReadUncommitted
     }
 }

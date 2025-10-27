@@ -6,7 +6,7 @@ set -euo pipefail
 SCRIPTPATH="$( cd -- "$(dirname "$0")" >/dev/null 2>&1 ; pwd -P )"
 readonly SCRIPTPATH
 
-readonly DEPS=(redpanda kafka zookeeper)
+readonly DEPS=(redpanda)
 
 pushd "$SCRIPTPATH/.."
 

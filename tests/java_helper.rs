@@ -15,6 +15,7 @@ macro_rules! maybe_skip_java_interopt {
         dotenvy::dotenv().ok();
 
         if env::var("TEST_JAVA_INTEROPT").is_err() {
+            eprintln!("skipping java test, set TEST_JAVA_INTEROPT");
             return;
         }
     }};
