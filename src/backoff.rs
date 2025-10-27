@@ -163,10 +163,10 @@ impl Iterator for Backoff {
         let backoff =
             Duration::from_secs_f64(std::mem::replace(&mut self.next_backoff_secs, next_backoff));
 
-        if let Some(deadline) = self.deadline {
-            if self.total >= deadline {
-                return None;
-            }
+        if let Some(deadline) = self.deadline
+            && self.total >= deadline
+        {
+            return None;
         }
         Some(backoff)
     }

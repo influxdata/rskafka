@@ -290,10 +290,10 @@ impl BrokerConnector {
         // perform multiple requests until the cache is populated. However, the
         // Client initialises this cache at construction time, so unless
         // invalidated, there will always be a cached entry available.
-        if matches!(metadata_mode, MetadataLookupMode::CachedArbitrary) {
-            if let Some((m, r#gen)) = self.cached_metadata.get(&topics) {
-                return Ok((m, Some(r#gen)));
-            }
+        if matches!(metadata_mode, MetadataLookupMode::CachedArbitrary)
+            && let Some((m, r#gen)) = self.cached_metadata.get(&topics)
+        {
+            return Ok((m, Some(r#gen)));
         }
 
         let backoff = Backoff::new(&self.backoff_config);
