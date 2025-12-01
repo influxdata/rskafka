@@ -37,6 +37,13 @@ pub fn criterion_benchmark(c: &mut Criterion) {
     maybe_start_logging();
     let connection = maybe_skip_kafka_integration!();
 
+    // We are NOT interested in potentially costly connection handling to invalid brokers (in contrast to the normal
+    // tests), so we remove the "deliberately problematic" hosts.
+    let connection = connection
+        .into_iter()
+        .filter(|s| !s.contains("invalid"))
+        .collect::<Vec<_>>();
+
     let record = Record {
         key: Some(vec![b'k'; 10]),
         value: Some(vec![b'x'; 10_000]),

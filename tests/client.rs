@@ -70,10 +70,10 @@ async fn test_topic_crud() {
 
     let mut max_id = 0;
     for topic in topics {
-        if let Some(maybe_int) = topic.name.strip_prefix(prefix) {
-            if let Ok(i) = usize::from_str(maybe_int) {
-                max_id = max_id.max(i);
-            }
+        if let Some(maybe_int) = topic.name.strip_prefix(prefix)
+            && let Ok(i) = usize::from_str(maybe_int)
+        {
+            max_id = max_id.max(i);
         }
     }
 

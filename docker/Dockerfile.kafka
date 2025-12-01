@@ -1,0 +1,3 @@
+FROM docker.io/apache/kafka:4.1.0
+
+COPY ./kafka_jaas.conf /etc/kafka/kafka_jaas.conf

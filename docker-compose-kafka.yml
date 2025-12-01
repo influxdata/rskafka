@@ -1,96 +1,75 @@
 ---
-version: "3"
-
 services:
-  zookeeper:
-    image: docker.io/bitnami/zookeeper:3.7
-    ports:
-      - "2181:2181"
-    environment:
-      - ALLOW_ANONYMOUS_LOGIN=yes
-    volumes:
-      - zookeeper_data:/bitnami/zookeeper
   kafka-0:
-    image: docker.io/bitnami/kafka:3.9.0
+    build:
+      context: docker
+      dockerfile: Dockerfile.kafka
     ports:
       - "9010:9010"
       - "9096:9096"
     environment:
-      - KAFKA_CFG_ZOOKEEPER_CONNECT=zookeeper:2181
-      - KAFKA_CFG_BROKER_ID=0
-      - ALLOW_PLAINTEXT_LISTENER=yes
-      - KAFKA_CFG_LISTENER_SECURITY_PROTOCOL_MAP=CLIENT:PLAINTEXT,EXTERNAL:PLAINTEXT,FOR_PROXY:PLAINTEXT,SECURE:SASL_PLAINTEXT
-      - KAFKA_CFG_LISTENERS=CLIENT://:9000,EXTERNAL://:9010,FOR_PROXY://:9020,SECURE://:9096
-      - KAFKA_CFG_ADVERTISED_LISTENERS=CLIENT://kafka-0:9000,EXTERNAL://localhost:9010,FOR_PROXY://kafka-0:9020,SECURE://localhost:9096
+      - CLUSTER_ID='4L6g3nShT-eMCtK--X86sw'
+      - KAFKA_NODE_ID=0
+      - KAFKA_PROCESS_ROLES=broker,controller
+      - KAFKA_LISTENER_SECURITY_PROTOCOL_MAP=CLIENT:PLAINTEXT,EXTERNAL:PLAINTEXT,FOR_PROXY:PLAINTEXT,SECURE:SASL_PLAINTEXT,CONTROLLER:PLAINTEXT
+      - KAFKA_LISTENERS=CLIENT://:9000,EXTERNAL://:9010,FOR_PROXY://:9020,SECURE://:9096,CONTROLLER://:9050
+      - KAFKA_ADVERTISED_LISTENERS=CLIENT://kafka-0:9000,EXTERNAL://localhost:9010,FOR_PROXY://kafka-0:9020,SECURE://localhost:9096
+      - KAFKA_CONTROLLER_QUORUM_VOTERS=0@kafka-0:9050,1@kafka-1:9051,2@kafka-2:9052
       - KAFKA_INTER_BROKER_LISTENER_NAME=CLIENT
-      - KAFKA_CFG_AUTO_CREATE_TOPICS_ENABLE=false
-      - KAFKA_CLIENT_USERS=admin
-      - KAFKA_CLIENT_PASSWORDS=admin-secret
-      - KAFKA_CLIENT_LISTENER_NAME=SECURE
-    volumes:
-      - kafka_0_data:/bitnami/kafka
-      - ./kafka_jaas.conf:/opt/bitnami/kafka/config/kafka_jaas.conf
-    depends_on:
-      - zookeeper
+      - KAFKA_CONTROLLER_LISTENER_NAMES=CONTROLLER
+      - KAFKA_AUTO_CREATE_TOPICS_ENABLE=false
+      - KAFKA_OPTS=-Djava.security.auth.login.config=/etc/kafka/kafka_jaas.conf
+      - KAFKA_SASL_ENABLED_MECHANISMS=PLAIN
+      - KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS=0
   kafka-1:
-    image: docker.io/bitnami/kafka:3.9.0
+    build:
+      context: docker
+      dockerfile: Dockerfile.kafka
     ports:
       - "9011:9011"
       - "9097:9097"
     environment:
-      - KAFKA_CFG_ZOOKEEPER_CONNECT=zookeeper:2181
-      - KAFKA_CFG_BROKER_ID=1
-      - ALLOW_PLAINTEXT_LISTENER=yes
-      - KAFKA_CFG_LISTENER_SECURITY_PROTOCOL_MAP=CLIENT:PLAINTEXT,EXTERNAL:PLAINTEXT,FOR_PROXY:PLAINTEXT,SECURE:SASL_PLAINTEXT
-      - KAFKA_CFG_LISTENERS=CLIENT://:9000,EXTERNAL://:9011,FOR_PROXY://:9021,SECURE://:9097
-      - KAFKA_CFG_ADVERTISED_LISTENERS=CLIENT://kafka-1:9000,EXTERNAL://localhost:9011,FOR_PROXY://kafka-1:9021,SECURE://localhost:9097
+      - CLUSTER_ID='4L6g3nShT-eMCtK--X86sw'
+      - KAFKA_NODE_ID=1
+      - KAFKA_PROCESS_ROLES=broker,controller
+      - KAFKA_LISTENER_SECURITY_PROTOCOL_MAP=CLIENT:PLAINTEXT,EXTERNAL:PLAINTEXT,FOR_PROXY:PLAINTEXT,SECURE:SASL_PLAINTEXT,CONTROLLER:PLAINTEXT
+      - KAFKA_LISTENERS=CLIENT://:9000,EXTERNAL://:9011,FOR_PROXY://:9021,SECURE://:9097,CONTROLLER://:9051
+      - KAFKA_ADVERTISED_LISTENERS=CLIENT://kafka-1:9000,EXTERNAL://localhost:9011,FOR_PROXY://kafka-1:9021,SECURE://localhost:9097
+      - KAFKA_CONTROLLER_QUORUM_VOTERS=0@kafka-0:9050,1@kafka-1:9051,2@kafka-2:9052
       - KAFKA_INTER_BROKER_LISTENER_NAME=CLIENT
-      - KAFKA_CFG_AUTO_CREATE_TOPICS_ENABLE=false
-      - KAFKA_CLIENT_USERS=admin
-      - KAFKA_CLIENT_PASSWORDS=admin-secret
-      - KAFKA_CLIENT_LISTENER_NAME=SECURE
-    volumes:
-      - kafka_1_data:/bitnami/kafka
-      - ./kafka_jaas.conf:/opt/bitnami/kafka/config/kafka_jaas.conf
-    depends_on:
-      - zookeeper
+      - KAFKA_CONTROLLER_LISTENER_NAMES=CONTROLLER
+      - KAFKA_AUTO_CREATE_TOPICS_ENABLE=false
+      - KAFKA_OPTS=-Djava.security.auth.login.config=/etc/kafka/kafka_jaas.conf
+      - KAFKA_SASL_ENABLED_MECHANISMS=PLAIN
+      - KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS=0
   kafka-2:
-    image: docker.io/bitnami/kafka:3.9.0
+    build:
+      context: docker
+      dockerfile: Dockerfile.kafka
     ports:
       - "9012:9012"
       - "9098:9098"
     environment:
-      - KAFKA_CFG_ZOOKEEPER_CONNECT=zookeeper:2181
-      - KAFKA_CFG_BROKER_ID=2
-      - ALLOW_PLAINTEXT_LISTENER=yes
-      - KAFKA_CFG_LISTENER_SECURITY_PROTOCOL_MAP=CLIENT:PLAINTEXT,EXTERNAL:PLAINTEXT,FOR_PROXY:PLAINTEXT,SECURE:SASL_PLAINTEXT
-      - KAFKA_CFG_LISTENERS=CLIENT://:9000,EXTERNAL://:9012,FOR_PROXY://:9022,SECURE://:9098
-      - KAFKA_CFG_ADVERTISED_LISTENERS=CLIENT://kafka-2:9000,EXTERNAL://localhost:9012,FOR_PROXY://kafka-2:9022,SECURE://localhost:9098
+      - CLUSTER_ID='4L6g3nShT-eMCtK--X86sw'
+      - KAFKA_NODE_ID=2
+      - KAFKA_PROCESS_ROLES=broker,controller
+      - KAFKA_LISTENER_SECURITY_PROTOCOL_MAP=CLIENT:PLAINTEXT,EXTERNAL:PLAINTEXT,FOR_PROXY:PLAINTEXT,SECURE:SASL_PLAINTEXT,CONTROLLER:PLAINTEXT
+      - KAFKA_LISTENERS=CLIENT://:9000,EXTERNAL://:9012,FOR_PROXY://:9022,SECURE://:9098,CONTROLLER://:9052
+      - KAFKA_ADVERTISED_LISTENERS=CLIENT://kafka-2:9000,EXTERNAL://localhost:9012,FOR_PROXY://kafka-2:9022,SECURE://localhost:9098
+      - KAFKA_CONTROLLER_QUORUM_VOTERS=0@kafka-0:9050,1@kafka-1:9051,2@kafka-2:9052
       - KAFKA_INTER_BROKER_LISTENER_NAME=CLIENT
-      - KAFKA_CFG_AUTO_CREATE_TOPICS_ENABLE=false
-      - KAFKA_CLIENT_USERS=admin
-      - KAFKA_CLIENT_PASSWORDS=admin-secret
-      - KAFKA_CLIENT_LISTENER_NAME=SECURE
-    volumes:
-      - kafka_2_data:/bitnami/kafka
-      - ./kafka_jaas.conf:/opt/bitnami/kafka/config/kafka_jaas.conf
-    depends_on:
-      - zookeeper
+      - KAFKA_CONTROLLER_LISTENER_NAMES=CONTROLLER
+      - KAFKA_AUTO_CREATE_TOPICS_ENABLE=false
+      - KAFKA_OPTS=-Djava.security.auth.login.config=/etc/kafka/kafka_jaas.conf
+      - KAFKA_SASL_ENABLED_MECHANISMS=PLAIN
+      - KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS=0
   proxy:
     image: serjs/go-socks5-proxy
     ports:
       - "1080:1080"
+    environment:
+      - REQUIRE_AUTH=false
     depends_on:
       - kafka-0
       - kafka-1
       - kafka-2
-
-volumes:
-  zookeeper_data:
-    driver: local
-  kafka_0_data:
-    driver: local
-  kafka_1_data:
-    driver: local
-  kafka_2_data:
-    driver: local

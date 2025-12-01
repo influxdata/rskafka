@@ -683,10 +683,10 @@ impl CleanupRequestStateOnCancel {
 
 impl Drop for CleanupRequestStateOnCancel {
     fn drop(&mut self) {
-        if !self.message_sent {
-            if let MessengerState::RequestMap(map) = self.state.lock().deref_mut() {
-                map.remove(&self.correlation_id);
-            }
+        if !self.message_sent
+            && let MessengerState::RequestMap(map) = self.state.lock().deref_mut()
+        {
+            map.remove(&self.correlation_id);
         }
     }
 }

@@ -490,11 +490,11 @@ where
         // If this caller is is intending to conditionally flush a specific
         // batch, verify this BatchBuilder is the batch it is indenting to
         // flush.
-        if let Some(token) = flusher_token {
-            if token != self.flush_clock {
-                debug!(client=?self.client, "spurious batch flush call");
-                return Ok(());
-            }
+        if let Some(token) = flusher_token
+            && token != self.flush_clock
+        {
+            debug!(client=?self.client, "spurious batch flush call");
+            return Ok(());
         }
 
         debug!(client=?self.client, "flushing batch");
@@ -1167,10 +1167,10 @@ mod tests {
             tag: Self::Tag,
         ) -> Result<Self::Status, aggregator::Error> {
             let mut errors = self.errors.lock().unwrap();
-            if let Some(e) = errors.get_mut(tag) {
-                if let Some(e) = std::mem::take(e) {
-                    return Err(e);
-                }
+            if let Some(e) = errors.get_mut(tag)
+                && let Some(e) = std::mem::take(e)
+            {
+                return Err(e);
             }
 
             Ok(self.inner.deaggregate(input, tag).unwrap())

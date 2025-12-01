@@ -142,7 +142,7 @@ To run the integration test via a SOCKS5 proxy, you need to set the environment 
 command requires a running proxy on the local machine.
 
 ```console
-$ KAFKA_CONNECT=0.0.0.0:9011,kafka-1:9021,redpanda-1:9021 SOCKS_PROXY=localhost:1080 cargo test --features full
+$ TEST_INTEGRATION=1 TEST_BROKER_IMPL=kafka KAFKA_CONNECT=0.0.0.0:9011,kafka-1:9021,redpanda-1:9021 SOCKS5_PROXY=localhost:1080 cargo test --features full
 ```
 
 The SOCKS5 proxy will automatically be started by the docker compose files. Note that `KAFKA_CONNECT` was extended by
