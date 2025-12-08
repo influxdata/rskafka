@@ -493,7 +493,7 @@ impl BrokerCache for &PartitionClient {
             .get_leader(MetadataLookupMode::SpecificBroker(Arc::clone(&broker)))
             .await?;
         if leader != leader_self {
-            if let Some(r#gen) = gen_leader_from_self {
+            if let Some(r#gen) = gen_leader_from_arbitrary {
                 // The cached metadata identified an incorrect leader - it is stale and should be refreshed.
                 self.brokers.invalidate_metadata_cache(
                     "partition client: broker that should be leader does treat itself as a leader",
