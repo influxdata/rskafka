@@ -209,36 +209,44 @@ async fn test_non_existing_partition() {
 #[tokio::test]
 #[cfg(feature = "transport-tls")]
 async fn test_tls() {
+    use rustls_pki_types::{
+        PrivateKeyDer,
+        pem::{PemObject, SectionKind},
+    };
+
     maybe_start_logging();
 
     let mut root_store = rustls::RootCertStore::empty();
 
     let file = std::fs::File::open("/tmp/cluster-ca.crt").unwrap();
     let mut reader = std::io::BufReader::new(file);
-    match rustls_pemfile::read_one(&mut reader).unwrap().unwrap() {
-        rustls_pemfile::Item::X509Certificate(key) => {
-            root_store.add(key).unwrap();
+    match rustls_pki_types::pem::from_buf(&mut reader)
+        .unwrap()
+        .unwrap()
+    {
+        (SectionKind::Certificate, data) => {
+            root_store.add(data.into()).unwrap();
         }
         _ => unreachable!(),
     }
 
     let file = std::fs::File::open("/tmp/ca.crt").unwrap();
     let mut reader = std::io::BufReader::new(file);
-    let producer_root = match rustls_pemfile::read_one(&mut reader).unwrap().unwrap() {
-        rustls_pemfile::Item::X509Certificate(key) => key,
+    let producer_root = match rustls_pki_types::pem::from_buf(&mut reader)
+        .unwrap()
+        .unwrap()
+    {
+        (SectionKind::Certificate, data) => data,
         _ => unreachable!(),
     };
 
     let file = std::fs::File::open("/tmp/ca.key").unwrap();
     let mut reader = std::io::BufReader::new(file);
-    let private_key = match rustls_pemfile::read_one(&mut reader).unwrap().unwrap() {
-        rustls_pemfile::Item::Pkcs8Key(key) => rustls::pki_types::PrivateKeyDer::Pkcs8(key),
-        _ => unreachable!(),
-    };
+    let private_key = PrivateKeyDer::from_pem_reader(&mut reader).unwrap();
 
     let config = rustls::ClientConfig::builder()
         .with_root_certificates(root_store)
-        .with_client_auth_cert(vec![producer_root], private_key)
+        .with_client_auth_cert(vec![producer_root.into()], private_key)
         .unwrap();
 
     let test_cfg = maybe_skip_kafka_integration!();
