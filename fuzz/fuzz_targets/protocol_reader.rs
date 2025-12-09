@@ -143,7 +143,8 @@ where
         let transport = MockTransport::new(transport_data);
 
         // setup messenger
-        let mut messenger = Messenger::new(transport, message_size, Arc::from(DEFAULT_CLIENT_ID));
+        let mut messenger =
+            Messenger::new(transport, message_size, Arc::from(DEFAULT_CLIENT_ID), None);
         messenger.override_version_ranges(HashMap::from([(
             api_key,
             ApiVersionRange::new(api_version, api_version),
