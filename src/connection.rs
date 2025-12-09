@@ -82,6 +82,7 @@ impl Display for MultiError {
 trait ConnectionHandler {
     type R: RequestHandler + Send + Sync;
 
+    #[allow(clippy::too_many_arguments, reason = "Method is internal")]
     fn connect(
         &self,
         client_id: Arc<str>,
