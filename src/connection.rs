@@ -23,7 +23,9 @@ use crate::{
 
 pub use self::transport::Error as TransportError;
 pub use self::transport::TlsConfig;
-pub use self::transport::{Credentials, OauthBearerCredentials, OauthCallback, SaslConfig};
+pub use self::transport::{
+    Credentials, KeepaliveConfig, OauthBearerCredentials, OauthCallback, SaslConfig,
+};
 
 mod topology;
 mod transport;
@@ -88,6 +90,7 @@ trait ConnectionHandler {
         sasl_config: Option<SaslConfig>,
         max_message_size: usize,
         timeout: Option<Duration>,
+        keepalive_config: Option<KeepaliveConfig>,
     ) -> impl Future<Output = Result<Arc<Self::R>>> + Send;
 }
 
@@ -151,6 +154,7 @@ impl ConnectionHandler for BrokerRepresentation {
         sasl_config: Option<SaslConfig>,
         max_message_size: usize,
         timeout: Option<Duration>,
+        keepalive_config: Option<KeepaliveConfig>,
     ) -> Result<Arc<Self::R>> {
         let url = self.url();
         info!(
@@ -158,12 +162,13 @@ impl ConnectionHandler for BrokerRepresentation {
             url = url.as_str(),
             "Establishing new connection",
         );
-        let transport = Transport::connect(&url, tls_config, socks5_proxy, timeout)
-            .await
-            .map_err(|error| Error::Transport {
-                broker: url.to_string(),
-                error,
-            })?;
+        let transport =
+            Transport::connect(&url, tls_config, socks5_proxy, timeout, keepalive_config)
+                .await
+                .map_err(|error| Error::Transport {
+                    broker: url.to_string(),
+                    error,
+                })?;
 
         let mut messenger = Messenger::new(BufStream::new(transport), max_message_size, client_id);
         messenger.sync_versions().await?;
@@ -217,6 +222,9 @@ pub struct BrokerConnector {
 
     /// Timeout for connection attempts to the broker.
     connect_timeout: Option<Duration>,
+
+    /// Keepalive configuration.
+    keepalive_config: Option<KeepaliveConfig>,
 }
 
 impl BrokerConnector {
@@ -230,6 +238,7 @@ impl BrokerConnector {
         max_message_size: usize,
         backoff_config: Arc<BackoffConfig>,
         connect_timeout: Option<Duration>,
+        keepalive_config: Option<KeepaliveConfig>,
     ) -> Self {
         Self {
             bootstrap_brokers,
@@ -243,6 +252,7 @@ impl BrokerConnector {
             sasl_config,
             max_message_size,
             connect_timeout,
+            keepalive_config,
         }
     }
 
@@ -340,6 +350,7 @@ impl BrokerConnector {
                         self.sasl_config.clone(),
                         self.max_message_size,
                         self.connect_timeout,
+                        self.keepalive_config,
                     )
                     .await?;
                 Ok(Some(connection))
@@ -455,6 +466,7 @@ impl BrokerCache for &BrokerConnector {
             self.sasl_config.clone(),
             self.max_message_size,
             self.connect_timeout,
+            self.keepalive_config,
         )
         .await?;
 
@@ -493,6 +505,7 @@ async fn connect_to_a_broker_with_retry<B>(
     sasl_config: Option<SaslConfig>,
     max_message_size: usize,
     connect_timeout: Option<Duration>,
+    keepalive_config: Option<KeepaliveConfig>,
 ) -> Result<Arc<B::R>>
 where
     B: ConnectionHandler + Send + Sync,
@@ -513,6 +526,7 @@ where
                         sasl_config.clone(),
                         max_message_size,
                         connect_timeout,
+                        keepalive_config,
                     )
                     .await;
 
@@ -825,6 +839,7 @@ mod tests {
             _sasl_config: Option<SaslConfig>,
             _max_message_size: usize,
             _connect_timeout: Option<Duration>,
+            _keepalive_config: Option<KeepaliveConfig>,
         ) -> Result<Arc<Self::R>> {
             (self.conn)()
         }
@@ -853,6 +868,7 @@ mod tests {
             Default::default(),
             Default::default(),
             Default::default(),
+            None,
             None,
         )
         .await

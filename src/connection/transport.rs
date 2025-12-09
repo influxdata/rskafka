@@ -1,3 +1,4 @@
+use socket2::{SockRef, TcpKeepalive};
 use std::ops::DerefMut;
 use std::pin::Pin;
 #[cfg(feature = "transport-tls")]
@@ -11,7 +12,9 @@ use tokio::net::TcpStream;
 #[cfg(feature = "transport-tls")]
 use tokio_rustls::{TlsConnector, client::TlsStream};
 
+mod keepalive;
 mod sasl;
+pub use keepalive::KeepaliveConfig;
 pub use sasl::{Credentials, OauthBearerCredentials, OauthCallback, SaslConfig};
 
 #[cfg(feature = "transport-tls")]
@@ -120,8 +123,23 @@ impl Transport {
         tls_config: TlsConfig,
         socks5_proxy: Option<String>,
         timeout: Option<Duration>,
+        keepalive_config: Option<KeepaliveConfig>,
     ) -> Result<Self> {
         let tcp_stream = Self::connect_tcp(broker, socks5_proxy, timeout).await?;
+        if let Some(keepalive_config) = keepalive_config {
+            let mut keepalive = TcpKeepalive::new();
+            if let Some(time) = keepalive_config.time {
+                keepalive = keepalive.with_time(time);
+            }
+            if let Some(interval) = keepalive_config.interval {
+                keepalive = keepalive.with_interval(interval);
+            }
+            if let Some(retries) = keepalive_config.retries {
+                keepalive = keepalive.with_retries(retries);
+            }
+            let sock_ref = SockRef::from(&tcp_stream);
+            sock_ref.set_tcp_keepalive(&keepalive).map_err(Error::IO)?;
+        }
         Self::wrap_tls(tcp_stream, broker, tls_config).await
     }
 

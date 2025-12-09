@@ -22,7 +22,9 @@ use error::{Error, Result};
 
 use self::{controller::ControllerClient, partition::UnknownTopicHandling};
 
-pub use crate::connection::{Credentials, OauthBearerCredentials, OauthCallback, SaslConfig};
+pub use crate::connection::{
+    Credentials, KeepaliveConfig, OauthBearerCredentials, OauthCallback, SaslConfig,
+};
 
 #[derive(Debug, Error)]
 pub enum ProduceError {
@@ -49,6 +51,7 @@ pub struct ClientBuilder {
     sasl_config: Option<SaslConfig>,
     backoff_config: Arc<BackoffConfig>,
     connect_timeout: Option<Duration>,
+    keepalive_config: Option<KeepaliveConfig>,
 }
 
 impl ClientBuilder {
@@ -63,6 +66,7 @@ impl ClientBuilder {
             sasl_config: None,
             backoff_config: Default::default(),
             connect_timeout: Some(Duration::from_secs(30)),
+            keepalive_config: None,
         }
     }
 
@@ -117,6 +121,14 @@ impl ClientBuilder {
         self
     }
 
+    /// Set keepalive configuration.
+    ///
+    /// The default is to not set any keepalive configuration.
+    pub fn keepalive_config(mut self, keepalive_config: KeepaliveConfig) -> Self {
+        self.keepalive_config = Some(keepalive_config);
+        self
+    }
+
     /// Build [`Client`].
     pub async fn build(self) -> Result<Client> {
         let brokers = Arc::new(BrokerConnector::new(
@@ -129,6 +141,7 @@ impl ClientBuilder {
             self.max_message_size,
             Arc::clone(&self.backoff_config),
             self.connect_timeout,
+            self.keepalive_config,
         ));
         brokers.refresh_metadata().await?;
 
