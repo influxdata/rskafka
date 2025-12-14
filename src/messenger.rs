@@ -420,7 +420,7 @@ where
         let mut response = if let Some(timeout) = self.timeout {
             // If a request times out, return a `RequestError::IO` with a timeout error.
             // This allows the backoff mechanism to detect transport issues and re-establish the connection as needed.
-            // 
+            //
             // Typically, timeouts occur due to abrupt TCP connection loss (e.g., a disconnected cable).
             tokio::time::timeout(timeout, rx).await.map_err(|_| {
                 RequestError::IO(std::io::Error::new(
@@ -1377,6 +1377,31 @@ mod tests {
         // clean up helper tasks
         handle_broker.abort();
         handle_network.abort();
+    }
+
+    #[tokio::test]
+    async fn test_request_timeout() {
+        let (tx, _rx) = tokio::io::duplex(1_000);
+        let mut messenger = Messenger::new(
+            tx,
+            1_000,
+            Arc::from(DEFAULT_CLIENT_ID),
+            Some(Duration::from_millis(200)),
+        );
+        messenger.set_version_ranges(HashMap::from([(
+            ApiKey::ApiVersions,
+            ApiVersionsRequest::API_VERSION_RANGE,
+        )]));
+
+        let err = messenger
+            .request(ApiVersionsRequest {
+                client_software_name: Some(CompactString(String::from("foo"))),
+                client_software_version: Some(CompactString(String::from("bar"))),
+                tagged_fields: Some(TaggedFields::default()),
+            })
+            .await
+            .unwrap_err();
+        assert_matches!(err, RequestError::IO(e) if e.kind() == std::io::ErrorKind::TimedOut);
     }
 
     #[derive(Debug)]
