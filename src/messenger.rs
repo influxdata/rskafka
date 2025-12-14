@@ -418,6 +418,10 @@ where
         cleanup_on_cancel.message_sent();
 
         let mut response = if let Some(timeout) = self.timeout {
+            // If a request times out, return a `RequestError::IO` with a timeout error.
+            // This allows the backoff mechanism to detect transport issues and re-establish the connection as needed.
+            // 
+            // Typically, timeouts occur due to abrupt TCP connection loss (e.g., a disconnected cable).
             tokio::time::timeout(timeout, rx).await.map_err(|_| {
                 RequestError::IO(std::io::Error::new(
                     std::io::ErrorKind::TimedOut,
