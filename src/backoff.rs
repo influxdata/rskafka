@@ -1,4 +1,4 @@
-use rand::prelude::*;
+use rand::{Rng, RngExt};
 use std::ops::ControlFlow;
 use std::time::Duration;
 use tracing::info;
@@ -60,7 +60,7 @@ pub struct Backoff {
     base: f64,
     total: f64,
     deadline: Option<f64>,
-    rng: Option<Box<dyn RngCore + Sync + Send>>,
+    rng: Option<Box<dyn Rng + Sync + Send>>,
 }
 
 impl std::fmt::Debug for Backoff {
@@ -83,10 +83,7 @@ impl Backoff {
     /// Creates a new `Backoff` with the optional `rng`
     ///
     /// Used [`rand::rng()`] if no rng provided
-    pub fn new_with_rng(
-        config: &BackoffConfig,
-        rng: Option<Box<dyn RngCore + Sync + Send>>,
-    ) -> Self {
+    pub fn new_with_rng(config: &BackoffConfig, rng: Option<Box<dyn Rng + Sync + Send>>) -> Self {
         let init_backoff = config.init_backoff.as_secs_f64();
         Self {
             init_backoff,
@@ -175,6 +172,8 @@ impl Iterator for Backoff {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use rand::{TryRng, rand_core::utils::fill_bytes_via_next_word};
+    use std::convert::Infallible;
 
     #[test]
     fn test_backoff() {
@@ -243,17 +242,19 @@ mod tests {
         }
     }
 
-    impl RngCore for ConstantRng {
-        fn next_u32(&mut self) -> u32 {
-            (self.value >> 32) as u32
+    impl TryRng for ConstantRng {
+        type Error = Infallible;
+
+        fn try_next_u32(&mut self) -> Result<u32, Self::Error> {
+            Ok((self.value >> 32) as u32)
         }
 
-        fn next_u64(&mut self) -> u64 {
-            self.value
+        fn try_next_u64(&mut self) -> Result<u64, Self::Error> {
+            Ok(self.value)
         }
 
-        fn fill_bytes(&mut self, _dest: &mut [u8]) {
-            unimplemented!()
+        fn try_fill_bytes(&mut self, dst: &mut [u8]) -> Result<(), Self::Error> {
+            fill_bytes_via_next_word(dst, || self.try_next_u64())
         }
     }
 }
