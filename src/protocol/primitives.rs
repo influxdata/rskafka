@@ -515,6 +515,7 @@ where
 #[derive(Debug, Eq, PartialEq)]
 #[cfg_attr(test, derive(proptest_derive::Arbitrary))]
 pub struct CompactBytes(pub Vec<u8>);
+
 impl<R> ReadType<R> for CompactBytes
 where
     R: Read,
@@ -522,7 +523,9 @@ where
     fn read(reader: &mut R) -> Result<Self, ReadError> {
         let len = UnsignedVarint::read(reader)?;
         let len = usize::try_from(len.0)?;
-        let len = len - 1;
+        let len = len.checked_sub(1).ok_or_else(|| {
+            ReadError::Malformed(format!("Must be able to substract 1 from len ({len})").into())
+        })?;
         let mut buf = VecBuilder::new(len);
         buf = buf.read_exact(reader)?;
         Ok(Self(buf.into()))
@@ -1027,6 +1030,20 @@ mod tests {
     test_roundtrip!(Bytes, test_bytes_roundtrip);
 
     test_roundtrip!(CompactBytes, test_compact_bytes_roundtrip);
+
+    #[test]
+    fn test_compact_read_negative_length() {
+        let mut buf = Cursor::new(Vec::<u8>::new());
+        UnsignedVarint(0).write(&mut buf).unwrap();
+        buf.set_position(0);
+
+        let err = CompactBytes::read(&mut buf).unwrap_err();
+        assert_matches!(err, ReadError::Malformed(_));
+        assert_eq!(
+            err.to_string(),
+            "Malformed data: Must be able to substract 1 from len (0)",
+        );
+    }
 
     test_roundtrip!(NullableBytes, test_nullable_bytes_roundtrip);
 
