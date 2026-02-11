@@ -80,6 +80,7 @@ impl Display for MultiError {
 trait ConnectionHandler {
     type R: RequestHandler + Send + Sync;
 
+    #[allow(clippy::too_many_arguments, reason = "Method is internal")]
     fn connect(
         &self,
         client_id: Arc<str>,
@@ -87,6 +88,7 @@ trait ConnectionHandler {
         socks5_proxy: Option<String>,
         sasl_config: Option<SaslConfig>,
         max_message_size: usize,
+        connection_timeout: Option<Duration>,
         timeout: Option<Duration>,
     ) -> impl Future<Output = Result<Arc<Self::R>>> + Send;
 }
@@ -150,6 +152,7 @@ impl ConnectionHandler for BrokerRepresentation {
         socks5_proxy: Option<String>,
         sasl_config: Option<SaslConfig>,
         max_message_size: usize,
+        connection_timeout: Option<Duration>,
         timeout: Option<Duration>,
     ) -> Result<Arc<Self::R>> {
         let url = self.url();
@@ -158,14 +161,19 @@ impl ConnectionHandler for BrokerRepresentation {
             url = url.as_str(),
             "Establishing new connection",
         );
-        let transport = Transport::connect(&url, tls_config, socks5_proxy, timeout)
+        let transport = Transport::connect(&url, tls_config, socks5_proxy, connection_timeout)
             .await
             .map_err(|error| Error::Transport {
                 broker: url.to_string(),
                 error,
             })?;
 
-        let mut messenger = Messenger::new(BufStream::new(transport), max_message_size, client_id);
+        let mut messenger = Messenger::new(
+            BufStream::new(transport),
+            max_message_size,
+            client_id,
+            timeout,
+        );
         messenger.sync_versions().await?;
         if let Some(sasl_config) = sasl_config {
             messenger.do_sasl(sasl_config).await?;
@@ -217,6 +225,12 @@ pub struct BrokerConnector {
 
     /// Timeout for connection attempts to the broker.
     connect_timeout: Option<Duration>,
+
+    /// Timeout for requests.
+    ///
+    /// If set, requests will timeout after the given duration.
+    /// If not set, requests will not timeout.
+    timeout: Option<Duration>,
 }
 
 impl BrokerConnector {
@@ -230,6 +244,7 @@ impl BrokerConnector {
         max_message_size: usize,
         backoff_config: Arc<BackoffConfig>,
         connect_timeout: Option<Duration>,
+        timeout: Option<Duration>,
     ) -> Self {
         Self {
             bootstrap_brokers,
@@ -243,6 +258,7 @@ impl BrokerConnector {
             sasl_config,
             max_message_size,
             connect_timeout,
+            timeout,
         }
     }
 
@@ -340,6 +356,7 @@ impl BrokerConnector {
                         self.sasl_config.clone(),
                         self.max_message_size,
                         self.connect_timeout,
+                        self.timeout,
                     )
                     .await?;
                 Ok(Some(connection))
@@ -455,6 +472,7 @@ impl BrokerCache for &BrokerConnector {
             self.sasl_config.clone(),
             self.max_message_size,
             self.connect_timeout,
+            self.timeout,
         )
         .await?;
 
@@ -493,6 +511,7 @@ async fn connect_to_a_broker_with_retry<B>(
     sasl_config: Option<SaslConfig>,
     max_message_size: usize,
     connect_timeout: Option<Duration>,
+    timeout: Option<Duration>,
 ) -> Result<Arc<B::R>>
 where
     B: ConnectionHandler + Send + Sync,
@@ -513,6 +532,7 @@ where
                         sasl_config.clone(),
                         max_message_size,
                         connect_timeout,
+                        timeout,
                     )
                     .await;
 
@@ -825,6 +845,7 @@ mod tests {
             _sasl_config: Option<SaslConfig>,
             _max_message_size: usize,
             _connect_timeout: Option<Duration>,
+            _timeout: Option<Duration>,
         ) -> Result<Arc<Self::R>> {
             (self.conn)()
         }
@@ -853,6 +874,7 @@ mod tests {
             Default::default(),
             Default::default(),
             Default::default(),
+            None,
             None,
         )
         .await
