@@ -47,7 +47,7 @@ j4rs = "0.24.0"
 proptest = "1"
 proptest-derive = "0.7"
 rustls-pki-types = "1.11"
-rdkafka = { version = "0.38", default-features = false, features = ["libz", "tokio", "zstd"] }
+rdkafka = { version = "0.39", default-features = false, features = ["libz", "tokio", "zstd"] }
 tokio = { version = "1.14", features = ["macros", "rt-multi-thread"] }
 tracing-log = "0.2"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
