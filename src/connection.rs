@@ -1,4 +1,4 @@
-use rand::prelude::*;
+use rand::seq::SliceRandom;
 use std::fmt::Display;
 use std::future::Future;
 use std::ops::ControlFlow;
