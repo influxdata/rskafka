@@ -18,10 +18,13 @@ use rskafka::{
         api_version::{ApiVersion, ApiVersionRange},
         frame::AsyncMessageWrite,
         messages::{
-            ApiVersionsRequest, CreateTopicsRequest, FetchRequest, ListOffsetsRequest,
-            MetadataRequest, ProduceRequest, ReadVersionedType, RequestBody, WriteVersionedType,
+            ApiVersionsRequest, CreateTopicsRequest, DeleteRecordsRequest, DeleteTopicsRequest,
+            FetchRequest, ListOffsetsRequest, MetadataRequest, ProduceRequest, ReadVersionedType,
+            RequestBody, SaslAuthenticateRequest, SaslHandshakeRequest, WriteVersionedType,
         },
-        primitives::{CompactString, Int16, Int32, NullableString, TaggedFields},
+        primitives::{
+            Array, Bytes, CompactString, Int16, Int32, NullableString, String_, TaggedFields,
+        },
         traits::ReadType,
     },
 };
@@ -55,6 +58,26 @@ fn driver(data: &[u8]) -> Result<(), Error> {
                 topics: vec![],
                 timeout_ms: Int32(0),
                 validate_only: None,
+                tagged_fields: None,
+            },
+            cursor,
+            api_key,
+            api_version,
+        ),
+        ApiKey::DeleteRecords => send_recv(
+            DeleteRecordsRequest {
+                topics: vec![],
+                timeout_ms: Int32(0),
+                tagged_fields: None,
+            },
+            cursor,
+            api_key,
+            api_version,
+        ),
+        ApiKey::DeleteTopics => send_recv(
+            DeleteTopicsRequest {
+                topic_names: Array(None),
+                timeout_ms: Int32(0),
                 tagged_fields: None,
             },
             cursor,
@@ -99,6 +122,23 @@ fn driver(data: &[u8]) -> Result<(), Error> {
                 acks: Int16(0),
                 timeout_ms: Int32(0),
                 topic_data: vec![],
+            },
+            cursor,
+            api_key,
+            api_version,
+        ),
+        ApiKey::SaslAuthenticate => send_recv(
+            SaslAuthenticateRequest {
+                auth_bytes: Bytes(vec![]),
+                tagged_fields: None,
+            },
+            cursor,
+            api_key,
+            api_version,
+        ),
+        ApiKey::SaslHandshake => send_recv(
+            SaslHandshakeRequest {
+                mechanism: String_(String::new()),
             },
             cursor,
             api_key,
