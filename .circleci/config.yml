@@ -142,57 +142,8 @@ jobs:
           path: rustdoc.tar.gz
 
   test-redpanda:
-    # setup multiple docker images (see https://circleci.com/docs/2.0/configuration-reference/#docker)
-    docker:
-      - image: quay.io/influxdb/rust:ci
-      - image: redpandadata/redpanda:v22.2.1
-        name: redpanda-0
-        command:
-          - redpanda
-          - start
-          - --smp 1
-          - --memory 1G
-          - --reserve-memory 0M
-          - --overprovisioned
-          - --node-id 0
-          - --check=false
-          - --kafka-addr redpanda-0:9092
-          - --rpc-addr redpanda-0:33145
-          - --set redpanda.auto_create_topics_enabled=false
-      - image: redpandadata/redpanda:v22.2.1
-        name: redpanda-1
-        command:
-          - redpanda
-          - start
-          - --smp 1
-          - --memory 1G
-          - --reserve-memory 0M
-          - --overprovisioned
-          - --node-id 1
-          - --check=false
-          - --kafka-addr redpanda-1:9092
-          - --rpc-addr redpanda-1:33145
-          - --seeds redpanda-0:33145
-          - --set redpanda.auto_create_topics_enabled=false
-      - image: redpandadata/redpanda:v22.2.1
-        name: redpanda-2
-        command:
-          - redpanda
-          - start
-          - --smp 1
-          - --memory 1G
-          - --reserve-memory 0M
-          - --overprovisioned
-          - --node-id 2
-          - --check=false
-          - --kafka-addr redpanda-2:9092
-          - --rpc-addr redpanda-2:33145
-          - --seeds redpanda-0:33145
-          - --set redpanda.auto_create_topics_enabled=false
-      - image: serjs/go-socks5-proxy
-        name: proxy
-        environment:
-          - REQUIRE_AUTH=false
+    machine:
+      image: default
     resource_class: xlarge  # use of a smaller executor tends crashes on link
     environment:
       # Disable incremental compilation to avoid overhead. We are not preserving these files anyway.
@@ -210,13 +161,18 @@ jobs:
       TEST_JAVA_INTEROPT: 1
       # Don't use the first node here since this is likely the controller and we want to ensure that we automatically
       # pick the controller for certain actions (e.g. topic creation) and don't just get lucky.
-      KAFKA_CONNECT: "invalid:9092,redpanda-1:9092"
-      SOCKS5_PROXY: "proxy:1080"
+      KAFKA_CONNECT: "invalid:9013,localhost:9011,redpanda-1:9021"
+      KAFKA_SASL_CONNECT: "localhost:9097"
+      SOCKS5_PROXY: "localhost:1080"
     steps:
       - checkout
       - install_packages
       - rust_components
       - cache_restore
+      - run:
+          name: start container
+          command: docker-compose -f docker-compose-redpanda.yml up
+          background: true
       - run:
           name: Cargo test
           command: cargo test --all-features --all-targets
