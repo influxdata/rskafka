@@ -6,7 +6,7 @@ set -euo pipefail
 SCRIPTPATH="$( cd -- "$(dirname "$0")" >/dev/null 2>&1 ; pwd -P )"
 readonly SCRIPTPATH
 
-readonly DEPS=(redpanda)
+readonly DEPS=(go-socks5-proxy redpanda)
 
 pushd "$SCRIPTPATH/.."
 

@@ -61,9 +61,11 @@ services:
       - --advertise-rpc-addr redpanda-2:33147
       - --set redpanda.auto_create_topics_enabled=false
   proxy:
-    image: serjs/go-socks5-proxy
+    image: serjs/go-socks5-proxy:v0.0.4
     ports:
       - "1080:1080"
+    environment:
+      - REQUIRE_AUTH=false
     depends_on:
       - redpanda-0
       - redpanda-1
