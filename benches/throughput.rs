@@ -41,7 +41,7 @@ pub fn criterion_benchmark(c: &mut Criterion) {
     // tests), so we remove the "deliberately problematic" hosts.
     let connection = connection
         .into_iter()
-        .filter(|s| !s.contains("invalid") && !s.contains("kafka"))
+        .filter(|s| !s.contains("invalid") && !s.contains("kafka") && !s.contains("redpanda"))
         .collect::<Vec<_>>();
 
     let record = Record {
