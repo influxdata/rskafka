@@ -207,7 +207,7 @@ async fn test_non_existing_partition() {
 // Disabled as currently no TLS integration tests
 #[ignore]
 #[tokio::test]
-#[cfg(feature = "transport-tls")]
+#[cfg(any(feature = "transport-tls-ring", feature = "transport-tls-aws-lc-rs"))]
 async fn test_tls() {
     use rustls_pki_types::{
         PrivateKeyDer,
@@ -244,7 +244,18 @@ async fn test_tls() {
     let mut reader = std::io::BufReader::new(file);
     let private_key = PrivateKeyDer::from_pem_reader(&mut reader).unwrap();
 
-    let config = rustls::ClientConfig::builder()
+    #[cfg(feature = "transport-tls-ring")]
+    let provider = rustls::crypto::ring::default_provider();
+
+    #[cfg(all(
+        not(feature = "transport-tls-ring"),
+        feature = "transport-tls-aws-lc-rs"
+    ))]
+    let provider = rustls::crypto::aws_lc_rs::default_provider();
+
+    let config = rustls::ClientConfig::builder_with_provider(provider.into())
+        .with_safe_default_protocol_versions()
+        .unwrap()
         .with_root_certificates(root_store)
         .with_client_auth_cert(vec![producer_root.into()], private_key)
         .unwrap();

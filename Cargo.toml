@@ -29,11 +29,11 @@ integer-encoding = "4"
 lz4 = { version = "1.23", optional = true }
 parking_lot = "0.12"
 rand = { version = "0.10", default-features = false, features = ["thread_rng"] }
-rustls = { version = "0.23", optional = true, default-features = false, features = ["logging", "ring", "std", "tls12"] }
+rustls = { version = "0.23", optional = true, default-features = false, features = ["logging", "std", "tls12"] }
 snap = { version = "1", optional = true }
 thiserror = "2.0"
 tokio = { version = "1.19", default-features = false, features = ["io-util", "net", "rt", "sync", "time", "macros"] }
-tokio-rustls = { version = "0.26", optional = true, default-features = false, features = ["logging", "ring", "tls12"] }
+tokio-rustls = { version = "0.26", optional = true, default-features = false, features = ["logging", "tls12"] }
 tracing = "0.1"
 zstd = { version = "0.13", optional = true }
 rsasl = { version = "2.2.1", default-features = false, features = ["config_builder", "provider", "plain", "scram-sha-2", "oauthbearer"]}
@@ -76,7 +76,10 @@ compression-snappy = ["snap"]
 compression-zstd = ["zstd"]
 
 transport-socks5 = ["async-socks5"]
-transport-tls = ["rustls", "tokio-rustls"]
+transport-tls = ["transport-tls-ring"]
+transport-tls-aws-lc-rs = ["transport-tls-no-provider", "rustls/aws-lc-rs", "tokio-rustls/aws-lc-rs"]
+transport-tls-no-provider = ["rustls", "tokio-rustls"]
+transport-tls-ring = ["transport-tls-no-provider", "rustls/ring", "tokio-rustls/ring"]
 
 unstable-fuzzing = []
 

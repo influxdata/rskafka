@@ -97,7 +97,10 @@ For more advanced production and consumption, see [`crate::client::producer`] an
 - **`full`:** Includes all stable features (`compression-gzip`, `compression-lz4`, `compression-snappy`,
   `compression-zstd`, `transport-socks5`, `transport-tls`).
 - **`transport-socks5`:** Allow transport via SOCKS5 proxy.
-- **`transport-tls`:** Allows TLS transport via [rustls].
+- **`transport-tls`:** Allows TLS transport via [rustls] using the `ring` crypto provider.
+- **`transport-tls-aws-lc-rs`:** Allows TLS transport via [rustls] using the `aws-lc-rs` crypto provider.
+- **`transport-tls-no-provider`:** Allows TLS transport via [rustls] without enabling a built-in crypto provider.
+- **`transport-tls-ring`:** Allows TLS transport via [rustls] using the `ring` crypto provider.
 - **`unstable-fuzzing`:** Exposes some internal data structures so that they can be used by our fuzzers. This is NOT a stable
   feature / API!
 

@@ -98,7 +98,7 @@ impl ClientBuilder {
     }
 
     /// Setup TLS.
-    #[cfg(feature = "transport-tls")]
+    #[cfg(feature = "transport-tls-no-provider")]
     pub fn tls_config(mut self, tls_config: Arc<rustls::ClientConfig>) -> Self {
         self.tls_config = Some(tls_config);
         self

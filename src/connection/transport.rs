@@ -1,6 +1,6 @@
 use std::ops::DerefMut;
 use std::pin::Pin;
-#[cfg(feature = "transport-tls")]
+#[cfg(feature = "transport-tls-no-provider")]
 use std::sync::Arc;
 use std::task::{Context, Poll};
 use std::time::Duration;
@@ -8,16 +8,16 @@ use thiserror::Error;
 use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
 use tokio::net::TcpStream;
 
-#[cfg(feature = "transport-tls")]
+#[cfg(feature = "transport-tls-no-provider")]
 use tokio_rustls::{TlsConnector, client::TlsStream};
 
 mod sasl;
 pub use sasl::{Credentials, OauthBearerCredentials, OauthCallback, SaslConfig};
 
-#[cfg(feature = "transport-tls")]
+#[cfg(feature = "transport-tls-no-provider")]
 pub type TlsConfig = Option<Arc<rustls::ClientConfig>>;
 
-#[cfg(not(feature = "transport-tls"))]
+#[cfg(not(feature = "transport-tls-no-provider"))]
 #[allow(missing_copy_implementations)]
 #[derive(Debug, Clone, Default)]
 pub struct TlsConfig();
@@ -37,7 +37,7 @@ pub enum Error {
     #[error("Connecting to broker timed out")]
     ConnectTimeout,
 
-    #[cfg(feature = "transport-tls")]
+    #[cfg(feature = "transport-tls-no-provider")]
     #[error("Invalid Hostname: {0}")]
     BadHostname(#[from] rustls::pki_types::InvalidDnsNameError),
 
@@ -48,7 +48,7 @@ pub enum Error {
 
 pub type Result<T, E = Error> = std::result::Result<T, E>;
 
-#[cfg(feature = "transport-tls")]
+#[cfg(feature = "transport-tls-no-provider")]
 #[derive(Debug)]
 pub enum Transport {
     Plain {
@@ -60,7 +60,7 @@ pub enum Transport {
     },
 }
 
-#[cfg(not(feature = "transport-tls"))]
+#[cfg(not(feature = "transport-tls-no-provider"))]
 #[derive(Debug)]
 pub enum Transport {
     Plain { inner: TcpStream },
@@ -75,7 +75,7 @@ impl AsyncRead for Transport {
         match self.deref_mut() {
             Self::Plain { inner } => Pin::new(inner).poll_read(cx, buf),
 
-            #[cfg(feature = "transport-tls")]
+            #[cfg(feature = "transport-tls-no-provider")]
             Self::Tls { inner } => inner.as_mut().poll_read(cx, buf),
         }
     }
@@ -90,7 +90,7 @@ impl AsyncWrite for Transport {
         match self.deref_mut() {
             Self::Plain { inner } => Pin::new(inner).poll_write(cx, buf),
 
-            #[cfg(feature = "transport-tls")]
+            #[cfg(feature = "transport-tls-no-provider")]
             Self::Tls { inner } => inner.as_mut().poll_write(cx, buf),
         }
     }
@@ -99,7 +99,7 @@ impl AsyncWrite for Transport {
         match self.deref_mut() {
             Self::Plain { inner } => Pin::new(inner).poll_flush(cx),
 
-            #[cfg(feature = "transport-tls")]
+            #[cfg(feature = "transport-tls-no-provider")]
             Self::Tls { inner } => inner.as_mut().poll_flush(cx),
         }
     }
@@ -108,7 +108,7 @@ impl AsyncWrite for Transport {
         match self.deref_mut() {
             Self::Plain { inner } => Pin::new(inner).poll_shutdown(cx),
 
-            #[cfg(feature = "transport-tls")]
+            #[cfg(feature = "transport-tls-no-provider")]
             Self::Tls { inner } => inner.as_mut().poll_shutdown(cx),
         }
     }
@@ -172,7 +172,7 @@ impl Transport {
         Self::connect_timeout(broker, timeout).await
     }
 
-    #[cfg(feature = "transport-tls")]
+    #[cfg(feature = "transport-tls-no-provider")]
     async fn wrap_tls(tcp_stream: TcpStream, broker: &str, tls_config: TlsConfig) -> Result<Self> {
         match tls_config {
             Some(config) => {
@@ -194,7 +194,7 @@ impl Transport {
         }
     }
 
-    #[cfg(not(feature = "transport-tls"))]
+    #[cfg(not(feature = "transport-tls-no-provider"))]
     async fn wrap_tls(
         tcp_stream: TcpStream,
         _broker: &str,
