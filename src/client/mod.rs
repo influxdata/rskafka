@@ -119,7 +119,8 @@ impl ClientBuilder {
         self
     }
 
-    /// Set the timeout on requests to the broker.
+    /// Set the maximum total duration of a request to the broker, including
+    /// sending the request frame and waiting for its response.
     /// By setting this to `None`, requests will never time out unless
     /// interrupted by an external event.
     /// The default timeout is `None`.
