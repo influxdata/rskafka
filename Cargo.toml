@@ -35,7 +35,7 @@ thiserror = "2.0"
 tokio = { version = "1.19", default-features = false, features = ["io-util", "net", "rt", "sync", "time", "macros"] }
 tokio-rustls = { version = "0.26", optional = true, default-features = false, features = ["logging", "tls12"] }
 tracing = "0.1"
-zstd = { version = "0.13", optional = true }
+zstd = { version = "0.14", optional = true }
 rsasl = { version = "2.2.1", default-features = false, features = ["config_builder", "provider", "plain", "scram-sha-2", "oauthbearer"]}
 
 [dev-dependencies]
