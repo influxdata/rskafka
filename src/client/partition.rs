@@ -16,8 +16,8 @@ use crate::{
             DeleteRequestTopic, DeleteResponsePartition, FetchRequest, FetchRequestPartition,
             FetchRequestTopic, FetchResponse, FetchResponsePartition, IsolationLevel,
             ListOffsetsRequest, ListOffsetsRequestPartition, ListOffsetsRequestTopic,
-            ListOffsetsResponse, ListOffsetsResponsePartition, NORMAL_CONSUMER, ProduceRequest,
-            ProduceRequestPartitionData, ProduceRequestTopicData, ProduceResponse,
+            ListOffsetsResponse, ListOffsetsResponsePartition, MetadataResponse, NORMAL_CONSUMER,
+            ProduceRequest, ProduceRequestPartitionData, ProduceRequestTopicData, ProduceResponse,
             ResponseBodyWithMetadata,
         },
         primitives::*,
@@ -383,6 +383,35 @@ impl PartitionClient {
             .request_metadata(&metadata_mode, Some(vec![self.topic.clone()]))
             .await?;
 
+        let leader = match self.leader_from_metadata(metadata) {
+            Ok(leader) => leader,
+            Err(e) => {
+                if let Some(r#gen) = r#gen {
+                    // The cached metadata has no usable leader for this partition, e.g. because it was captured
+                    // while the cluster was still electing leaders. Nothing else invalidates the cache on this
+                    // path, and partition-scoped lookups never refill it, so without this every retry would be
+                    // answered from the same stale entry -- forever, even after the cluster has recovered.
+                    self.brokers.invalidate_metadata_cache(
+                        "partition client: cached metadata has no leader for this partition",
+                        r#gen,
+                    );
+                }
+                return Err(e);
+            }
+        };
+
+        info!(
+            topic=%self.topic,
+            partition=%self.partition,
+            leader,
+            %metadata_mode,
+            "Detected leader",
+        );
+        Ok((leader, r#gen))
+    }
+
+    /// Extract the leader of this partition from a metadata response.
+    fn leader_from_metadata(&self, metadata: MetadataResponse) -> Result<i32> {
         let topic = metadata
             .topics
             .exactly_one()
@@ -438,14 +467,7 @@ impl PartitionClient {
             });
         }
 
-        info!(
-            topic=%self.topic,
-            partition=%self.partition,
-            leader=partition.leader_id.0,
-            %metadata_mode,
-            "Detected leader",
-        );
-        Ok((partition.leader_id.0, r#gen))
+        Ok(partition.leader_id.0)
     }
 }
 
@@ -1080,5 +1102,177 @@ fn process_delete_records_response(
             is_virtual: false,
         }),
         None => Ok(response_partition),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use assert_matches::assert_matches;
+
+    use super::*;
+    use crate::protocol::messages::{MetadataResponsePartition, MetadataResponseTopic};
+
+    const TOPIC: &str = "topic";
+
+    /// A partition client whose connector has no bootstrap brokers: every leader lookup in these tests must be
+    /// answered from the metadata cache.
+    fn partition_client(partition: i32) -> PartitionClient {
+        let backoff_config = Arc::new(BackoffConfig::default());
+        let brokers = Arc::new(BrokerConnector::new(
+            vec![],
+            Arc::from("test"),
+            Default::default(),
+            None,
+            None,
+            usize::MAX,
+            Arc::clone(&backoff_config),
+            None,
+            None,
+        ));
+        PartitionClient {
+            topic: TOPIC.to_owned(),
+            partition,
+            brokers,
+            backoff_config,
+            current_broker: Mutex::new(CurrentBroker {
+                broker: None,
+                gen_broker: BrokerCacheGeneration::START,
+                gen_leader_from_arbitrary: None,
+                gen_leader_from_self: None,
+            }),
+            unknown_topic_handling: UnknownTopicHandling::Retry,
+        }
+    }
+
+    fn metadata(
+        topic_error: Option<ProtocolError>,
+        partitions: Vec<MetadataResponsePartition>,
+    ) -> MetadataResponse {
+        MetadataResponse {
+            throttle_time_ms: None,
+            brokers: vec![],
+            cluster_id: None,
+            controller_id: None,
+            topics: vec![MetadataResponseTopic {
+                error: topic_error,
+                name: String_(TOPIC.to_owned()),
+                is_internal: None,
+                partitions,
+            }],
+        }
+    }
+
+    fn partition(
+        index: i32,
+        leader_id: i32,
+        error: Option<ProtocolError>,
+    ) -> MetadataResponsePartition {
+        MetadataResponsePartition {
+            error,
+            partition_index: Int32(index),
+            leader_id: Int32(leader_id),
+            replica_nodes: Array(Some(vec![])),
+            isr_nodes: Array(Some(vec![])),
+        }
+    }
+
+    /// Seed the metadata cache, look the leader up from it and report whether the cached entry survived.
+    async fn lookup_from_cache(
+        client: &PartitionClient,
+        cached: MetadataResponse,
+    ) -> (Result<(i32, Option<MetadataCacheGeneration>)>, bool) {
+        client.brokers.metadata_cache().update(cached);
+        let result = client.get_leader(MetadataLookupMode::CachedArbitrary).await;
+        let still_cached = client
+            .brokers
+            .metadata_cache()
+            .get(&Some(vec![TOPIC.to_owned()]))
+            .is_some();
+        (result, still_cached)
+    }
+
+    #[tokio::test]
+    async fn cached_partition_error_invalidates_metadata_cache() {
+        let client = partition_client(0);
+        let (result, still_cached) = lookup_from_cache(
+            &client,
+            metadata(
+                None,
+                vec![partition(0, -1, Some(ProtocolError::LeaderNotAvailable))],
+            ),
+        )
+        .await;
+
+        assert_matches!(
+            result,
+            Err(Error::ServerError {
+                protocol_error: ProtocolError::LeaderNotAvailable,
+                is_virtual: false,
+                ..
+            })
+        );
+        assert!(
+            !still_cached,
+            "a cached entry without a usable leader must be invalidated, \
+             otherwise every retry of the leader detection reads it again"
+        );
+    }
+
+    #[tokio::test]
+    async fn cached_missing_leader_invalidates_metadata_cache() {
+        let client = partition_client(0);
+        let (result, still_cached) =
+            lookup_from_cache(&client, metadata(None, vec![partition(0, -1, None)])).await;
+
+        assert_matches!(
+            result,
+            Err(Error::ServerError {
+                protocol_error: ProtocolError::LeaderNotAvailable,
+                is_virtual: true,
+                ..
+            })
+        );
+        assert!(!still_cached);
+    }
+
+    #[tokio::test]
+    async fn cached_topic_error_invalidates_metadata_cache() {
+        let client = partition_client(0);
+        let (result, still_cached) = lookup_from_cache(
+            &client,
+            metadata(Some(ProtocolError::UnknownTopicOrPartition), vec![]),
+        )
+        .await;
+
+        assert_matches!(
+            result,
+            Err(Error::ServerError {
+                protocol_error: ProtocolError::UnknownTopicOrPartition,
+                request: RequestContext::Topic(_),
+                ..
+            })
+        );
+        assert!(!still_cached);
+    }
+
+    #[tokio::test]
+    async fn cached_metadata_without_the_partition_invalidates_metadata_cache() {
+        // e.g. the partition was added to the topic after the metadata was cached
+        let client = partition_client(1);
+        let (result, still_cached) =
+            lookup_from_cache(&client, metadata(None, vec![partition(0, 1, None)])).await;
+
+        assert_matches!(result, Err(Error::InvalidResponse(_)));
+        assert!(!still_cached);
+    }
+
+    #[tokio::test]
+    async fn cached_metadata_with_a_leader_is_used_and_kept() {
+        let client = partition_client(0);
+        let (result, still_cached) =
+            lookup_from_cache(&client, metadata(None, vec![partition(0, 42, None)])).await;
+
+        assert_matches!(result, Ok((42, Some(_))));
+        assert!(still_cached);
     }
 }

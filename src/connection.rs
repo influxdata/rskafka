@@ -344,6 +344,12 @@ impl BrokerConnector {
         self.cached_metadata.invalidate(reason, r#gen)
     }
 
+    /// Direct access to the metadata cache, so that unit tests can seed and inspect it without a broker.
+    #[cfg(test)]
+    pub(crate) fn metadata_cache(&self) -> &MetadataCache {
+        &self.cached_metadata
+    }
+
     /// Returns a new connection to the broker with the provided id
     pub async fn connect(&self, broker_id: i32) -> Result<Option<BrokerConnection>> {
         match self.topology.get_broker(broker_id).await {
