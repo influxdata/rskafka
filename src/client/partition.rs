@@ -1127,6 +1127,7 @@ mod tests {
             usize::MAX,
             Arc::clone(&backoff_config),
             None,
+            false,
             None,
         ));
         PartitionClient {

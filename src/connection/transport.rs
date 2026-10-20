@@ -120,8 +120,10 @@ impl Transport {
         tls_config: TlsConfig,
         socks5_proxy: Option<String>,
         timeout: Option<Duration>,
+        tcp_nodelay: bool,
     ) -> Result<Self> {
         let tcp_stream = Self::connect_tcp(broker, socks5_proxy, timeout).await?;
+        tcp_stream.set_nodelay(tcp_nodelay)?;
         Self::wrap_tls(tcp_stream, broker, tls_config).await
     }
 
@@ -201,5 +203,29 @@ impl Transport {
         _tls_config: TlsConfig,
     ) -> Result<Self> {
         Ok(Self::Plain { inner: tcp_stream })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use tokio::net::TcpListener;
+
+    use super::*;
+
+    #[tokio::test]
+    async fn test_connect_sets_tcp_nodelay_as_configured() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap().to_string();
+
+        for tcp_nodelay in [false, true] {
+            let transport =
+                Transport::connect(&address, Default::default(), None, None, tcp_nodelay)
+                    .await
+                    .unwrap();
+            let Transport::Plain { inner } = transport else {
+                panic!("plain connection expected");
+            };
+            assert_eq!(inner.nodelay().unwrap(), tcp_nodelay);
+        }
     }
 }
