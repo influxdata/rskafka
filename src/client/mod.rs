@@ -49,6 +49,7 @@ pub struct ClientBuilder {
     sasl_config: Option<SaslConfig>,
     backoff_config: Arc<BackoffConfig>,
     connect_timeout: Option<Duration>,
+    tcp_nodelay: bool,
     timeout: Option<Duration>,
 }
 
@@ -64,6 +65,7 @@ impl ClientBuilder {
             sasl_config: None,
             backoff_config: Default::default(),
             connect_timeout: Some(Duration::from_secs(30)),
+            tcp_nodelay: false,
             timeout: None,
         }
     }
@@ -119,6 +121,17 @@ impl ClientBuilder {
         self
     }
 
+    /// Set `TCP_NODELAY` on broker connections, turning off Nagle's algorithm.
+    ///
+    /// With Nagle's algorithm on, a request larger than one TCP segment can wait for the
+    /// broker's delayed ACK (often ~40 ms) before its last segment is sent. Enable this for
+    /// latency-sensitive producers and consumers; the Java client sets it by default.
+    /// The default is `false`.
+    pub fn tcp_nodelay(mut self, tcp_nodelay: bool) -> Self {
+        self.tcp_nodelay = tcp_nodelay;
+        self
+    }
+
     /// Set the maximum total duration of a request to the broker, including
     /// sending the request frame and waiting for its response.
     /// By setting this to `None`, requests will never time out unless
@@ -141,6 +154,7 @@ impl ClientBuilder {
             self.max_message_size,
             Arc::clone(&self.backoff_config),
             self.connect_timeout,
+            self.tcp_nodelay,
             self.timeout,
         ));
         brokers.refresh_metadata().await?;
