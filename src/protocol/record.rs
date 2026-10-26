@@ -241,21 +241,22 @@ pub enum ControlBatchRecord {
     Commit,
 }
 
-impl<R> ReadType<R> for ControlBatchRecord
-where
-    R: Read,
-{
-    fn read(reader: &mut R) -> Result<Self, ReadError> {
-        // version
-        let version = Int16::read(reader)?.0;
+impl ControlBatchRecord {
+    /// Parse a `ControlBatchRecord` from a key byte slice.
+    ///
+    /// Per the Kafka spec, the control record's key contains:
+    ///   version: int16 (must be 0)
+    ///   type:    int16 (0 = ABORT, 1 = COMMIT)
+    fn from_key(key: &[u8]) -> Result<Self, ReadError> {
+        let mut cursor = Cursor::new(key);
+        let version = Int16::read(&mut cursor)?.0;
         if version != 0 {
             return Err(ReadError::Malformed(
                 format!("Unknown control batch record version: {version}").into(),
             ));
         }
 
-        // type
-        let t = Int16::read(reader)?.0;
+        let t = Int16::read(&mut cursor)?.0;
         match t {
             0 => Ok(Self::Abort),
             1 => Ok(Self::Commit),
@@ -266,22 +267,44 @@ where
     }
 }
 
+impl<R> ReadType<R> for ControlBatchRecord
+where
+    R: Read,
+{
+    fn read(reader: &mut R) -> Result<Self, ReadError> {
+        // A control batch record is wrapped in a standard Record envelope.
+        // Parse the Record first, then extract version/type from its key.
+        let record = Record::read(reader)?;
+        let key = record.key.ok_or_else(|| {
+            ReadError::Malformed("Control batch record has no key".into())
+        })?;
+        Self::from_key(&key)
+    }
+}
+
 impl<W> WriteType<W> for ControlBatchRecord
 where
     W: Write,
 {
     fn write(&self, writer: &mut W) -> Result<(), WriteError> {
-        // version
-        Int16(0).write(writer)?;
-
-        // type
-        let t = match self {
+        // Build the key: version (int16) + type (int16)
+        let mut key = Vec::with_capacity(4);
+        Int16(0).write(&mut key)?;
+        let t: i16 = match self {
             Self::Abort => 0,
             Self::Commit => 1,
         };
-        Int16(t).write(writer)?;
+        Int16(t).write(&mut key)?;
 
-        Ok(())
+        // Wrap in a standard Record envelope
+        let record = Record {
+            timestamp_delta: 0,
+            offset_delta: 0,
+            key: Some(key),
+            value: None,
+            headers: vec![],
+        };
+        record.write(writer)
     }
 }
 
@@ -1022,12 +1045,28 @@ mod tests {
 
     test_roundtrip!(ControlBatchRecord, test_control_batch_record_roundtrip);
 
+    /// Helper: wrap a control-batch key (version + type as raw bytes) inside
+    /// a Record envelope so that `ControlBatchRecord::read` can parse it.
+    fn wrap_control_key_in_record(key_bytes: &[u8]) -> Vec<u8> {
+        let mut buf = Vec::new();
+        let record = Record {
+            timestamp_delta: 0,
+            offset_delta: 0,
+            key: Some(key_bytes.to_vec()),
+            value: None,
+            headers: vec![],
+        };
+        record.write(&mut buf).unwrap();
+        buf
+    }
+
     #[test]
     fn test_control_batch_record_unknown_version() {
-        let mut buf = Cursor::new(Vec::<u8>::new());
-        Int16(1).write(&mut buf).unwrap();
-        Int16(0).write(&mut buf).unwrap();
-        buf.set_position(0);
+        let mut key = Vec::new();
+        Int16(1).write(&mut key).unwrap();
+        Int16(0).write(&mut key).unwrap();
+        let data = wrap_control_key_in_record(&key);
+        let mut buf = Cursor::new(data);
 
         let err = ControlBatchRecord::read(&mut buf).unwrap_err();
         assert_matches!(err, ReadError::Malformed(_));
@@ -1039,10 +1078,11 @@ mod tests {
 
     #[test]
     fn test_control_batch_record_unknown_type() {
-        let mut buf = Cursor::new(Vec::<u8>::new());
-        Int16(0).write(&mut buf).unwrap();
-        Int16(2).write(&mut buf).unwrap();
-        buf.set_position(0);
+        let mut key = Vec::new();
+        Int16(0).write(&mut key).unwrap();
+        Int16(2).write(&mut key).unwrap();
+        let data = wrap_control_key_in_record(&key);
+        let mut buf = Cursor::new(data);
 
         let err = ControlBatchRecord::read(&mut buf).unwrap_err();
         assert_matches!(err, ReadError::Malformed(_));
