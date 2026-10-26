@@ -29,11 +29,9 @@ impl<T> VecBuilder<T> {
     /// Panics when block size is too small to hold a single element of `T`.
     pub fn new_with_block_size(expected_elements: usize, block_size: usize) -> Self {
         let element_size = std::mem::size_of::<T>();
-        let elements_per_block = if element_size == 0 {
-            expected_elements
-        } else {
-            block_size / element_size
-        };
+        let elements_per_block = block_size
+            .checked_div(element_size)
+            .unwrap_or(expected_elements);
         if elements_per_block == 0 {
             panic!("Block size too small for this type!");
         }
