@@ -55,6 +55,7 @@ jobs:
   fmt:
     docker:
       - image: quay.io/influxdb/rust:ci
+    resource_class: large.gen2
     environment:
       # Disable incremental compilation to avoid overhead. We are not preserving these files anyway.
       CARGO_INCREMENTAL: "0"
@@ -74,6 +75,7 @@ jobs:
   lint:
     docker:
       - image: quay.io/influxdb/rust:ci
+    resource_class: large.gen2
     environment:
       # Disable incremental compilation to avoid overhead. We are not preserving these files anyway.
       CARGO_INCREMENTAL: "0"
@@ -102,6 +104,7 @@ jobs:
   cargo_audit:
     docker:
       - image: quay.io/influxdb/rust:ci
+    resource_class: large.gen2
     environment:
       # Disable incremental compilation to avoid overhead. We are not preserving these files anyway.
       CARGO_INCREMENTAL: "0"
@@ -119,6 +122,7 @@ jobs:
   doc:
     docker:
       - image: quay.io/influxdb/rust:ci
+    resource_class: large.gen2
     environment:
       # Disable incremental compilation to avoid overhead. We are not preserving these files anyway.
       CARGO_INCREMENTAL: "0"
@@ -144,7 +148,7 @@ jobs:
   test-redpanda:
     machine:
       image: default
-    resource_class: xlarge  # use of a smaller executor tends crashes on link
+    resource_class: large.gen2
     environment:
       # Disable incremental compilation to avoid overhead. We are not preserving these files anyway.
       CARGO_INCREMENTAL: "0"
@@ -187,7 +191,7 @@ jobs:
   test-kafka:
     machine:
       image: default
-    resource_class: xlarge  # use of a smaller executor tends crashes on link
+    resource_class: large.gen2
     environment:
       # Disable incremental compilation to avoid overhead. We are not preserving these files anyway.
       CARGO_INCREMENTAL: "0"
@@ -231,7 +235,7 @@ jobs:
   build-default-features:
     docker:
       - image: quay.io/influxdb/rust:ci
-    resource_class: xlarge  # use of a smaller executor tends crashes on link
+    resource_class: xlarge.gen2  # use of a smaller executor tends crashes on link
     environment:
       # Disable incremental compilation to avoid overhead. We are not preserving these files anyway.
       CARGO_INCREMENTAL: "0"
@@ -253,7 +257,7 @@ jobs:
   build-no-default-features:
     docker:
       - image: quay.io/influxdb/rust:ci
-    resource_class: xlarge  # use of a smaller executor tends crashes on link
+    resource_class: xlarge.gen2  # use of a smaller executor tends crashes on link
     environment:
       # Disable incremental compilation to avoid overhead. We are not preserving these files anyway.
       CARGO_INCREMENTAL: "0"
@@ -275,7 +279,7 @@ jobs:
   build-all-features:
     docker:
       - image: quay.io/influxdb/rust:ci
-    resource_class: xlarge  # use of a smaller executor tends crashes on link
+    resource_class: xlarge.gen2  # use of a smaller executor tends crashes on link
     environment:
       # Disable incremental compilation to avoid overhead. We are not preserving these files anyway.
       CARGO_INCREMENTAL: "0"
@@ -297,7 +301,7 @@ jobs:
   build-fuzz:
     docker:
       - image: quay.io/influxdb/rust:ci
-    resource_class: xlarge  # use of a smaller executor tends crashes on link
+    resource_class: xlarge.gen2  # use of a smaller executor tends crashes on link
     environment:
       # Disable incremental compilation to avoid overhead. We are not preserving these files anyway.
       CARGO_INCREMENTAL: "0"
@@ -325,7 +329,7 @@ jobs:
   run-fuzz:
     docker:
       - image: quay.io/influxdb/rust:ci
-    resource_class: xlarge  # use of a smaller executor tends crashes on link
+    resource_class: large.gen2
     environment:
       # Disable incremental compilation to avoid overhead. We are not preserving these files anyway.
       CARGO_INCREMENTAL: "0"
@@ -376,6 +380,11 @@ workflows:
 
   # CI for all pull requests.
   ci:
+    when:
+      not:
+        # skip ci on scheduled pipelines
+        # so the fuzz schedule doesn't run the full suite
+        equal: [scheduled_pipeline, << pipeline.trigger_source >>]
     jobs:
       - fmt
       - lint
