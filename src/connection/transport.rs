@@ -37,9 +37,6 @@ pub enum Error {
     #[error("Connecting to broker timed out")]
     ConnectTimeout,
 
-    #[error("Connecting to broker requires TLS")]
-    TlsRequired,
-
     #[cfg(feature = "transport-tls-no-provider")]
     #[error("Invalid Hostname: {0}")]
     BadHostname(#[from] rustls::pki_types::InvalidDnsNameError),

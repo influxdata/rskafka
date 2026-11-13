@@ -176,8 +176,6 @@ impl ConnectionHandler for BrokerRepresentation {
             broker: url.to_string(),
             error,
         })?;
-        let is_tls = transport.is_tls();
-
         let mut messenger = Messenger::new(
             BufStream::new(transport),
             max_message_size,
@@ -187,13 +185,6 @@ impl ConnectionHandler for BrokerRepresentation {
 
         if let Some(sasl_config) = sasl_config {
             if is_sasl_ssl {
-                if !is_tls {
-                    return Err(Error::Transport {
-                        broker: url,
-                        error: TransportError::TlsRequired,
-                    });
-                }
-
                 messenger.do_sasl(sasl_config).await?;
                 messenger.sync_versions().await?;
             } else {

@@ -113,14 +113,10 @@ impl ClientBuilder {
     }
 
     /// Setup SASL auth with TLS required
+    #[cfg(feature = "transport-tls-no-provider")]
     pub fn sasl_ssl_config(mut self, sasl_config: SaslConfig) -> Self {
         self.sasl_config = Some(sasl_config);
-        self.sasl_ssl(true)
-    }
-
-    /// Sets whether TLS encryption is required for SASL auth
-    pub fn sasl_ssl(mut self, sasl_ssl: bool) -> Self {
-        self.tls_config.sasl_ssl = sasl_ssl;
+        self.tls_config.sasl_ssl = true;
         self
     }
 
