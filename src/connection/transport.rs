@@ -14,13 +14,13 @@ use tokio_rustls::{TlsConnector, client::TlsStream};
 mod sasl;
 pub use sasl::{Credentials, OauthBearerCredentials, OauthCallback, SaslConfig};
 
-#[cfg(feature = "transport-tls-no-provider")]
-pub type TlsConfig = Option<Arc<rustls::ClientConfig>>;
-
-#[cfg(not(feature = "transport-tls-no-provider"))]
-#[allow(missing_copy_implementations)]
 #[derive(Debug, Clone, Default)]
-pub struct TlsConfig();
+#[allow(missing_copy_implementations)]
+pub struct TlsConfig {
+    #[cfg(feature = "transport-tls-no-provider")]
+    pub(crate) config: Option<Arc<rustls::ClientConfig>>,
+    pub(crate) sasl_ssl: bool,
+}
 
 #[derive(Debug, Error)]
 #[non_exhaustive]
@@ -36,6 +36,9 @@ pub enum Error {
 
     #[error("Connecting to broker timed out")]
     ConnectTimeout,
+
+    #[error("Connecting to broker requires TLS")]
+    TlsRequired,
 
     #[cfg(feature = "transport-tls-no-provider")]
     #[error("Invalid Hostname: {0}")]
@@ -176,7 +179,7 @@ impl Transport {
 
     #[cfg(feature = "transport-tls-no-provider")]
     async fn wrap_tls(tcp_stream: TcpStream, broker: &str, tls_config: TlsConfig) -> Result<Self> {
-        match tls_config {
+        match tls_config.config {
             Some(config) => {
                 // Strip port if any
                 let host = broker
@@ -203,6 +206,11 @@ impl Transport {
         _tls_config: TlsConfig,
     ) -> Result<Self> {
         Ok(Self::Plain { inner: tcp_stream })
+    }
+
+    #[inline]
+    pub fn is_tls(&self) -> bool {
+        matches!(self, Self::Plain { .. })
     }
 }
 

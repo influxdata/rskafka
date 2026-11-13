@@ -163,6 +163,7 @@ impl ConnectionHandler for BrokerRepresentation {
             url = url.as_str(),
             "Establishing new connection",
         );
+        let is_sasl_ssl = tls_config.sasl_ssl;
         let transport = Transport::connect(
             &url,
             tls_config,
@@ -175,6 +176,7 @@ impl ConnectionHandler for BrokerRepresentation {
             broker: url.to_string(),
             error,
         })?;
+        let is_tls = transport.is_tls();
 
         let mut messenger = Messenger::new(
             BufStream::new(transport),
@@ -182,10 +184,26 @@ impl ConnectionHandler for BrokerRepresentation {
             client_id,
             timeout,
         );
-        messenger.sync_versions().await?;
+
         if let Some(sasl_config) = sasl_config {
-            messenger.do_sasl(sasl_config).await?;
+            if is_sasl_ssl {
+                if !is_tls {
+                    return Err(Error::Transport {
+                        broker: url,
+                        error: TransportError::TlsRequired,
+                    });
+                }
+
+                messenger.do_sasl(sasl_config).await?;
+                messenger.sync_versions().await?;
+            } else {
+                messenger.sync_versions().await?;
+                messenger.do_sasl(sasl_config).await?;
+            }
+        } else {
+            messenger.sync_versions().await?;
         }
+
         Ok(Arc::new(messenger))
     }
 }
