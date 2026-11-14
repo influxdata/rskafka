@@ -175,17 +175,18 @@ impl ConnectionHandler for BrokerRepresentation {
             broker: url.to_string(),
             error,
         })?;
-
         let mut messenger = Messenger::new(
             BufStream::new(transport),
             max_message_size,
             client_id,
             timeout,
         );
+
         messenger.sync_versions().await?;
         if let Some(sasl_config) = sasl_config {
             messenger.do_sasl(sasl_config).await?;
         }
+
         Ok(Arc::new(messenger))
     }
 }

@@ -102,13 +102,21 @@ impl ClientBuilder {
     /// Setup TLS.
     #[cfg(feature = "transport-tls-no-provider")]
     pub fn tls_config(mut self, tls_config: Arc<rustls::ClientConfig>) -> Self {
-        self.tls_config = Some(tls_config);
+        self.tls_config.config = Some(tls_config);
         self
     }
 
     /// Setup SASL username and password. Mechanism is assumed to be PLAIN.
     pub fn sasl_config(mut self, sasl_config: SaslConfig) -> Self {
         self.sasl_config = Some(sasl_config);
+        self
+    }
+
+    /// Setup SASL auth with TLS required
+    #[cfg(feature = "transport-tls-no-provider")]
+    pub fn sasl_ssl_config(mut self, sasl_config: SaslConfig) -> Self {
+        self.sasl_config = Some(sasl_config);
+        self.tls_config.sasl_ssl = true;
         self
     }
 

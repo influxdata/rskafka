@@ -16,6 +16,7 @@ pub enum SaslConfig {
     /// # References
     /// - <https://datatracker.ietf.org/doc/html/rfc4616>
     Plain(Credentials),
+
     /// SASL - SCRAM-SHA-256
     ///
     /// # References

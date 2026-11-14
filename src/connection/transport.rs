@@ -14,13 +14,13 @@ use tokio_rustls::{TlsConnector, client::TlsStream};
 mod sasl;
 pub use sasl::{Credentials, OauthBearerCredentials, OauthCallback, SaslConfig};
 
-#[cfg(feature = "transport-tls-no-provider")]
-pub type TlsConfig = Option<Arc<rustls::ClientConfig>>;
-
-#[cfg(not(feature = "transport-tls-no-provider"))]
-#[allow(missing_copy_implementations)]
 #[derive(Debug, Clone, Default)]
-pub struct TlsConfig();
+#[allow(missing_copy_implementations)]
+pub struct TlsConfig {
+    #[cfg(feature = "transport-tls-no-provider")]
+    pub(crate) config: Option<Arc<rustls::ClientConfig>>,
+    pub(crate) sasl_ssl: bool,
+}
 
 #[derive(Debug, Error)]
 #[non_exhaustive]
@@ -176,24 +176,34 @@ impl Transport {
 
     #[cfg(feature = "transport-tls-no-provider")]
     async fn wrap_tls(tcp_stream: TcpStream, broker: &str, tls_config: TlsConfig) -> Result<Self> {
-        match tls_config {
-            Some(config) => {
-                // Strip port if any
-                let host = broker
-                    .split(':')
-                    .next()
-                    .ok_or_else(|| Error::InvalidHostPort(broker.to_owned()))?
-                    .to_owned();
-                let server_name = rustls::pki_types::ServerName::try_from(host)?;
-
-                let connector = TlsConnector::from(config);
-                let tls_stream = connector.connect(server_name, tcp_stream).await?;
-                Ok(Self::Tls {
-                    inner: Box::pin(tls_stream),
-                })
-            }
-            None => Ok(Self::Plain { inner: tcp_stream }),
+        if !tls_config.sasl_ssl {
+            return Ok(Self::Plain { inner: tcp_stream });
         }
+
+        let config = match tls_config.config {
+            Some(config) => config,
+            None => {
+                use rustls_platform_verifier::ConfigVerifierExt;
+                Arc::new(
+                    rustls::ClientConfig::with_platform_verifier()
+                        .expect("load system TLS certificates"),
+                )
+            }
+        };
+
+        // Strip port if any
+        let host = broker
+            .split(':')
+            .next()
+            .ok_or_else(|| Error::InvalidHostPort(broker.to_owned()))?
+            .to_owned();
+        let server_name = rustls::pki_types::ServerName::try_from(host)?;
+
+        let connector = TlsConnector::from(config);
+        let tls_stream = connector.connect(server_name, tcp_stream).await?;
+        Ok(Self::Tls {
+            inner: Box::pin(tls_stream),
+        })
     }
 
     #[cfg(not(feature = "transport-tls-no-provider"))]
