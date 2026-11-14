@@ -204,11 +204,6 @@ impl Transport {
     ) -> Result<Self> {
         Ok(Self::Plain { inner: tcp_stream })
     }
-
-    #[inline]
-    pub fn is_tls(&self) -> bool {
-        matches!(self, Self::Plain { .. })
-    }
 }
 
 #[cfg(test)]
