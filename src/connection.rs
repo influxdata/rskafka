@@ -163,7 +163,6 @@ impl ConnectionHandler for BrokerRepresentation {
             url = url.as_str(),
             "Establishing new connection",
         );
-        let is_sasl_ssl = tls_config.sasl_ssl;
         let transport = Transport::connect(
             &url,
             tls_config,
@@ -183,16 +182,9 @@ impl ConnectionHandler for BrokerRepresentation {
             timeout,
         );
 
+        messenger.sync_versions().await?;
         if let Some(sasl_config) = sasl_config {
-            if is_sasl_ssl {
-                messenger.do_sasl(sasl_config).await?;
-                messenger.sync_versions().await?;
-            } else {
-                messenger.sync_versions().await?;
-                messenger.do_sasl(sasl_config).await?;
-            }
-        } else {
-            messenger.sync_versions().await?;
+            messenger.do_sasl(sasl_config).await?;
         }
 
         Ok(Arc::new(messenger))
