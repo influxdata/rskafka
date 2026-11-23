@@ -48,6 +48,6 @@ mod throttle;
 pub mod topic;
 
 // re-exports
-pub use chrono;
+pub use jiff;
 
 mod validation;

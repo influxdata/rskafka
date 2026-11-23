@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
 
-use chrono::{DateTime, Utc};
+use jiff::Timestamp;
 
 /// High-level record.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -8,7 +8,7 @@ pub struct Record {
     pub key: Option<Vec<u8>>,
     pub value: Option<Vec<u8>>,
     pub headers: BTreeMap<String, Vec<u8>>,
-    pub timestamp: DateTime<Utc>,
+    pub timestamp: Timestamp,
 }
 
 impl Record {
@@ -33,8 +33,6 @@ pub struct RecordAndOffset {
 
 #[cfg(test)]
 mod tests {
-    use chrono::TimeZone;
-
     use super::*;
 
     #[test]
@@ -45,7 +43,7 @@ mod tests {
             headers: vec![("a".to_string(), vec![0; 5]), ("b".to_string(), vec![0; 7])]
                 .into_iter()
                 .collect(),
-            timestamp: Utc.timestamp_millis_opt(1337).unwrap(),
+            timestamp: Timestamp::from_millisecond(1337).unwrap(),
         };
 
         assert_eq!(record.approximate_size(), 23 + 45 + 1 + 5 + 1 + 7);

@@ -7,11 +7,11 @@ use std::{
     time::{Duration, Instant},
 };
 
-use chrono::{TimeZone, Utc};
 use criterion::{
     BenchmarkGroup, Criterion, SamplingMode, criterion_group, criterion_main, measurement::WallTime,
 };
 use futures::{FutureExt, StreamExt, TryStreamExt, stream::FuturesUnordered};
+use jiff::Timestamp;
 use parking_lot::Once;
 use rdkafka::{
     ClientConfig, TopicPartitionList,
@@ -48,7 +48,7 @@ pub fn criterion_benchmark(c: &mut Criterion) {
         key: Some(vec![b'k'; 10]),
         value: Some(vec![b'x'; 10_000]),
         headers: BTreeMap::default(),
-        timestamp: Utc.timestamp_millis_opt(1337).unwrap(),
+        timestamp: Timestamp::from_millisecond(1337).unwrap(),
     };
 
     {

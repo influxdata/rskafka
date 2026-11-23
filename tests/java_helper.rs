@@ -1,7 +1,7 @@
 use std::{collections::BTreeMap, sync::LazyLock};
 
-use chrono::{TimeZone, Utc};
 use j4rs::{Instance, InvocationArg, Jvm, JvmBuilder, MavenArtifact};
+use jiff::Timestamp;
 use rskafka::{
     client::partition::Compression,
     record::{Record, RecordAndOffset},
@@ -68,7 +68,7 @@ pub async fn produce(
 
     let mut futures = vec![];
     for (topic_name, partition_index, record) in records {
-        let ts = record.timestamp.timestamp_millis();
+        let ts = record.timestamp.as_millisecond();
         let k = String::from_utf8(record.key.unwrap()).unwrap();
         let v = String::from_utf8(record.value.unwrap()).unwrap();
 
@@ -296,7 +296,7 @@ pub async fn consume(
                 key: Some(key.as_bytes().to_vec()),
                 value: Some(value.as_bytes().to_vec()),
                 headers,
-                timestamp: Utc.timestamp_millis_opt(timestamp).unwrap(),
+                timestamp: Timestamp::from_millisecond(timestamp).unwrap(),
             };
             let record_and_offset = RecordAndOffset { record, offset };
             results.push(record_and_offset);

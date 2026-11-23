@@ -50,7 +50,7 @@
 //!     },
 //!     record::Record,
 //! };
-//! use chrono::{TimeZone, Utc};
+//! use jiff::Timestamp;
 //! use std::{
 //!     collections::BTreeMap,
 //!     sync::Arc,
@@ -82,7 +82,7 @@
 //!     headers: BTreeMap::from([
 //!         ("foo".to_owned(), b"bar".to_vec()),
 //!     ]),
-//!     timestamp: Utc.timestamp_millis(42),
+//!     timestamp: Timestamp::from_millisecond(42).unwrap(),
 //! };
 //! producer.produce(record.clone()).await.unwrap();
 //! # }
@@ -109,7 +109,7 @@
 //!     },
 //!     record::Record,
 //! };
-//! use chrono::{TimeZone, Utc};
+//! use jiff::Timestamp;
 //! use std::{
 //!     collections::BTreeMap,
 //!     sync::Arc,
@@ -156,7 +156,7 @@
 //!                 headers: BTreeMap::from([
 //!                     ("foo".to_owned(), b"bar".to_vec()),
 //!                 ]),
-//!                 timestamp: Utc.timestamp_millis(42),
+//!                 timestamp: Timestamp::from_millisecond(42).unwrap(),
 //!             },
 //!         ];
 //!         Ok((
@@ -697,9 +697,9 @@ mod tests {
     use crate::{
         client::producer::aggregator::RecordAggregator, protocol::error::Error as ProtocolError,
     };
-    use chrono::{TimeZone, Utc};
     use futures::stream::{FuturesOrdered, FuturesUnordered};
     use futures::{FutureExt, StreamExt, TryStreamExt, pin_mut};
+    use jiff::Timestamp;
 
     #[derive(Debug)]
     struct MockClient {
@@ -753,7 +753,7 @@ mod tests {
             key: Some(vec![0; 4]),
             value: Some(vec![0; 6]),
             headers: Default::default(),
-            timestamp: Utc.timestamp_millis_opt(320).unwrap(),
+            timestamp: Timestamp::from_millisecond(320).unwrap(),
         }
     }
 

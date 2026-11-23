@@ -1,5 +1,5 @@
 use assert_matches::assert_matches;
-use chrono::{TimeZone, Utc};
+use jiff::Timestamp;
 use rskafka::{
     BackoffConfig,
     client::{
@@ -506,7 +506,7 @@ async fn test_get_offset() {
     // use out-of order timestamps to ensure our "lastest offset" logic works
     let record_early = record(b"");
     let record_late = Record {
-        timestamp: record_early.timestamp + chrono::Duration::try_seconds(1).unwrap(),
+        timestamp: record_early.timestamp + Duration::from_secs(1),
         ..record_early.clone()
     };
     let offsets = partition_client
@@ -841,6 +841,6 @@ pub fn large_record() -> Record {
         key: Some(b"".to_vec()),
         value: Some(vec![b'x'; 1024]),
         headers: BTreeMap::from([("foo".to_owned(), b"bar".to_vec())]),
-        timestamp: Utc.timestamp_millis_opt(1337).unwrap(),
+        timestamp: Timestamp::from_millisecond(1337).unwrap(),
     }
 }
