@@ -367,8 +367,8 @@ mod tests {
     use std::time::Duration;
 
     use assert_matches::assert_matches;
-    use chrono::{TimeZone, Utc};
     use futures::{StreamExt, pin_mut};
+    use jiff::Timestamp;
     use tokio::sync::{Mutex, mpsc};
 
     use crate::client::partition::FetchResult;
@@ -524,7 +524,7 @@ mod tests {
             key: Some(vec![0; 4]),
             value: Some(vec![0; 6]),
             headers: Default::default(),
-            timestamp: Utc.timestamp_millis_opt(1337).unwrap(),
+            timestamp: Timestamp::from_millisecond(1337).unwrap(),
         };
 
         let (sender, receiver) = mpsc::channel(10);
@@ -591,7 +591,7 @@ mod tests {
             key: Some(vec![0; 4]),
             value: Some(vec![0; 6]),
             headers: Default::default(),
-            timestamp: Utc.timestamp_millis_opt(1337).unwrap(),
+            timestamp: Timestamp::from_millisecond(1337).unwrap(),
         };
 
         let (sender, receiver) = mpsc::channel(10);
@@ -682,7 +682,7 @@ mod tests {
             key: Some(vec![0; 4]),
             value: Some(vec![0; 6]),
             headers: Default::default(),
-            timestamp: Utc.timestamp_millis_opt(1337).unwrap(),
+            timestamp: Timestamp::from_millisecond(1337).unwrap(),
         };
 
         // Simulate an error on first fetch to encourage an offset update
@@ -729,7 +729,7 @@ mod tests {
             key: Some(vec![0; 4]),
             value: Some(vec![0; 6]),
             headers: Default::default(),
-            timestamp: Utc.timestamp_millis_opt(1337).unwrap(),
+            timestamp: Timestamp::from_millisecond(1337).unwrap(),
         };
 
         // Simulate an error on first fetch to encourage an offset update

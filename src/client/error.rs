@@ -96,6 +96,9 @@ pub enum Error {
 
     #[error("Timeout")]
     Timeout,
+
+    #[error("Invalid request: {0}")]
+    InvalidRequest(String),
 }
 
 impl Error {

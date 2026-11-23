@@ -2,8 +2,8 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use assert_matches::assert_matches;
-use chrono::{DateTime, TimeZone, Utc};
 use futures::{Stream, StreamExt};
+use jiff::Timestamp;
 use tokio::time::timeout;
 
 use rskafka::client::partition::OffsetAt;
@@ -441,7 +441,7 @@ async fn test_stream_consumer_start_timestamp_based_offset() {
             .await
             .unwrap(),
     );
-    let ts = Utc.timestamp_millis_opt(1337).unwrap();
+    let ts = Timestamp::from_millisecond(1337).unwrap();
     let record_1 = record_with_timestamp_milliseconds(b"x", ts);
     let record_2 = record_with_timestamp_milliseconds(b"y", ts + Duration::from_millis(100));
     partition_client
@@ -494,7 +494,7 @@ where
     };
 }
 
-fn record_with_timestamp_milliseconds(key: &[u8], timestamp: DateTime<Utc>) -> Record {
+fn record_with_timestamp_milliseconds(key: &[u8], timestamp: Timestamp) -> Record {
     Record {
         key: Some(key.to_vec()),
         value: Some(b"hello kafka".to_vec()),

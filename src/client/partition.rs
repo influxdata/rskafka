@@ -27,8 +27,9 @@ use crate::{
     throttle::maybe_throttle,
     validation::ExactlyOne,
 };
-use chrono::{DateTime, LocalResult, TimeZone, Utc};
+use jiff::Timestamp;
 use std::{
+    num::TryFromIntError,
     ops::{ControlFlow, Deref, Range},
     sync::Arc,
 };
@@ -102,7 +103,7 @@ pub enum OffsetAt {
     /// The Kafka API supports querying an offset based on a timestamp, but the behavior seems to be
     /// semi-defined, unintuitive (even within Apache Kafka) and inconsistent between Apache Kafka and Redpanda. Mostly it
     /// offers timestamp based querying with millisecond precision.
-    Timestamp(DateTime<Utc>),
+    Timestamp(Timestamp),
 }
 
 #[derive(Debug)]
@@ -220,7 +221,7 @@ impl PartitionClient {
         }
 
         let n = records.len() as i64;
-        let request = &build_produce_request(self.partition, &self.topic, records, compression);
+        let request = &build_produce_request(self.partition, &self.topic, records, compression)?;
 
         maybe_retry(
             &self.backoff_config,
@@ -706,7 +707,7 @@ fn build_produce_request(
     topic: &str,
     records: Vec<Record>,
     compression: Compression,
-) -> ProduceRequest {
+) -> Result<ProduceRequest> {
     let n = records.len() as i32;
 
     // TODO: Retry on failure
@@ -720,19 +721,22 @@ fn build_produce_request(
         .map(|(offset_delta, record)| {
             max_timestamp = max_timestamp.max(record.timestamp);
 
-            ProtocolRecord {
+            Ok(ProtocolRecord {
                 key: record.key,
                 value: record.value,
-                timestamp_delta: (record.timestamp - first_timestamp).num_milliseconds(),
+                timestamp_delta: (record.timestamp - first_timestamp)
+                    .as_millis()
+                    .try_into()
+                    .map_err(|e: TryFromIntError| Error::InvalidRequest(e.to_string()))?,
                 offset_delta: offset_delta as i32,
                 headers: record
                     .headers
                     .into_iter()
                     .map(|(key, value)| RecordHeader { key, value })
                     .collect(),
-            }
+            })
         })
-        .collect();
+        .collect::<Result<_>>()?;
 
     let record_batch = ProduceRequestPartitionData {
         index: Int32(partition),
@@ -756,13 +760,13 @@ fn build_produce_request(
             timestamp_type: RecordBatchTimestampType::CreateTime,
             producer_id: -1,
             producer_epoch: -1,
-            first_timestamp: first_timestamp.timestamp_millis(),
-            max_timestamp: max_timestamp.timestamp_millis(),
+            first_timestamp: first_timestamp.as_millisecond(),
+            max_timestamp: max_timestamp.as_millisecond(),
             records: ControlBatchOrRecords::Records(records),
         }]),
     };
 
-    ProduceRequest {
+    Ok(ProduceRequest {
         transactional_id: crate::protocol::primitives::NullableString(None),
         acks: Int16(-1),
         timeout_ms: Int32(30_000),
@@ -770,7 +774,7 @@ fn build_produce_request(
             name: String_(topic.to_string()),
             partition_data: vec![record_batch],
         }],
-    }
+    })
 }
 
 fn process_produce_response(
@@ -923,19 +927,8 @@ fn extract_records(
                                 )));
                             }
                         };
-                    let timestamp = match Utc.timestamp_millis_opt(timestamp_millis) {
-                        LocalResult::None => {
-                            return Err(Error::InvalidResponse(format!(
-                                "Not a valid timestamp ({timestamp_millis})"
-                            )));
-                        }
-                        LocalResult::Single(ts) => ts,
-                        LocalResult::Ambiguous(a, b) => {
-                            return Err(Error::InvalidResponse(format!(
-                                "Ambiguous timestamp ({timestamp_millis}): {a} or {b}"
-                            )));
-                        }
-                    };
+                    let timestamp = Timestamp::from_millisecond(timestamp_millis)
+                        .map_err(|e| Error::InvalidResponse(format!("invalid timestamp: {e}")))?;
 
                     records.push(RecordAndOffset {
                         record: Record {
@@ -962,7 +955,7 @@ fn build_list_offsets_request(partition: i32, topic: &str, at: OffsetAt) -> List
     let timestamp = match at {
         OffsetAt::Earliest => -2,
         OffsetAt::Latest => -1,
-        OffsetAt::Timestamp(ts) => ts.timestamp_millis(),
+        OffsetAt::Timestamp(ts) => ts.as_millisecond(),
     };
 
     ListOffsetsRequest {

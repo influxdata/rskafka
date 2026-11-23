@@ -1,4 +1,4 @@
-use chrono::{TimeZone, Utc};
+use jiff::Timestamp;
 use parking_lot::Once;
 use rskafka::record::Record;
 use std::{collections::BTreeMap, time::Duration};
@@ -162,7 +162,7 @@ pub fn record(key: &[u8]) -> Record {
         key: Some(key.to_vec()),
         value: Some(b"hello kafka".to_vec()),
         headers: BTreeMap::from([("foo".to_owned(), b"bar".to_vec())]),
-        timestamp: Utc.timestamp_millis_opt(1337).unwrap(),
+        timestamp: Timestamp::from_millisecond(1337).unwrap(),
     }
 }
 

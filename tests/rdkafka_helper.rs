@@ -1,7 +1,7 @@
 use std::time::Duration;
 
-use chrono::{TimeZone, Utc};
 use futures::{StreamExt, TryStreamExt};
+use jiff::Timestamp;
 use rdkafka::{
     ClientConfig, Message, TopicPartitionList,
     consumer::{Consumer, StreamConsumer},
@@ -58,7 +58,7 @@ pub async fn produce(
         let mut f_record = FutureRecord::to(&topic_name)
             .partition(partition_index)
             .headers(headers)
-            .timestamp(record.timestamp.timestamp_millis());
+            .timestamp(record.timestamp.as_millisecond());
         let key_ref: Option<&Vec<u8>> = record.key.as_ref();
         let value_ref: Option<&Vec<u8>> = record.value.as_ref();
         if let Some(key) = key_ref {
@@ -113,9 +113,10 @@ pub async fn consume(
                                     .collect()
                             })
                             .unwrap_or_default(),
-                        timestamp: Utc
-                            .timestamp_millis_opt(msg.timestamp().to_millis().unwrap_or_default())
-                            .unwrap(),
+                        timestamp: Timestamp::from_millisecond(
+                            msg.timestamp().to_millis().unwrap_or_default(),
+                        )
+                        .unwrap(),
                     },
                     offset: msg.offset(),
                 })
