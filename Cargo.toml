@@ -26,7 +26,7 @@ flate2 = { version = "1", optional = true }
 futures = "0.3"
 integer-encoding = "4"
 jiff = { version = "1.0.2", default-features = false }
-lz4 = { version = "1.23", optional = true }
+lz4_flex = { version = "0.14", optional = true }
 parking_lot = "0.13"
 rand = { version = "0.10", default-features = false, features = ["thread_rng"] }
 rustls = { version = "0.23", optional = true, default-features = false, features = ["logging", "std", "tls12"] }
@@ -71,7 +71,7 @@ full = [
 ]
 
 compression-gzip = ["flate2"]
-compression-lz4 = ["lz4"]
+compression-lz4 = ["lz4_flex"]
 compression-snappy = ["snap"]
 compression-zstd = ["zstd"]
 
