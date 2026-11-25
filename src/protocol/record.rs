@@ -604,16 +604,13 @@ where
             }
             #[cfg(feature = "compression-lz4")]
             RecordBatchCompression::Lz4 => {
-                use lz4::Decoder;
+                use lz4_flex::frame::FrameDecoder;
 
-                let mut decoder = Decoder::new(reader)?;
+                let mut decoder = FrameDecoder::new(reader);
                 let records = Self::read_records(&mut decoder, is_control, n_records)?;
 
                 // the lz4 decoder requires us to consume the whole inner stream until we reach EOF
                 ensure_eof(&mut decoder, "Data left in LZ4 block")?;
-
-                let (_reader, res) = decoder.finish();
-                res?;
 
                 records
             }
@@ -835,17 +832,15 @@ where
             }
             #[cfg(feature = "compression-lz4")]
             RecordBatchCompression::Lz4 => {
-                use lz4::{EncoderBuilder, liblz4::BlockMode};
+                use lz4_flex::frame::{BlockMode, FrameEncoder, FrameInfo};
 
-                let mut encoder = EncoderBuilder::new()
-                    .block_mode(
-                        // the only one supported by Kafka
-                        BlockMode::Independent,
-                    )
-                    .build(writer)?;
+                let frame_info = FrameInfo::new().block_mode(
+                    // the only one supported by Kafka
+                    BlockMode::Independent,
+                );
+                let mut encoder = FrameEncoder::with_frame_info(frame_info, writer);
                 Self::write_records(&mut encoder, self.records)?;
-                let (_writer, res) = encoder.finish();
-                res?;
+                encoder.finish().map_err(std::io::Error::from)?;
             }
             #[cfg(feature = "compression-snappy")]
             RecordBatchCompression::Snappy => {
@@ -1198,6 +1193,45 @@ mod tests {
         // roundtrip instead
         let actual2 = RecordBatch::read(&mut Cursor::new(data2)).unwrap();
         assert_eq!(actual2, expected);
+    }
+
+    #[cfg(feature = "compression-lz4")]
+    #[test]
+    fn test_lz4_large_multi_block_roundtrip() {
+        // Exceeds the 64 KiB default max block size so multiple independent LZ4 blocks are exercised.
+        let records = (0..100)
+            .map(|i| Record {
+                timestamp_delta: i,
+                offset_delta: i as i32,
+                key: Some(vec![b'k'; 128]),
+                value: Some(vec![(i % 251) as u8; 1024]),
+                headers: vec![RecordHeader {
+                    key: "h".to_owned(),
+                    value: vec![b'v'; 32],
+                }],
+            })
+            .collect();
+
+        let batch = RecordBatch {
+            base_offset: 10,
+            partition_leader_epoch: 1,
+            last_offset_delta: 99,
+            first_timestamp: 1_700_000_000_000,
+            max_timestamp: 1_700_000_000_099,
+            producer_id: -1,
+            producer_epoch: -1,
+            base_sequence: -1,
+            records: ControlBatchOrRecords::Records(records),
+            compression: RecordBatchCompression::Lz4,
+            is_transactional: false,
+            timestamp_type: RecordBatchTimestampType::CreateTime,
+        };
+
+        let mut encoded = vec![];
+        batch.write(&mut encoded).unwrap();
+
+        let decoded = RecordBatch::read(&mut Cursor::new(encoded)).unwrap();
+        assert_eq!(decoded, batch);
     }
 
     #[cfg(feature = "compression-snappy")]
