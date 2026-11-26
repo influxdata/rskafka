@@ -1100,6 +1100,8 @@ fn process_delete_records_response(
 
 #[cfg(test)]
 mod tests {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
     use assert_matches::assert_matches;
 
     use super::*;
@@ -1268,5 +1270,45 @@ mod tests {
 
         assert_matches!(result, Ok((42, Some(_))));
         assert!(still_cached);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn connection_error_invalidates_leader_metadata_before_retry() {
+        let client = partition_client(0);
+        let cache = client.brokers.metadata_cache();
+        cache.update(metadata(None, vec![partition(0, 42, None)]));
+        let (_, metadata_generation) = cache.get(&None).unwrap();
+        let broker_generation = {
+            let mut broker = client.current_broker.lock().await;
+            broker.gen_leader_from_arbitrary = Some(metadata_generation);
+            broker.gen_broker
+        };
+        let attempts = AtomicUsize::new(0);
+
+        let result = maybe_retry(
+            &BackoffConfig::default(),
+            UnknownTopicHandling::Retry,
+            &client,
+            "test request",
+            || async {
+                if attempts.fetch_add(1, Ordering::Relaxed) == 0 {
+                    assert!(cache.get(&None).is_some());
+                    let error = RequestError::IO(std::io::ErrorKind::ConnectionReset.into());
+                    return Err(ErrorOrThrottle::Error((
+                        Error::Request(error),
+                        Some(broker_generation),
+                    )));
+                }
+                assert!(
+                    cache.get(&None).is_none(),
+                    "the retry must not see metadata from the broken connection"
+                );
+                Ok(17)
+            },
+        )
+        .await;
+
+        assert_eq!(result.unwrap(), 17);
+        assert_eq!(attempts.load(Ordering::Relaxed), 2);
     }
 }
